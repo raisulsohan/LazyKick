@@ -1,86 +1,153 @@
-# ⚡ LazyKick (v1.0.0)
+# ⚡ LazyKick — The Ultimate Adobe Workflow Companion
 
-> **The Ultimate All-in-One Workflow Companion for Adobe Premiere Pro & After Effects.**  
-> **Developed By: RaisulSohan** ([raisulsohan.com](https://raisulsohan.com))
+<p align="center">
+  <img src="https://img.shields.io/badge/Adobe%20After%20Effects-2020--2026+-9999FF?style=for-the-badge&logo=adobeaftereffects&logoColor=white" alt="AE Support" />
+  <img src="https://img.shields.io/badge/Adobe%20Premiere%20Pro-2020--2026+-EA77FF?style=for-the-badge&logo=adobepremierepro&logoColor=white" alt="PPro Support" />
+  <img src="https://img.shields.io/badge/CEP%20Version-9.0--12.0+-FF5722?style=for-the-badge" alt="CEP Version" />
+  <img src="https://img.shields.io/badge/Developed%20By-RaisulSohan-00E676?style=for-the-badge&logo=github" alt="Developer" />
+</p>
 
----
+<p align="center">
+  <strong>A unified, lightning-fast CEP extension for Adobe Premiere Pro and After Effects that combines instant clipboard image pasting, real-time project notes with timecode stamping, and automated folder watch bins.</strong>
+</p>
 
-## 🌟 ওভারভিউ (Overview)
-
-**LazyKick** হলো Premiere Pro এবং After Effects-এর জন্য একটি সার্বক্ষণিক অ্যাসিস্ট্যান্ট CEP এক্সটেনশন। এটি মূলত পূর্বের **QuickPaste**, **QuickBinSync**, এবং **ProjectNotepad**-কে একটি একক, আল্ট্রা-ফাস্ট ও আধুনিক ডার্ক থিম প্যানেলে একত্রিত করেছে এবং সাথে এনেছে একগুচ্ছ নতুন প্রোডাক্টিভ ফিচার।
-
----
-
-## 🚀 মূল ফিচারসমূহ (Key Features)
-
-### ১. ⚡ Universal QuickPaste (টপ-বারে সর্বদা দৃশ্যমান)
-- যেকোনো ট্যাব বা উইন্ডোতে থাকা অবস্থাতেই এক ক্লিকে ক্লিপবোর্ডের স্ক্রিনশট বা ছবি প্রজেক্টের টাইমলাইনে পেস্ট হয়ে যাবে।
-- ছবি স্বয়ংক্রিয়ভাবে `<ProjectFolder>/Pasted Images/`-এ সেভ হয়।
-- **After Effects:** কারেন্ট CTI-তে লেয়ার যোগ হয়। সাথে অপশনাল **Guide Layer** সাপোর্ট (যা ভুলবশত ফাইনালে রেন্ডার হবে না) এবং **Auto-Fit to Comp**।
-- **Premiere Pro:** টাইমলাইনে প্লেহেডের কারেন্ট পজিশনে প্রথম ফাঁকা ভিডিও ট্র্যাকে স্বয়ংক্রিয়ভাবে ক্লিপ বসে যায়।
-- **Recent Pastes History:** শেষ পেস্ট করা ছবির থাম্বনেইল গ্যালারি থেকে যেকোনো সময় এক ক্লিকে রি-ইম্পোর্ট করার সুবিধা।
-
-### ২. 📝 Notes & Interactive Tasks (স্মার্ট নোটপ্যাড)
-- **প্রজেক্ট ওয়াইজ অটো-সেভ:** প্রজেক্ট সুইচ করার সাথে সাথে সেই প্রজেক্টের নোট ওপেন হয়ে যাবে। Premiere এবং AE একই প্রজেক্টে শেয়ার্ড মেমরি ব্যবহার করে।
-- **🌐 Global Scratchpad:** এমন একটি কমন নোট ট্যাব যা সব প্রজেক্টেই থাকবে (যেখানে নিয়মিত ব্যবহৃত ক্লায়েন্ট কোড, হ্যাশট্যাগ, এক্সপোর্ট সেটিংস রাখা যায়)।
-- **☑️ Interactive To-Do Checklist:** এডিটিংয়ের টাস্কলিস্ট লিখে এক ক্লিকে সম্পন্ন হওয়া কাজ স্ট্রাইক-থ্রু (Strike-through) করার সুবিধা।
-- **⏱️ Live Timecode Stamp:** এক ক্লিকে টাইমলাইনের লাইভ টাইমকোড (যেমন `[00:01:24:12]`) নোটে স্ট্যাম্প হিসেবে যোগ করার সুবিধা।
-- **📋 Copy & 📥 Export:** এক ক্লিকে পুরো নোট কপি বা `.txt` ফাইল হিসেবে সেভ করার অপশন।
-
-### ৩. 📂 Watch Bins & Media Sync (অটো মিডিয়া সিঙ্ক)
-- কম্পিউটারের যেকোনো ফোল্ডারকে (যেমন: Downloads, SFX, Client Footage) প্রজেক্টের বিনের সাথে লিঙ্ক করে রাখা যায়।
-- **Duplicate Protection:** পূর্বে ইম্পোর্ট করা ফাইল স্বয়ংক্রিয়ভাবে স্কিপ হয়।
-- **Auto-Sync:** ব্যাকগ্রাউন্ডে স্বয়ংক্রিয়ভাবে প্রতি ৫ সেকেন্ড পর পর নতুন ফাইলের জন্য স্ক্যান করে।
-- **Nested Bins:** `Footage/Interviews` লিখলে স্বয়ংক্রিয়ভাবে নেস্টেড বিন তৈরি করে নেয়।
-- **Media Filters:** ফোল্ডারে শুধু ভিডিও `[🎬]`, অডিও `[🎵]` বা ইমেজ `[🖼️]` ফিল্টার করে ইম্পোর্ট করার টগল।
-- **Fast In-Panel Browser:** কোনো ভারী OS ডায়ালগ ছাড়াই দ্রুত ড্রাইভ ও ফোল্ডার ব্রাউজ করার সুবিধা।
-- **📂 Open in Explorer:** প্রতিটি বিনের পাশে এক ক্লিকে পিসির আসল ফোল্ডারটি ওপেন করার বাটন।
+<p align="center">
+  <a href="https://raisulsohan.com"><strong>🌐 raisulsohan.com</strong></a> • 
+  <a href="#-features">Features</a> • 
+  <a href="#-installation">Installation</a> • 
+  <a href="#-tech-stack">Tech Stack</a> • 
+  <a href="#-troubleshooting">Troubleshooting</a>
+</p>
 
 ---
 
-## 💻 ইনস্টলেশন গাইড (Installation)
+## 🌟 Overview
 
-### ধাপ ১ — PlayerDebugMode চালু করা (One-Time)
-unsigned এক্সটেনশন লোড করার জন্য এটি একবার অন করতে হয়:
+**LazyKick** is the all-in-one productivity power tool engineered for video editors and motion designers. It merges three essential workflows into a single, cohesive, dark-themed panel:
 
-* **Windows:** ফোল্ডারের ভেতর থাকা `ENABLE_DEBUG_MODE.bat` ফাইলে ডাবল-ক্লিক করুন।
-* **macOS (Terminal):**
-  ```bash
-  defaults write com.adobe.CSXS.9 PlayerDebugMode 1
-  defaults write com.adobe.CSXS.10 PlayerDebugMode 1
-  defaults write com.adobe.CSXS.11 PlayerDebugMode 1
-  defaults write com.adobe.CSXS.12 PlayerDebugMode 1
-  ```
+1. **Universal QuickPaste**: 1-Click clipboard image pasting directly onto the active timeline with intelligent bin deduplication.
+2. **Notes & Interactive Tasks**: Project-aware task checklists, timecode stamps, and a global scratchpad across both Premiere Pro and After Effects.
+3. **Watch Bins & Media Sync**: Automated background directory scanning that syncs external asset folders (Downloads, SFX, Client assets) into custom project bins without duplicates.
 
 ---
 
-### ধাপ ২ — এক্সটেনশন ফোল্ডার কপি করা
-পুরো `LazyKick` ফোল্ডারটি কপি করে নিচের লোকেশনে পেস্ট করুন:
+## 🚀 Key Features
 
-* **Windows:**
-  ```text
-  C:\Users\<Your-Username>\AppData\Roaming\Adobe\CEP\extensions\LazyKick
-  ```
-  *(বা `Win + R` চেপে `%APPDATA%\Adobe\CEP\extensions\` লিখে Enter দিন)*
+### 1. ⚡ Universal QuickPaste (Always-Accessible Header)
+* **Instant Timeline Paste**: Copy any image or screenshot to your OS clipboard and hit **`⚡ QuickPaste`**. The image is instantly saved to `<ProjectFolder>/Pasted Images/` and inserted onto your timeline at the current playhead/CTI position.
+* **Smart Bin Deduplication**: Prevents project clutter. LazyKick computes image checksums and reuses existing bin items instead of creating duplicate imports.
+* **After Effects Intelligence**:
+  * Places footage at current CTI.
+  * Optional **Guide Layer** mode (won't accidentally render in your final export).
+  * Optional **Auto-Fit to Comp** (scales oversized screenshots to fit).
+* **Premiere Pro Intelligence**:
+  * Places clip on the lowest available video track at the exact playhead position without overwriting existing clips.
+* **Recent Pastes Gallery**: Visual thumbnail history of recent clipboard assets with 1-click re-insertion.
 
-* **macOS:**
-  ```text
-  ~/Library/Application Support/Adobe/CEP/extensions/LazyKick
-  ```
+### 2. 📝 Notes & Interactive Checklist
+* **Project-Aware Auto-Saving**: Automatically loads and isolates notes per project file.
+* **Shared AE ↔ PPro Context**: Switching between Premiere and After Effects on the same project seamlessly preserves your notes.
+* **🌐 Global Scratchpad**: A dedicated persistent scratchpad available across all projects for client hex codes, hashtags, export presets, and boilerplates.
+* **☑️ Interactive Checklist**: Write tasks and click checkboxes to toggle strike-through styling.
+* **⏱️ Live Timecode Stamping**: 1-click insertion of the active timeline's exact timecode (e.g., `[00:01:24:12]`) directly into your notes.
+* **📋 Copy & 📥 Export**: Fast 1-click clipboard copy or `.txt` file export.
+
+### 3. 📂 Watch Bins & Media Sync (Auto Ingestion)
+* **Folder-to-Bin Mapping**: Link local/network folders (e.g., `Downloads`, `Sound Effects`, `Footage`) to specific project bins.
+* **Recursive Background Polling**: Scans linked folders every 5 seconds for new media files.
+* **Media Type Filters**: Selectively import only Video `[🎬]`, Audio `[🎵]`, or Images `[🖼️]`.
+* **Zero Duplicates**: Tracks imported file paths and MD5 signatures to guarantee zero duplicate bin clutter.
+* **Built-in Fast Browser**: Lightweight in-panel drive and folder browser with 1-click "Open in Explorer / Finder".
 
 ---
 
-### ধাপ ৩ — সফটওয়্যার রিস্টার্ট ও ওপেন
-1. Premiere Pro বা After Effects চালু করুন।
-2. মেনুবার থেকে প্যানেল ওপেন করুন:
+## 💻 Installation
+
+### Step 1: Enable PlayerDebugMode (One-Time Setup)
+
+Adobe CEP requires `PlayerDebugMode` enabled to run development/unpacked extensions:
+
+#### **Windows (Fastest)**
+Double-click the included [`ENABLE_DEBUG_MODE.bat`](ENABLE_DEBUG_MODE.bat) file inside the `LazyKick` directory.
+
+#### **macOS (Terminal)**
+```bash
+defaults write com.adobe.CSXS.9 PlayerDebugMode 1
+defaults write com.adobe.CSXS.10 PlayerDebugMode 1
+defaults write com.adobe.CSXS.11 PlayerDebugMode 1
+defaults write com.adobe.CSXS.12 PlayerDebugMode 1
+```
+
+---
+
+### Step 2: Deploy to Adobe CEP Extensions Folder
+
+Copy the entire `LazyKick` folder into your system's Adobe CEP directory:
+
+#### **Windows**:
+```text
+C:\Users\<Your-Username>\AppData\Roaming\Adobe\CEP\extensions\LazyKick
+```
+> *(Quick shortcut: Press `Win + R`, paste `%APPDATA%\Adobe\CEP\extensions\`, press Enter, and place the folder there)*
+
+#### **macOS**:
+```text
+~/Library/Application Support/Adobe/CEP/extensions/LazyKick
+```
+
+---
+
+### Step 3: Launch in Premiere Pro / After Effects
+
+1. Start (or restart) **Adobe Premiere Pro** or **Adobe After Effects**.
+2. Navigate to the top menu bar:
    * **Window > Extensions > LazyKick**
-3. আপনার ওয়ার্কস্পেসের যেকোনো সুবিধাজনক পাশে ডক (Dock) করে কাজ শুরু করুন!
+3. Dock the panel anywhere in your workspace.
 
 ---
 
-## 👨‍💻 Credits & License
+## 🛠️ Tech Stack & Architecture
 
-* **Developer:** Raisul Sohan
-* **Website:** [https://raisulsohan.com](https://raisulsohan.com)
-* **Suite:** LazySuite Ecosystem
-* **Copyright:** © 2026 Raisul Sohan. All rights reserved.
+| Component | Technology | Description |
+| :--- | :--- | :--- |
+| **CEP Runtime** | Adobe CEP 9.0 – 12.0+ | Cross-application extension container |
+| **Client UI** | HTML5, CSS3, Vanilla ES6+ | Modern CC dark-theme responsive UI |
+| **Host Engine** | Adobe ExtendScript (ES3) | Native Premiere Pro & After Effects automation |
+| **Inter-Process Comm** | `CSInterface.js` | Bi-directional JSON bridge between Client and Host |
+| **File I/O & Hashes** | Node.js `fs` & `crypto` | Zero-dependency high-speed image processing & deduplication |
+
+---
+
+## 🔧 Troubleshooting
+
+<details>
+<summary><strong>1. "LazyKick" does not appear under Window > Extensions</strong></summary>
+
+* Ensure you ran `ENABLE_DEBUG_MODE.bat` (on Windows) or ran the terminal commands (on macOS).
+* Verify that the extension folder is located directly at `%APPDATA%\Adobe\CEP\extensions\LazyKick\` and contains `CSXS/manifest.xml`.
+* Completely close and restart Premiere Pro / After Effects.
+</details>
+
+<details>
+<summary><strong>2. QuickPaste shows "No image in clipboard"</strong></summary>
+
+* Make sure you have an actual raster image copied to your OS clipboard (e.g. using `Win + Shift + S` or right-clicking an image in a browser and choosing *Copy Image*).
+* Copying a file path in Windows Explorer is not a clipboard image.
+</details>
+
+<details>
+<summary><strong>3. Watch Bins auto-sync not importing</strong></summary>
+
+* Ensure the target folder contains supported media extensions (`.mp4`, `.mov`, `.wav`, `.mp3`, `.png`, `.jpg`, etc.).
+* Check that the media filter toggle for that file type (Video, Audio, or Image) is enabled on the bin item.
+</details>
+
+---
+
+## 👨‍💻 Author & Credits
+
+* **Developer**: **Raisul Sohan**
+* **Website**: [https://raisulsohan.com](https://raisulsohan.com)
+* **GitHub**: [@raisulsohan](https://github.com/raisulsohan)
+* **Suite**: LazySuite Creative Tools Ecosystem
+* **License**: Proprietary / Creative Commons — © 2026 Raisul Sohan. All rights reserved.
