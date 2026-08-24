@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LazyKick</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- MAIN APP CONTAINER -->
+    <div id="appContainer">
+
+        <!-- ================= TOP HEADER (UNIVERSAL TOOLBAR) ================= -->
+        <header id="topHeader">
+            <div class="header-left">
+                <div class="brand-title">
+                    <span class="brand-icon">⚡</span>
+                    <span class="brand-name">LazyKick</span>
+                </div>
+                <div class="project-info">
+                    <span id="hostBadge" class="host-badge">--</span>
+                    <span id="projectName" class="project-name" title="Current Project">Detecting project...</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button id="quickPasteBtn" class="btn-quick-paste" title="Paste clipboard image into timeline & project (Ctrl/Cmd+V)">
+                    <span class="btn-icon">📋</span>
+                    <span class="btn-text">Paste Image</span>
+                </button>
+                <button id="refreshBtn" class="btn-icon-only" title="Refresh project status">↻</button>
+            </div>
+        </header>
+
+        <!-- ================= NAVIGATION TABS ================= -->
+        <nav id="navTabs">
+            <button class="nav-tab active" data-tab="tabNotes">
+                <span class="tab-icon">📝</span>
+                <span class="tab-label">Notes & Tasks</span>
+            </button>
+            <button class="nav-tab" data-tab="tabBins">
+                <span class="tab-icon">📂</span>
+                <span class="tab-label">Watch Bins</span>
+                <span id="binCountBadge" class="badge-count">0</span>
+            </button>
+            <button class="nav-tab" data-tab="tabTools">
+                <span class="tab-icon">🛠️</span>
+                <span class="tab-label">Paste & Tools</span>
+            </button>
+        </nav>
+
+        <!-- ================= TAB 1: NOTES & TASKS ================= -->
+        <section id="tabNotes" class="tab-content active">
+            <!-- Notes Sub-bar -->
+            <div class="notes-toolbar">
+                <div class="notes-tabs-scroll" id="notesTabBar">
+                    <button class="sub-tab" data-tab-id="global">🌐 Global</button>
+                    <button class="sub-tab active" data-tab-id="0">Note 1</button>
+                </div>
+                <div class="notes-actions">
+                    <button id="btnAddNoteTab" class="btn-tool" title="Add new note tab">+</button>
+                    <button id="btnInsertTimecode" class="btn-tool btn-accent" title="Insert current timeline timecode">⏱️ Timecode</button>
+                    <button id="btnInsertTask" class="btn-tool" title="Insert To-Do Checkbox">☑️ Task</button>
+                    <button id="btnCopyNote" class="btn-tool" title="Copy entire note">📋</button>
+                    <button id="btnExportNote" class="btn-tool" title="Export note as .txt file">📥</button>
+                    <button id="btnDeleteNoteTab" class="btn-tool btn-danger" title="Delete current tab">🗑️</button>
+                </div>
+            </div>
+
+            <!-- Notes Editor Area -->
+            <div class="editor-wrapper">
+                <div id="noteEditor" class="rich-editor" contenteditable="true" spellcheck="false" placeholder="Write project notes, client feedbacks, or add to-do tasks..."></div>
+            </div>
+        </section>
+
+        <!-- ================= TAB 2: WATCH BINS ================= -->
+        <section id="tabBins" class="tab-content">
+            <!-- Watch Bins Control Bar -->
+            <div class="bins-control-bar">
+                <div class="control-left">
+                    <button id="btnAddBin" class="btn-primary-sm">+ Add Watch Bin</button>
+                    <button id="btnSyncAll" class="btn-secondary-sm">⚡ Sync All</button>
+                </div>
+                <div class="control-right">
+                    <label class="toggle-switch" title="Auto-sync media files in background">
+                        <input type="checkbox" id="autoSyncToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="toggle-label">Auto-Sync</span>
+                    <span id="autoSyncDot" class="status-dot"></span>
+                </div>
+            </div>
+
+            <!-- Bin Cards List -->
+            <div id="binListContainer" class="bin-list-container">
+                <div id="binsEmptyHint" class="empty-hint">
+                    <div class="empty-icon">📁</div>
+                    <p>No watch bins linked to this project yet.</p>
+                    <span>Click <strong>+ Add Watch Bin</strong> to link folders (e.g. SFX, Footage, Music).</span>
+                </div>
+                <div id="binCardsList" class="bin-cards-list"></div>
+            </div>
+        </section>
+
+        <!-- ================= TAB 3: PASTE & TOOLS ================= -->
+        <section id="tabTools" class="tab-content">
+            <div class="tools-container">
+                <!-- QuickPaste Options Card -->
+                <div class="tool-card">
+                    <div class="card-header">
+                        <h3>📋 QuickPaste Options</h3>
+                    </div>
+                    <div class="card-body">
+                        <label class="setting-row">
+                            <span class="setting-desc">Paste as Guide Layer <small>(After Effects only — won't render)</small></span>
+                            <input type="checkbox" id="optGuideLayer" checked>
+                        </label>
+
+                        <label class="setting-row">
+                            <span class="setting-desc">Auto-Scale to Comp/Sequence size</span>
+                            <input type="checkbox" id="optAutoFit">
+                        </label>
+
+                        <div class="setting-row-input">
+                            <label for="optTargetFolder">Save Folder / Bin Name:</label>
+                            <input type="text" id="optTargetFolder" value="Pasted Images" spellcheck="false">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Pastes Gallery -->
+                <div class="tool-card">
+                    <div class="card-header">
+                        <h3>🖼️ Recent Pastes</h3>
+                        <button id="btnClearPastesHistory" class="btn-link">Clear</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentPastesGallery" class="recent-pastes-gallery">
+                            <div class="empty-pastes">No recent clipboard pastes yet.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= STATUS BAR & CREDITS FOOTER ================= -->
+        <footer id="mainFooter">
+            <div class="footer-status">
+                <span id="globalStatus" class="status-text">Ready</span>
+            </div>
+            <div class="footer-credits">
+                <span class="brand-tag">LazyKick v1.0</span>
+                <span class="sep">•</span>
+                <a href="https://raisulsohan.com" target="_blank" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- ================= ADD / EDIT BIN MODAL ================= -->
+    <div id="binModalOverlay" class="modal-overlay hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="binModalTitle">Link Folder to Bin</h3>
+                <button id="btnModalClose" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Source Folder (Computer):</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="modalFolderInput" placeholder="Choose or paste folder path..." spellcheck="false">
+                        <button id="btnBrowseFolder" class="btn-secondary-sm">Browse...</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Target Bin Name (Project):</label>
+                    <input type="text" id="modalBinNameInput" placeholder="e.g. SFX or Footage/Interviews" spellcheck="false">
+                    <small class="hint-text">Use slashes (/) to create nested bins.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Media Filters:</label>
+                    <div class="filter-toggles">
+                        <label class="filter-chip"><input type="checkbox" id="filterVideo" checked> 🎬 Video</label>
+                        <label class="filter-chip"><input type="checkbox" id="filterAudio" checked> 🎵 Audio</label>
+                        <label class="filter-chip"><input type="checkbox" id="filterImage" checked> 🖼️ Image</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="modalRecursiveCheck" checked>
+                        <span>Include subfolders (recursive scan)</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btnModalCancel" class="btn-secondary-sm">Cancel</button>
+                <button id="btnModalSaveBin" class="btn-primary-sm">Save Watch Bin</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= CUSTOM IN-PANEL FOLDER BROWSER ================= -->
+    <div id="fbOverlay" class="modal-overlay hidden">
+        <div class="modal-box fb-box">
+            <div class="modal-header">
+                <h3>Select Folder</h3>
+                <button id="fbCloseBtn" class="btn-close">&times;</button>
+            </div>
+            <div class="fb-drives-bar" id="fbDrivesBar"></div>
+            <div class="fb-path-bar">
+                <button id="fbUpBtn" class="btn-icon-only" title="Up one level">⬆</button>
+                <input type="text" id="fbPathInput" spellcheck="false" placeholder="Path...">
+                <button id="fbGoBtn" class="btn-secondary-sm">Go</button>
+            </div>
+            <div class="fb-list" id="fbList"></div>
+            <div class="modal-footer">
+                <span id="fbSelectedHint" class="fb-selected-hint"></span>
+                <button id="fbCancelBtn" class="btn-secondary-sm">Cancel</button>
+                <button id="fbSelectBtn" class="btn-primary-sm">Select Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script src="../lib/CSInterface.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
