@@ -5,7 +5,7 @@
   Developed By: RaisulSohan
   Description: Unified backend host script for After Effects & Premiere Pro.
                Powers Project Notepad, Watch Bins (QuickBinSync) & QuickPaste.
-  Copyright (c) 2026 Raisul Sohan. All rights reserved.
+  Copyright (c) 2026 Raisul Sohan. Free and open source under the MIT License.
 ========================================================================
 
   Everything here is ExtendScript (ES3): no trailing commas, no Array

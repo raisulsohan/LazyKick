@@ -103,4 +103,8 @@ SUPPORT
   Raisul Sohan
   lettertosohan@gmail.com
   https://raisulsohan.com
+
+  LazyKick is free and open source (MIT licence):
   https://github.com/raisulsohan/LazyKick
+
+  Feel free to share it with friends.

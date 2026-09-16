@@ -4,7 +4,7 @@
   Developed By: RaisulSohan
   Website: https://raisulsohan.com
   Description: Unified frontend for Notes, Watch Bins, and QuickPaste.
-  Copyright (c) 2026 Raisul Sohan. All rights reserved.
+  Copyright (c) 2026 Raisul Sohan. Free and open source under the MIT License.
 ========================================================================
 
   Runs in CEP's Chromium with Node enabled. The oldest supported hosts

@@ -5,6 +5,7 @@
   <img src="https://img.shields.io/badge/Adobe%20Premiere%20Pro-2020+-EA77FF?style=for-the-badge&logo=adobepremierepro&logoColor=white" alt="PPro Support" />
   <img src="https://img.shields.io/badge/CEP-9%20to%2012+-FF5722?style=for-the-badge" alt="CEP Version" />
   <img src="https://img.shields.io/badge/Windows%20%7C%20macOS-supported-2EA44F?style=for-the-badge" alt="Platforms" />
+  <img src="https://img.shields.io/badge/License-MIT%20%C2%B7%20Free-yellow?style=for-the-badge" alt="MIT License" />
   <img src="https://img.shields.io/badge/Developed%20By-RaisulSohan-00E676?style=for-the-badge&logo=github" alt="Developer" />
 </p>
 
@@ -21,7 +22,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.1** · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -42,6 +43,7 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.1** · [
 - [Troubleshooting & FAQ](#-troubleshooting--faq)
 - [Roadmap Ideas](#%EF%B8%8F-roadmap-ideas)
 - [Author & Credits](#-author--credits)
+- [License](#-license)
 
 ---
 
@@ -344,6 +346,7 @@ LazyKick/
 │   └── zip.mjs                   # Small ZIP writer (forward slashes, executable .command files)
 ├── ENABLE_DEBUG_MODE.bat         # Developer setup: PlayerDebugMode for unsigned copies
 ├── CHANGELOG.md
+├── LICENSE                       # MIT
 ├── package.json                  # Version source + npm scripts
 └── README.md
 ```
@@ -457,5 +460,11 @@ Suggestions welcome in [Issues](https://github.com/raisulsohan/LazyKick/issues).
 * **Website**: [https://raisulsohan.com](https://raisulsohan.com)
 * **GitHub**: [@raisulsohan](https://github.com/raisulsohan)
 * **Suite**: LazySuite Creative Tools Ecosystem
-* **License**: Proprietary / Creative Commons — © 2026 Raisul Sohan. All rights reserved.
-* `lib/CSInterface.js` © Adobe, distributed under Adobe's CEP license terms.
+
+---
+
+## 📄 License
+
+LazyKick is **free and open source** under the [MIT License](LICENSE): use it, share it, change it, including in commercial work.
+
+`lib/CSInterface.js` is © Adobe and distributed under Adobe's own CEP terms, not the MIT License.
