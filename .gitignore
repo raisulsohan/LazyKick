@@ -1,0 +1,16 @@
+node_modules/
+.claude/
+
+# The signing key and its password: kept in the repository folder, never in
+# git — this repository is public. Also listed in .git/info/exclude, which no
+# commit can change.
+/Signing key (do not share)/
+*.p12
+password.txt
+
+# Adobe's signing tool is fetched on demand by tools/get-zxpsigncmd.mjs.
+tools/vendor/
+
+# A release is built outside the repository (see tools/package-zxp.mjs), so
+# nothing signed lands here. This is a safety net.
+*.zxp

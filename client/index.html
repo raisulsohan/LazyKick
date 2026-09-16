@@ -23,7 +23,7 @@
                 </div>
             </div>
             <div class="header-right">
-                <button id="quickPasteBtn" class="btn-quick-paste" title="Paste clipboard image into timeline & project (Ctrl/Cmd+V)">
+                <button id="quickPasteBtn" class="btn-quick-paste" title="Paste the clipboard image (or a copied image file) into the timeline and project. Shortcut: Ctrl/Cmd+V while the panel is focused, outside the notes.">
                     <span class="btn-icon">📋</span>
                     <span class="btn-text">Paste Image</span>
                 </button>
@@ -116,13 +116,17 @@
                         </label>
 
                         <label class="setting-row">
-                            <span class="setting-desc">Auto-Scale to Comp/Sequence size</span>
+                            <span class="setting-desc">Shrink large images to fit the comp <small>(After Effects only — never enlarges)</small></span>
                             <input type="checkbox" id="optAutoFit">
                         </label>
 
                         <div class="setting-row-input">
                             <label for="optTargetFolder">Save Folder / Bin Name:</label>
-                            <input type="text" id="optTargetFolder" value="Pasted Images" spellcheck="false">
+                            <div class="input-with-btn">
+                                <input type="text" id="optTargetFolder" value="Pasted Images" spellcheck="false">
+                                <button id="btnOpenPasteFolder" class="btn-secondary-sm" title="Open this project's paste folder">📂</button>
+                            </div>
+                            <small class="hint-text">Used for the folder next to the project file and for the project bin. Slashes (/) make nested folders.</small>
                         </div>
                     </div>
                 </div>
@@ -148,9 +152,9 @@
                 <span id="globalStatus" class="status-text">Ready</span>
             </div>
             <div class="footer-credits">
-                <span class="brand-tag">LazyKick v1.0</span>
+                <span id="brandTag" class="brand-tag">LazyKick v1.1</span>
                 <span class="sep">•</span>
-                <a href="https://raisulsohan.com" target="_blank" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
+                <a id="devLink" href="https://raisulsohan.com" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
             </div>
         </footer>
 

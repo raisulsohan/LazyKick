@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="11.0"
+<!--
+  LazyKick — one panel for After Effects (AEFT) and Premiere Pro (PPRO).
+  The manifest schema stays at 9.0, the oldest runtime the panel supports
+  (CSXS 9), so older hosts read it too. tools/package-zxp.mjs keeps both
+  version numbers in step with package.json.
+-->
+<ExtensionManifest Version="9.0"
     ExtensionBundleId="com.sohan.LazyKick"
-    ExtensionBundleVersion="1.0.0"
+    ExtensionBundleVersion="1.1.0"
     ExtensionBundleName="LazyKick"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 
     <ExtensionList>
-        <Extension Id="com.sohan.LazyKick.panel" Version="1.0.0" />
+        <Extension Id="com.sohan.LazyKick.panel" Version="1.1.0" />
     </ExtensionList>
 
     <ExecutionEnvironment>

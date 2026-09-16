@@ -1,0 +1,106 @@
+============================================================
+  LAZYKICK
+  Paste images, keep project notes and auto-import media
+  inside After Effects and Premiere Pro
+============================================================
+
+WHAT YOU NEED
+  - Windows 10 / 11, or macOS
+  - Adobe After Effects (CC 2019 or newer) and/or
+    Adobe Premiere Pro (CC 2020 or newer)
+
+
+------------------------------------------------------------
+INSTALL
+------------------------------------------------------------
+  1. Unzip this download anywhere. The Desktop is fine.
+  2. Close After Effects and Premiere Pro if they are open.
+  3. Windows: double-click  "Install LazyKick.bat"
+     macOS:   double-click  "Install LazyKick (macOS).command"
+              (if macOS refuses, right-click it and choose Open)
+  4. Wait for "Installed", then press a key.
+  5. Start the app and open:
+       Window > Extensions > LazyKick
+
+  The panel is signed, so nothing else needs installing and
+  no Adobe setting has to be changed. Updating from an older
+  LazyKick? Just run the installer: your notes and watch bins
+  are kept.
+
+
+------------------------------------------------------------
+THE THREE TABS
+------------------------------------------------------------
+  PASTE IMAGE (top of the panel, always there)
+    Copy a screenshot, a picture from a browser, or an image
+    file in Explorer / Finder. Click "Paste Image" - or press
+    Ctrl+V (Cmd+V) while the panel is focused, outside the
+    notes. The image is saved in a "Pasted Images" folder next
+    to your project and placed at the playhead:
+      After Effects  a new layer at the current time (a guide
+                     layer by default, so it never renders)
+      Premiere Pro   the lowest video track that is free at the
+                     playhead; nothing on the timeline moves
+    Paste the same picture twice and the same file is reused.
+
+  NOTES & TASKS
+    Notes are saved per project, automatically. "Global" is a
+    scratchpad shared by every project. Buttons:
+      +          new note tab (double-click a tab to rename it)
+      Timecode   inserts the playhead time, e.g. [00:01:24:12]
+      Task       inserts a checkbox
+      Copy       copies the note as text
+      Export     saves a .txt next to the project
+
+  WATCH BINS
+    Link a folder on your computer (Downloads, SFX, client
+    uploads...) to a bin in the project. "Sync" imports what is
+    new; turn on Auto-Sync and new files come in by themselves
+    every few seconds - once they have finished copying.
+    Files that cannot be imported are shown as "skipped" and
+    tried again when they change, or when you click Sync.
+
+
+------------------------------------------------------------
+IF SOMETHING GOES WRONG
+------------------------------------------------------------
+  The panel is not in the Window menu
+      Restart After Effects / Premiere Pro. Adobe only looks
+      for new panels while the app is starting.
+
+  The panel opens blank
+      Windows: run "Fix a blank panel.bat" and restart the app.
+      macOS: in Terminal run
+        defaults write com.adobe.CSXS.12 PlayerDebugMode 1
+      and restart the app.
+
+  "No image in clipboard"
+      Copy an actual picture, or an image file (PNG, JPG, GIF,
+      BMP, TIFF, WEBP, PSD). Copying a file path as text does
+      not count.
+
+  "No free video track at the playhead" (Premiere Pro)
+      Every unlocked video track has a clip under the playhead.
+      Add an empty video track, or move the playhead. The image
+      is already in the project bin.
+
+  A watch folder shows "skipped" files
+      Hover the word "skipped" to see which files. They are a
+      format the app cannot import, or damaged.
+
+
+------------------------------------------------------------
+UNINSTALL
+------------------------------------------------------------
+  Windows: double-click  "Uninstall LazyKick.bat"
+  macOS:   double-click  "Uninstall LazyKick (macOS).command"
+  Both ask before deleting your notes and settings.
+
+
+------------------------------------------------------------
+SUPPORT
+------------------------------------------------------------
+  Raisul Sohan
+  lettertosohan@gmail.com
+  https://raisulsohan.com
+  https://github.com/raisulsohan/LazyKick
