@@ -2,6 +2,9 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## Unreleased
+- LazyKick is free and open source under the MIT License (`LICENSE` added; README, `package.json`, source headers and the install guide updated).
+
 ## 1.1.0
 
 ### Install

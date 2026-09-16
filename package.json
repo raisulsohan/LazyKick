@@ -4,6 +4,7 @@
   "private": true,
   "description": "LazyKick — clipboard image paste, project notes with timecodes, and auto-importing watch folders for After Effects and Premiere Pro.",
   "author": "Raisul Sohan",
+  "license": "MIT",
   "homepage": "https://github.com/raisulsohan/LazyKick",
   "scripts": {
     "check": "cscript //Nologo tools\\check-extendscript.js",
