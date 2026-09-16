@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Scripts that break with the wrong line endings, whatever core.autocrlf says.
+*.bat text eol=crlf
+*.command text eol=lf
+*.sh text eol=lf

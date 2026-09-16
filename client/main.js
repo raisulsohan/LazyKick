@@ -6,26 +6,46 @@
   Description: Unified frontend for Notes, Watch Bins, and QuickPaste.
   Copyright (c) 2026 Raisul Sohan. All rights reserved.
 ========================================================================
+
+  Runs in CEP's Chromium with Node enabled. The oldest supported hosts
+  (CEP 9) ship Chromium 61 and Node 8.6, so this file sticks to what those
+  have: no optional chaining, no fs.promises, no readdir withFileTypes, no
+  recursive mkdir, no navigator.clipboard without a fallback.
+  `tools/test-panel.mjs` drives it against a mocked DOM and host.
 */
 
 (function () {
     "use strict";
 
-    console.log("%c ⚡ LazyKick v1.0 • Developed By RaisulSohan (raisulsohan.com) ", 
+    var PANEL_VERSION = "1.1.0";
+
+    console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
 
     // ============================================================
     // Node.js & Host Interface Modules
     // ============================================================
-    var fs        = require("fs");
-    var path      = require("path");
-    var os        = require("os");
-    var execSync  = require("child_process").execSync;
-    var cs        = new CSInterface();
+    var fs           = require("fs");
+    var path         = require("path");
+    var os           = require("os");
+    var crypto       = require("crypto");
+    var childProcess = require("child_process");
+    var cs           = new CSInterface();
 
     // ============================================================
     // Storage Directory & Constants
     // ============================================================
+    function mkdirp(dir) {
+        if (!dir || fs.existsSync(dir)) return;
+        var parent = path.dirname(dir);
+        if (parent !== dir) mkdirp(parent);
+        try {
+            fs.mkdirSync(dir);
+        } catch (e) {
+            if (e.code !== "EEXIST") throw e;
+        }
+    }
+
     function getStorageDir() {
         var base;
         if (process.platform === "win32") {
@@ -35,19 +55,37 @@
         } else {
             base = path.join(os.homedir(), ".config");
         }
+        // The folder keeps the name of the tool LazyKick grew out of, so notes
+        // written by earlier versions are still found.
         var dir = path.join(base, "AdobeProjectNotepad");
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        mkdirp(dir);
         return dir;
     }
 
     var STORAGE_DIR = getStorageDir();
+    var SETTINGS_FILE = path.join(STORAGE_DIR, "lazykick_settings.json");
+    var GLOBAL_NOTE_FILE = path.join(STORAGE_DIR, "global_scratchpad.txt");
+    var RECENT_PASTES_FILE = path.join(STORAGE_DIR, "recent_pastes.json");
+    var PASTE_INDEX_FILE = path.join(STORAGE_DIR, "paste_index.json");
+
     var NONE_ID = "__none__";
+    var DEFAULT_PASTE_FOLDER = "Pasted Images";
+    var AUTO_SYNC_INTERVAL_MS = 6000;
+    var PROJECT_POLL_MS = 2500;
+    var MAX_RECENT_PASTES = 12;
+    var MAX_PASTE_INDEX = 500;
+    var SAVED_JUST_NOW_MS = 120000;
 
     var EXT_GROUPS = {
-        video: [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg", ".mxf", ".prores"],
+        video: [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg", ".mxf", ".mts", ".m2ts", ".wmv"],
         audio: [".mp3", ".wav", ".aac", ".flac", ".m4a", ".ogg", ".aif", ".aiff", ".wma"],
-        image: [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".exr", ".dpx", ".tga", ".bmp", ".psd", ".ai", ".gif", ".webp", ".heic", ".raw", ".arw", ".cr2", ".nef", ".svg"]
+        // No camera raw (.cr2, .nef, ...): After Effects opens a Camera Raw
+        // dialog for each one, which would stall a background sync.
+        image: [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".exr", ".dpx", ".tga", ".bmp", ".psd", ".ai", ".gif", ".webp", ".heic", ".svg"]
     };
+
+    // Image files that can be pasted when copied in Explorer / Finder.
+    var PASTE_FILE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".psd"];
 
     var WIN_HIDDEN_FOLDERS = {
         "$recycle.bin": true, "system volume information": true, "$winreagent": true,
@@ -64,6 +102,7 @@
         projectHost: "none",
         projectName: "(No project)",
         isSaved: false,
+        touchedUnsaved: false,
 
         // Notes State
         notesData: { tabs: [{ name: "Note 1", content: "" }], activeTabId: "0" },
@@ -74,24 +113,29 @@
         bins: [],
         autoSync: false,
         autoSyncTimer: null,
-        autoSyncBusy: false,
+        syncPending: 0,
         lastPickerPath: "",
 
         // QuickPaste & Tools Settings
         settings: {
             guideLayer: true,
             autoFit: false,
-            targetFolder: "Pasted Images"
+            targetFolder: DEFAULT_PASTE_FOLDER
         },
-        recentPastes: []
+        recentPastes: [],
+        pasteBusy: false
     };
+
+    // Auto-sync only imports a file once its size has held still between two
+    // scans, so a copy or download still in progress is not imported half-written.
+    var stableSizes = {};
+    var syncChain = Promise.resolve();
 
     // Folder Browser State
     var fb = {
         currentPath: "",
         selectedPath: "",
-        callback: null,
-        drives: []
+        callback: null
     };
 
     // ============================================================
@@ -106,6 +150,8 @@
         navTabs:               document.querySelectorAll(".nav-tab"),
         tabContents:           document.querySelectorAll(".tab-content"),
         binCountBadge:         document.getElementById("binCountBadge"),
+        brandTag:              document.getElementById("brandTag"),
+        devLink:               document.getElementById("devLink"),
 
         // Notes Elements
         notesTabBar:           document.getElementById("notesTabBar"),
@@ -155,6 +201,7 @@
         optGuideLayer:         document.getElementById("optGuideLayer"),
         optAutoFit:            document.getElementById("optAutoFit"),
         optTargetFolder:       document.getElementById("optTargetFolder"),
+        btnOpenPasteFolder:    document.getElementById("btnOpenPasteFolder"),
         recentPastesGallery:   document.getElementById("recentPastesGallery"),
         btnClearPastesHistory: document.getElementById("btnClearPastesHistory")
     };
@@ -175,10 +222,12 @@
     function setStatus(msg, duration) {
         if (el.globalStatus) {
             el.globalStatus.textContent = msg;
+            el.globalStatus.title = msg;
+            clearTimeout(setStatus._t);
             if (duration) {
-                clearTimeout(setStatus._t);
                 setStatus._t = setTimeout(function () {
                     el.globalStatus.textContent = "Ready";
+                    el.globalStatus.title = "";
                 }, duration);
             }
         }
@@ -186,26 +235,172 @@
 
     function padZero(n) { return n < 10 ? "0" + n : "" + n; }
 
-    function makeTimestampFilename() {
+    function makeTimestampFilename(ext) {
         var d = new Date();
         return "pasted_" + d.getFullYear() + padZero(d.getMonth() + 1) + padZero(d.getDate()) +
-               "_" + padZero(d.getHours()) + padZero(d.getMinutes()) + padZero(d.getSeconds()) + ".png";
+               "_" + padZero(d.getHours()) + padZero(d.getMinutes()) + padZero(d.getSeconds()) + (ext || ".png");
+    }
+
+    /** `dir/name.ext`, or `dir/name_2.ext`, `_3`... when that is taken. */
+    function uniqueFilePath(dir, fileName) {
+        var ext = path.extname(fileName);
+        var stem = fileName.slice(0, fileName.length - ext.length);
+        var candidate = path.join(dir, fileName);
+        for (var n = 2; fs.existsSync(candidate); n++) {
+            candidate = path.join(dir, stem + "_" + n + ext);
+        }
+        return candidate;
+    }
+
+    function readJson(file, fallback) {
+        try {
+            if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8"));
+        } catch (e) {}
+        return fallback;
+    }
+
+    function writeJson(file, data) {
+        try {
+            fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function normPath(p) { return String(p || "").replace(/\\/g, "/"); }
+
+    function samePath(a, b) {
+        var x = normPath(path.resolve(a)).replace(/\/+$/, "");
+        var y = normPath(path.resolve(b)).replace(/\/+$/, "");
+        return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+    }
+
+    /** Same rules as sanitizeBinPath in host.jsx: "A/B", never outside the folder. */
+    function sanitizeRelativePath(str, fallback) {
+        var clean = String(str || "").split(/[\/\\]/).map(function (seg) {
+            return seg.replace(/[<>:"|?*\x00-\x1f]/g, "_").trim();
+        }).filter(function (seg) {
+            return seg && seg !== "." && seg !== "..";
+        });
+        return clean.length ? clean.join("/") : (fallback || "");
+    }
+
+    function parseReply(res) {
+        if (res === undefined || res === null || res === "" || res === "EvalScript error.") return null;
+        if (typeof res !== "string") return res;
+        try { return JSON.parse(res); } catch (e) { return null; }
+    }
+
+    function evalScriptRaw(script) {
+        return new Promise(function (resolve) {
+            cs.evalScript(script, function (res) { resolve(res); });
+        });
+    }
+
+    function evalScriptP(script) {
+        return evalScriptRaw(script).then(parseReply);
+    }
+
+    function fileMd5(filePath) {
+        return new Promise(function (resolve) {
+            var hash = crypto.createHash("md5");
+            var stream = fs.createReadStream(filePath);
+            stream.on("data", function (chunk) { hash.update(chunk); });
+            stream.on("end", function () { resolve(hash.digest("hex")); });
+            stream.on("error", function () { resolve(null); });
+        });
+    }
+
+    function fileUrl(p) {
+        return "file:///" + encodeURI(normPath(p).replace(/^\/+/, "")).replace(/#/g, "%23").replace(/\?/g, "%3F");
+    }
+
+    function makeEl(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    }
+
+    function isEditableTarget(node) {
+        if (!node || !node.tagName) return false;
+        var tag = String(node.tagName).toUpperCase();
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+        if (node.isContentEditable) return true;
+        return !!(node.closest && node.closest("[contenteditable]"));
+    }
+
+    function isModalOpen() {
+        return !el.binModalOverlay.classList.contains("hidden") || !el.fbOverlay.classList.contains("hidden");
+    }
+
+    function hasOpenProject() {
+        var id = appState.projectId;
+        return !!id && id !== NONE_ID && id.indexOf("error|") !== 0 && appState.projectHost !== "none";
+    }
+
+    function isUnsavedId(id) {
+        return !!id && String(id).split("|")[1] === "unsaved";
+    }
+
+    function openInOS(folderPath) {
+        if (!folderPath || !fs.existsSync(folderPath)) {
+            alert("Folder path does not exist on disk:\n" + folderPath);
+            return;
+        }
+        // Arguments go straight to the program, never through a shell, so a
+        // folder name with quotes or ampersands cannot turn into a command.
+        var command = process.platform === "win32" ? "explorer.exe" : "open";
+        var target = process.platform === "win32" ? path.normalize(folderPath) : folderPath;
+        try {
+            var child = childProcess.spawn(command, [target], { detached: true, stdio: "ignore" });
+            child.on("error", function () {});
+            child.unref();
+        } catch (e) {}
+    }
+
+    function openExternal(url) {
+        try {
+            cs.openURLInDefaultBrowser(url);
+        } catch (e) {
+            try { window.open(url); } catch (e2) {}
+        }
+    }
+
+    function legacyCopy(text) {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-10000px";
+        ta.style.userSelect = "text";
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        if (!ok) throw new Error("Copy was refused");
+        return true;
+    }
+
+    /** navigator.clipboard arrived in Chromium 66; CEP 9 has 61. */
+    function copyTextToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text).catch(function () { return legacyCopy(text); });
+        }
+        return new Promise(function (resolve) { resolve(legacyCopy(text)); });
     }
 
     // ============================================================
     // Persistence: Settings & Global Notes
     // ============================================================
     function loadGeneralSettings() {
-        var f = path.join(STORAGE_DIR, "lazykick_settings.json");
-        if (fs.existsSync(f)) {
-            try {
-                var s = JSON.parse(fs.readFileSync(f, "utf8"));
-                if (s.guideLayer !== undefined) appState.settings.guideLayer = s.guideLayer;
-                if (s.autoFit !== undefined) appState.settings.autoFit = s.autoFit;
-                if (s.targetFolder) appState.settings.targetFolder = s.targetFolder;
-                if (s.autoSync !== undefined) appState.autoSync = s.autoSync;
-            } catch (e) {}
-        }
+        var s = readJson(SETTINGS_FILE, {});
+        if (s.guideLayer !== undefined) appState.settings.guideLayer = !!s.guideLayer;
+        if (s.autoFit !== undefined) appState.settings.autoFit = !!s.autoFit;
+        if (s.targetFolder) appState.settings.targetFolder = sanitizeRelativePath(s.targetFolder, DEFAULT_PASTE_FOLDER);
+        if (s.autoSync !== undefined) appState.autoSync = !!s.autoSync;
+
         el.optGuideLayer.checked = appState.settings.guideLayer;
         el.optAutoFit.checked = appState.settings.autoFit;
         el.optTargetFolder.value = appState.settings.targetFolder;
@@ -213,28 +408,23 @@
     }
 
     function saveGeneralSettings() {
-        var f = path.join(STORAGE_DIR, "lazykick_settings.json");
-        try {
-            fs.writeFileSync(f, JSON.stringify({
-                guideLayer: appState.settings.guideLayer,
-                autoFit: appState.settings.autoFit,
-                targetFolder: appState.settings.targetFolder,
-                autoSync: appState.autoSync
-            }, null, 2), "utf8");
-        } catch (e) {}
+        writeJson(SETTINGS_FILE, {
+            guideLayer: appState.settings.guideLayer,
+            autoFit: appState.settings.autoFit,
+            targetFolder: appState.settings.targetFolder,
+            autoSync: appState.autoSync
+        });
     }
 
     function loadGlobalNote() {
-        var f = path.join(STORAGE_DIR, "global_scratchpad.txt");
-        if (fs.existsSync(f)) {
-            try { return fs.readFileSync(f, "utf8"); } catch (e) { return ""; }
-        }
+        try {
+            if (fs.existsSync(GLOBAL_NOTE_FILE)) return fs.readFileSync(GLOBAL_NOTE_FILE, "utf8");
+        } catch (e) {}
         return "";
     }
 
     function saveGlobalNote(content) {
-        var f = path.join(STORAGE_DIR, "global_scratchpad.txt");
-        try { fs.writeFileSync(f, content, "utf8"); } catch (e) {}
+        try { fs.writeFileSync(GLOBAL_NOTE_FILE, content, "utf8"); } catch (e) {}
     }
 
     // ============================================================
@@ -255,83 +445,129 @@
     // ============================================================
     // Project Polling & State Management
     // ============================================================
+    function notesFileFor(projId) {
+        return path.join(STORAGE_DIR, hashPath(projId) + ".json");
+    }
+
+    function binsFileFor(projId) {
+        return path.join(STORAGE_DIR, "bins_" + hashPath(projId) + ".json");
+    }
+
+    /**
+     * Notes and watch bins made before a project was first saved move with it
+     * to its saved file. Only when this session wrote them, and only when the
+     * project file is brand new (just saved), so opening some other project
+     * never inherits them.
+     */
+    function migrateUnsavedData(previousId, newId) {
+        if (!previousId || !newId || !appState.touchedUnsaved) return false;
+        var prev = previousId.split("|");
+        var next = newId.split("|");
+        if (prev[1] !== "unsaved" || next[1] !== "saved" || prev[0] !== next[0]) return false;
+
+        var projectFile = newId.substring(next[0].length + "|saved|".length);
+        try {
+            if (Date.now() - fs.statSync(projectFile).mtime.getTime() > SAVED_JUST_NOW_MS) return false;
+        } catch (e) {
+            return false;
+        }
+
+        var moved = false;
+        [[notesFileFor(previousId), notesFileFor(newId)], [binsFileFor(previousId), binsFileFor(newId)]].forEach(function (pair) {
+            if (fs.existsSync(pair[0]) && !fs.existsSync(pair[1])) {
+                try {
+                    fs.renameSync(pair[0], pair[1]);
+                    moved = true;
+                } catch (e) {}
+            }
+        });
+        appState.touchedUnsaved = false;
+        return moved;
+    }
+
     function pollProject() {
         cs.evalScript("getProjectInfo()", function (res) {
-            try {
-                var info = (typeof res === "string") ? JSON.parse(res) : res;
-                if (!info) return;
+            var info = parseReply(res);
+            if (!info) return; // host still starting up
 
-                var host = (info.host || "none").toUpperCase();
-                el.hostBadge.textContent = host;
+            el.hostBadge.textContent = String(info.host || "none").toUpperCase();
 
-                var id = info.fullId || NONE_ID;
-                if (id !== appState.projectId) {
-                    appState.projectId = id;
-                    appState.projectPath = info.path || null;
-                    appState.projectHost = info.host || "none";
-                    appState.isSaved = !!info.saved;
-                    appState.projectName = info.name || "Untitled";
+            var id = (info.ok && info.fullId) ? info.fullId : NONE_ID;
+            if (id === appState.projectId) return;
 
-                    el.projectName.textContent = appState.projectName;
-                    el.projectName.title = appState.projectPath || appState.projectName;
+            // Whatever was typed in the last moments belongs to the project it
+            // was typed in: write it there before switching.
+            var previousId = appState.projectId;
+            if (previousId !== null && appState.notesSaveTimer) saveCurrentNote();
 
-                    onProjectChanged();
-                }
-            } catch (err) {
-                // Ignore parse errors during app startup
-            }
+            appState.projectId = id;
+            appState.projectPath = info.path || null;
+            appState.projectHost = info.ok ? (info.host || "none") : "none";
+            appState.isSaved = !!info.saved;
+            appState.projectName = info.ok ? (info.name || "Untitled") : "(No project)";
+
+            el.projectName.textContent = appState.projectName;
+            el.projectName.title = appState.projectPath || appState.projectName;
+
+            var migrated = migrateUnsavedData(previousId, id);
+            onProjectChanged(migrated);
         });
     }
 
-    function onProjectChanged() {
+    function onProjectChanged(migrated) {
         loadNotesForProject();
         loadBinsForProject();
         renderNotesTabBar();
         renderActiveNoteContent();
         renderBinCards();
-        setStatus("Loaded project: " + appState.projectName, 2000);
+        if (migrated) {
+            setStatus("Notes and watch bins moved to the saved project", 3000);
+        } else {
+            setStatus("Loaded project: " + appState.projectName, 2000);
+        }
     }
 
     // ============================================================
     // NOTES & TASKS ENGINE
     // ============================================================
-    function notesFileFor(projId) {
-        return path.join(STORAGE_DIR, hashPath(projId) + ".json");
-    }
+    var savedRange = null;
 
     function loadNotesForProject() {
         appState.globalNote = loadGlobalNote();
-        var fallback = { tabs: [{ name: "Note 1", content: "" }], activeTabId: "0" };
-        var f = notesFileFor(appState.projectId);
-        if (!fs.existsSync(f)) {
-            appState.notesData = fallback;
-            return;
-        }
-        try {
-            var d = JSON.parse(fs.readFileSync(f, "utf8"));
-            if (!d.tabs || !d.tabs.length) d.tabs = [{ name: "Note 1", content: "" }];
-            if (!d.activeTabId) d.activeTabId = "0";
-            appState.notesData = d;
-        } catch (e) {
-            appState.notesData = fallback;
+        var d = readJson(notesFileFor(appState.projectId), null);
+        if (!d || typeof d !== "object") d = {};
+        if (!d.tabs || !d.tabs.length) d.tabs = [{ name: "Note 1", content: "" }];
+        if (d.activeTabId !== "global" && !d.tabs[parseInt(d.activeTabId, 10)]) d.activeTabId = "0";
+        appState.notesData = d;
+    }
+
+    /** Copy the editor into the state of whichever tab it is showing. */
+    function captureEditor() {
+        var html = el.noteEditor.innerHTML;
+        if (appState.notesData.activeTabId === "global") {
+            appState.globalNote = html;
+        } else {
+            var tab = appState.notesData.tabs[parseInt(appState.notesData.activeTabId, 10)];
+            if (tab) tab.content = html;
         }
     }
 
-    function saveCurrentNote() {
-        var currentTab = appState.notesData.activeTabId;
-        var content = el.noteEditor.innerHTML;
+    function writeProjectNotes() {
+        if (!appState.projectId) return;
+        writeJson(notesFileFor(appState.projectId), appState.notesData);
+        if (isUnsavedId(appState.projectId)) appState.touchedUnsaved = true;
+    }
 
-        if (currentTab === "global") {
-            appState.globalNote = content;
-            saveGlobalNote(content);
+    function saveCurrentNote() {
+        clearTimeout(appState.notesSaveTimer);
+        appState.notesSaveTimer = null;
+        if (!appState.projectId) return; // nothing has been loaded into the editor yet
+
+        captureEditor();
+        if (appState.notesData.activeTabId === "global") {
+            saveGlobalNote(appState.globalNote);
         } else {
-            var idx = parseInt(currentTab, 10);
-            if (appState.notesData.tabs[idx]) {
-                appState.notesData.tabs[idx].content = content;
-            }
-            try {
-                fs.writeFileSync(notesFileFor(appState.projectId), JSON.stringify(appState.notesData, null, 2), "utf8");
-            } catch (e) {}
+            writeProjectNotes();
         }
         setStatus("Notes saved", 1000);
     }
@@ -345,39 +581,61 @@
         el.notesTabBar.innerHTML = "";
 
         // Global Tab
-        var globalBtn = document.createElement("button");
-        globalBtn.className = "sub-tab" + (appState.notesData.activeTabId === "global" ? " active" : "");
+        var globalBtn = makeEl("button", "sub-tab" + (appState.notesData.activeTabId === "global" ? " active" : ""), "🌐 Global");
         globalBtn.setAttribute("data-tab-id", "global");
-        globalBtn.textContent = "🌐 Global";
+        globalBtn.title = "Scratchpad shared by every project";
         globalBtn.addEventListener("click", function () { switchNoteTab("global"); });
         el.notesTabBar.appendChild(globalBtn);
 
         // Project Tabs
         appState.notesData.tabs.forEach(function (tab, idx) {
-            var tabBtn = document.createElement("button");
             var strIdx = String(idx);
-            tabBtn.className = "sub-tab" + (appState.notesData.activeTabId === strIdx ? " active" : "");
+            var tabBtn = makeEl("button", "sub-tab" + (appState.notesData.activeTabId === strIdx ? " active" : ""), tab.name || ("Note " + (idx + 1)));
             tabBtn.setAttribute("data-tab-id", strIdx);
-            tabBtn.textContent = tab.name || ("Note " + (idx + 1));
+            tabBtn.title = "Double-click to rename";
             tabBtn.addEventListener("click", function () { switchNoteTab(strIdx); });
-
-            // Double click to rename tab
-            tabBtn.addEventListener("dblclick", function () {
-                var newName = prompt("Rename note tab:", tab.name);
-                if (newName && newName.trim()) {
-                    tab.name = newName.trim();
-                    saveCurrentNote();
-                    renderNotesTabBar();
-                }
-            });
-
+            tabBtn.addEventListener("dblclick", function () { startRenameTab(tabBtn, idx); });
             el.notesTabBar.appendChild(tabBtn);
         });
+    }
+
+    /** Rename in place: CEP's Chromium has no window.prompt(). */
+    function startRenameTab(tabBtn, idx) {
+        var tab = appState.notesData.tabs[idx];
+        if (!tab || !tabBtn.parentNode) return;
+
+        var input = makeEl("input", "sub-tab-rename");
+        input.type = "text";
+        input.value = tab.name || ("Note " + (idx + 1));
+        input.maxLength = 40;
+        input.spellcheck = false;
+        tabBtn.parentNode.replaceChild(input, tabBtn);
+        input.focus();
+        input.select();
+
+        var finished = false;
+        function finish(commit) {
+            if (finished) return;
+            finished = true;
+            if (commit) {
+                var name = input.value.trim();
+                if (name) tab.name = name;
+                writeProjectNotes();
+            }
+            renderNotesTabBar();
+        }
+        input.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") finish(true);
+            else if (e.key === "Escape") finish(false);
+            e.stopPropagation();
+        });
+        input.addEventListener("blur", function () { finish(true); });
     }
 
     function switchNoteTab(tabId) {
         saveCurrentNote();
         appState.notesData.activeTabId = tabId;
+        writeProjectNotes();
         renderNotesTabBar();
         renderActiveNoteContent();
     }
@@ -390,34 +648,91 @@
             var tab = appState.notesData.tabs[idx] || appState.notesData.tabs[0];
             el.noteEditor.innerHTML = (tab && tab.content) ? tab.content : "";
         }
-        attachTodoListeners();
+        savedRange = null;
     }
 
-    function attachTodoListeners() {
-        var checkboxes = el.noteEditor.querySelectorAll(".todo-checkbox");
-        checkboxes.forEach(function (cb) {
-            cb.onchange = function () {
-                var parent = cb.closest(".todo-item");
-                if (parent) {
-                    if (cb.checked) {
-                        parent.classList.add("completed");
-                        cb.setAttribute("checked", "checked");
-                    } else {
-                        parent.classList.remove("completed");
-                        cb.removeAttribute("checked");
-                    }
-                    debouncedSaveNote();
-                }
-            };
-        });
+    function rememberSelection() {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && el.noteEditor.contains(sel.anchorNode)) {
+            savedRange = sel.getRangeAt(0).cloneRange();
+        }
     }
 
-    // Notes Action Buttons
-    el.noteEditor.addEventListener("input", function () {
+    /** Focus the editor with the caret back where it was before a toolbar click. */
+    function focusEditor() {
+        el.noteEditor.focus();
+        var sel = window.getSelection();
+        if (!sel) return;
+        var range;
+        if (savedRange && el.noteEditor.contains(savedRange.startContainer)) {
+            range = savedRange;
+        } else {
+            range = document.createRange();
+            range.selectNodeContents(el.noteEditor);
+            range.collapse(false);
+        }
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+
+    /** The note as plain text, with checklist items written as [ ] and [x]. */
+    function noteToPlainText() {
+        var clone = el.noteEditor.cloneNode(true);
+        var boxes = clone.querySelectorAll(".todo-checkbox");
+        for (var i = 0; i < boxes.length; i++) {
+            var marker = document.createTextNode(boxes[i].hasAttribute("checked") ? "[x] " : "[ ] ");
+            boxes[i].parentNode.replaceChild(marker, boxes[i]);
+        }
+        clone.removeAttribute("id");
+        clone.removeAttribute("contenteditable");
+        clone.style.position = "absolute";
+        clone.style.left = "-10000px";
+        clone.style.top = "0";
+        clone.style.height = "auto";
+        document.body.appendChild(clone);
+        var text = clone.innerText;
+        document.body.removeChild(clone);
+        return text;
+    }
+
+    // Checklist boxes: one delegated listener survives every re-render.
+    el.noteEditor.addEventListener("change", function (e) {
+        var cb = e.target;
+        if (!cb || !cb.classList || !cb.classList.contains("todo-checkbox")) return;
+        var item = cb.closest(".todo-item");
+        if (!item) return;
+        if (cb.checked) {
+            item.classList.add("completed");
+            cb.setAttribute("checked", "checked");
+        } else {
+            item.classList.remove("completed");
+            cb.removeAttribute("checked");
+        }
         debouncedSaveNote();
     });
 
+    el.noteEditor.addEventListener("input", function () {
+        rememberSelection();
+        debouncedSaveNote();
+    });
+    el.noteEditor.addEventListener("keyup", rememberSelection);
+    el.noteEditor.addEventListener("mouseup", rememberSelection);
+
+    // Paste text only: rich web pages bring fonts, colours and huge inline images.
+    el.noteEditor.addEventListener("paste", function (e) {
+        var data = e.clipboardData;
+        if (!data) return;
+        e.preventDefault();
+        var text = data.getData("text/plain");
+        if (text) {
+            document.execCommand("insertText", false, text);
+        } else if (data.types && Array.prototype.indexOf.call(data.types, "Files") !== -1) {
+            setStatus("Images go to the timeline: click Paste Image, or press Ctrl/Cmd+V outside the notes", 4000);
+        }
+    });
+
     el.btnAddNoteTab.addEventListener("click", function () {
+        saveCurrentNote();
         var newIdx = appState.notesData.tabs.length;
         appState.notesData.tabs.push({ name: "Note " + (newIdx + 1), content: "" });
         switchNoteTab(String(newIdx));
@@ -433,55 +748,65 @@
             return;
         }
         if (confirm("Delete this note tab?")) {
+            // Drop any pending save: it would write the deleted tab's text
+            // into whichever tab takes its place.
+            clearTimeout(appState.notesSaveTimer);
+            appState.notesSaveTimer = null;
+
             var idx = parseInt(appState.notesData.activeTabId, 10);
             appState.notesData.tabs.splice(idx, 1);
-            appState.notesData.activeTabId = "0";
-            saveCurrentNote();
+            appState.notesData.activeTabId = String(Math.max(0, idx - 1));
+            writeProjectNotes();
             renderNotesTabBar();
             renderActiveNoteContent();
+            setStatus("Note tab deleted", 1500);
         }
     });
 
     el.btnInsertTask.addEventListener("click", function () {
-        el.noteEditor.focus();
+        focusEditor();
         var html = '<div class="todo-item"><input type="checkbox" class="todo-checkbox"><span class="todo-text">New Task</span></div><div><br></div>';
         document.execCommand("insertHTML", false, html);
-        attachTodoListeners();
+        rememberSelection();
         debouncedSaveNote();
     });
 
     el.btnInsertTimecode.addEventListener("click", function () {
-        cs.evalScript("getCurrentTimecode()", function (res) {
-            try {
-                var data = (typeof res === "string") ? JSON.parse(res) : res;
-                var tc = (data && data.ok && data.timecode) ? data.timecode : "00:00:00:00";
-                el.noteEditor.focus();
-                var html = '<span class="timecode-tag">[' + tc + ']</span>&nbsp;';
-                document.execCommand("insertHTML", false, html);
-                debouncedSaveNote();
-                setStatus("Inserted timecode: " + tc, 2000);
-            } catch (e) {
-                setStatus("Could not get timeline timecode", 2000);
+        evalScriptP("getCurrentTimecode()").then(function (data) {
+            if (!data || !data.ok || !data.timecode) {
+                setStatus((data && data.msg) || "Could not read the timeline timecode", 3000);
+                return;
             }
+            focusEditor();
+            document.execCommand("insertHTML", false, '<span class="timecode-tag">[' + data.timecode + ']</span>&nbsp;');
+            rememberSelection();
+            debouncedSaveNote();
+            setStatus("Inserted timecode: " + data.timecode, 2000);
         });
     });
 
     el.btnCopyNote.addEventListener("click", function () {
-        var text = el.noteEditor.innerText;
-        navigator.clipboard.writeText(text).then(function () {
+        copyTextToClipboard(noteToPlainText()).then(function () {
             setStatus("Note copied to clipboard!", 2000);
+        }, function () {
+            setStatus("Could not copy the note", 3000);
         });
     });
 
     el.btnExportNote.addEventListener("click", function () {
-        var text = el.noteEditor.innerText;
+        saveCurrentNote();
+        var text = noteToPlainText();
         var defaultFolder = appState.projectPath ? path.dirname(appState.projectPath) : os.homedir();
-        var filename = "Note_" + (appState.projectName.replace(/[^\w]/g, "_")) + ".txt";
-        var targetFile = path.join(defaultFolder, filename);
+        var tabName = appState.notesData.activeTabId === "global"
+            ? "Global"
+            : ((appState.notesData.tabs[parseInt(appState.notesData.activeTabId, 10)] || {}).name || "Note");
+        var projectPart = appState.projectName.replace(/\.[^.]+$/, "");
+        var filename = ("Note_" + projectPart + "_" + tabName).replace(/[^\w\-]+/g, "_") + ".txt";
+        var targetFile = uniqueFilePath(defaultFolder, filename);
 
         try {
             fs.writeFileSync(targetFile, text, "utf8");
-            setStatus("Exported note to: " + filename, 3000);
+            setStatus("Exported note to: " + path.basename(targetFile), 3000);
             alert("Note successfully exported to:\n" + targetFile);
         } catch (e) {
             alert("Failed to export note:\n" + e.message);
@@ -491,157 +816,245 @@
     // ============================================================
     // QUICKPASTE ENGINE (Clipboard Image to Timeline)
     // ============================================================
-    function saveClipboardImageWindows(targetPath) {
-        var safePath = targetPath.replace(/'/g, "''").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        var ps = "Add-Type -AssemblyName System.Windows.Forms; " +
-                 "Add-Type -AssemblyName System.Drawing; " +
-                 "$img = [System.Windows.Forms.Clipboard]::GetImage(); " +
-                 "if ($img -ne $null) { " +
-                 "$img.Save('" + safePath + "', [System.Drawing.Imaging.ImageFormat]::Png); " +
-                 "Write-Output 'OK' " +
-                 "} else { Write-Output 'NO_IMAGE' }";
-        try {
-            var out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"',
-                               { windowsHide: true }).toString().trim();
-            return out.indexOf("OK") !== -1;
-        } catch (e) { return false; }
+
+    /**
+     * What is on the clipboard, in order of preference:
+     *  1. a PNG (keeps transparency, which the plain bitmap copy loses)
+     *  2. an image file copied in Explorer
+     *  3. any other picture (screenshots, most apps)
+     * Sent as -EncodedCommand, so no quoting passes through cmd.exe.
+     */
+    function clipboardScriptWindows(targetPath) {
+        var literal = "'" + targetPath.replace(/'/g, "''") + "'";
+        var exts = PASTE_FILE_EXTS.map(function (e) { return "'" + e + "'"; }).join(",");
+        return [
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+            "$ErrorActionPreference = 'Stop'",
+            "try {",
+            "  Add-Type -AssemblyName System.Windows.Forms",
+            "  Add-Type -AssemblyName System.Drawing",
+            "  $target = " + literal,
+            "  $exts = @(" + exts + ")",
+            "  $data = [System.Windows.Forms.Clipboard]::GetDataObject()",
+            "  if ($data -eq $null) { 'NO_IMAGE'; return }",
+            "  if ($data.GetDataPresent('PNG')) {",
+            "    $png = $data.GetData('PNG')",
+            "    if ($png -is [System.IO.MemoryStream]) { [System.IO.File]::WriteAllBytes($target, $png.ToArray()); 'OK'; return }",
+            "  }",
+            "  if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {",
+            "    foreach ($f in [System.Windows.Forms.Clipboard]::GetFileDropList()) {",
+            "      if ($exts -contains [System.IO.Path]::GetExtension($f).ToLower()) { 'FILE:' + $f; return }",
+            "    }",
+            "  }",
+            "  $img = [System.Windows.Forms.Clipboard]::GetImage()",
+            "  if ($img -ne $null) { $img.Save($target, [System.Drawing.Imaging.ImageFormat]::Png); $img.Dispose(); 'OK'; return }",
+            "  'NO_IMAGE'",
+            "} catch { 'ERROR:' + $_.Exception.Message }"
+        ].join("\n");
     }
 
-    function saveClipboardImageMac(targetPath) {
-        var safePath = targetPath.replace(/"/g, '\\"');
-        var script =
-            'try\n' +
-            '  set png_data to (the clipboard as «class PNGf»)\n' +
-            '  set fp to open for access POSIX file "' + safePath + '" with write permission\n' +
-            '  set eof of fp to 0\n' +
-            '  write png_data to fp\n' +
-            '  close access fp\n' +
-            '  return "OK"\n' +
-            'on error\n' +
-            '  try\n' +
-            '    close access fp\n' +
-            '  end try\n' +
-            '  return "NO_IMAGE"\n' +
-            'end try';
-        try {
-            var out = execSync("osascript -e " + JSON.stringify(script)).toString().trim();
-            return out === "OK";
-        } catch (e) { return false; }
+    function clipboardScriptMac(targetPath) {
+        var literal = '"' + targetPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+        return [
+            "try",
+            "  set png_data to (the clipboard as «class PNGf»)",
+            "  set fp to open for access POSIX file " + literal + " with write permission",
+            "  set eof of fp to 0",
+            "  write png_data to fp",
+            "  close access fp",
+            "  return \"OK\"",
+            "on error",
+            "  try",
+            "    close access POSIX file " + literal,
+            "  end try",
+            "end try",
+            "try",
+            "  set copied_file to (the clipboard as «class furl»)",
+            "  return \"FILE:\" & POSIX path of copied_file",
+            "on error",
+            "  return \"NO_IMAGE\"",
+            "end try"
+        ].join("\n");
     }
 
-    function saveClipboardImage(targetPath) {
-        if (process.platform === "win32") return saveClipboardImageWindows(targetPath);
-        if (process.platform === "darwin") return saveClipboardImageMac(targetPath);
-        return false;
-    }
-
-    var crypto    = require("crypto");
-
-    function getFileMd5(filePath) {
-        try {
-            var buf = fs.readFileSync(filePath);
-            return crypto.createHash("md5").update(buf).digest("hex");
-        } catch (e) { return null; }
-    }
-
-    var lastClipboardHash = null;
-    var lastSavedImagePath = null;
-
-    function handleQuickPaste() {
-        var btn = el.quickPasteBtn;
-        var origText = btn.querySelector(".btn-text").textContent;
-
-        function setPasteBtnState(state, text) {
-            btn.className = "btn-quick-paste " + (state || "");
-            btn.querySelector(".btn-text").textContent = text;
-            if (state === "processing") {
-                btn.disabled = true;
-            } else {
-                btn.disabled = false;
-                setTimeout(function () {
-                    btn.className = "btn-quick-paste";
-                    btn.querySelector(".btn-text").textContent = origText;
-                }, 2500);
-            }
-        }
-
-        setPasteBtnState("processing", "Reading Clipboard...");
-
-        cs.evalScript("getProjectFolder()", function (folderResult) {
-            var destDir;
-            if (!folderResult || folderResult === "NO_PROJECT" || folderResult === "EvalScript error.") {
-                // Fallback to desktop/pictures if project is unsaved
-                var baseHome = (process.platform === "win32") ? os.homedir() : os.tmpdir();
-                destDir = path.join(baseHome, "LazyKick_Pasted_Images");
-            } else {
-                var subName = appState.settings.targetFolder || "Pasted Images";
-                destDir = path.join(folderResult, subName);
-            }
-
-            if (!fs.existsSync(destDir)) {
-                try { fs.mkdirSync(destDir, { recursive: true }); } catch (e) {}
-            }
-
-            // Save to temp file first to verify and hash
-            var tempFileName = "temp_clipboard_" + Date.now() + ".png";
-            var tempFilePath = path.join(destDir, tempFileName);
-
-            var saved = saveClipboardImage(tempFilePath);
-            if (!saved || !fs.existsSync(tempFilePath)) {
-                if (fs.existsSync(tempFilePath)) try { fs.unlinkSync(tempFilePath); } catch (e) {}
-                setPasteBtnState("error", "No Image in Clipboard!");
-                setStatus("No image found on clipboard to paste.", 3000);
-                return;
-            }
-
-            var currentHash = getFileMd5(tempFilePath);
-            var targetFilePath;
-
-            // If this is identical to the last pasted image and that file still exists, reuse it!
-            if (currentHash && currentHash === lastClipboardHash && lastSavedImagePath && fs.existsSync(lastSavedImagePath)) {
-                try { fs.unlinkSync(tempFilePath); } catch (eU) {}
-                targetFilePath = lastSavedImagePath;
-            } else {
-                var filename = makeTimestampFilename();
-                targetFilePath = path.join(destDir, filename);
-                try {
-                    fs.renameSync(tempFilePath, targetFilePath);
-                } catch (eR) {
-                    targetFilePath = tempFilePath;
+    /** Resolves { kind: "saved" | "file" | "none" | "error", path?, message? }. */
+    function readClipboardImage(tempPath) {
+        return new Promise(function (resolve) {
+            function interpret(err, stdout) {
+                var lines = String(stdout || "").trim().split(/\r?\n/);
+                var out = lines[lines.length - 1].trim();
+                if (out === "OK") {
+                    resolve(fs.existsSync(tempPath) ? { kind: "saved", path: tempPath } : { kind: "none" });
+                } else if (out.indexOf("FILE:") === 0) {
+                    var filePath = out.substring(5);
+                    var ok = PASTE_FILE_EXTS.indexOf(path.extname(filePath).toLowerCase()) !== -1 && fs.existsSync(filePath);
+                    resolve(ok ? { kind: "file", path: filePath } : { kind: "none" });
+                } else if (out.indexOf("ERROR:") === 0) {
+                    resolve({ kind: "error", message: out.substring(6) });
+                } else if (err && !out) {
+                    resolve({ kind: "error", message: err.message });
+                } else {
+                    resolve({ kind: "none" });
                 }
-                lastClipboardHash = currentHash;
-                lastSavedImagePath = targetFilePath;
             }
 
-            setPasteBtnState("processing", "Placing on timeline...");
-
-            var guideFlag = !!appState.settings.guideLayer;
-            var fitFlag = !!appState.settings.autoFit;
-            var safePathArg = targetFilePath.replace(/\\/g, "/");
-
-            var scriptCall = "importPastedImage(" + JSON.stringify(safePathArg) + ", " + guideFlag + ", " + fitFlag + ")";
-            cs.evalScript(scriptCall, function (evalRes) {
-                try {
-                    var r = (typeof evalRes === "string") ? JSON.parse(evalRes) : evalRes;
-                    if (r && r.ok) {
-                        setPasteBtnState("success", "Placed on Timeline!");
-                        setStatus("Image placed on timeline: " + path.basename(targetFilePath), 3000);
-                        addRecentPaste(targetFilePath);
-                    } else {
-                        setPasteBtnState("error", (r && r.msg) || "Import Failed");
-                        setStatus("Error: " + ((r && r.msg) || "Could not place image"), 3000);
-                    }
-                } catch (err) {
-                    setPasteBtnState("success", "Placed!");
-                    addRecentPaste(targetFilePath);
-                }
-            });
+            if (process.platform === "win32") {
+                var encoded = Buffer.from(clipboardScriptWindows(tempPath), "utf16le").toString("base64");
+                childProcess.execFile("powershell.exe",
+                    ["-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                    { windowsHide: true, timeout: 20000, maxBuffer: 1024 * 1024 }, interpret);
+            } else if (process.platform === "darwin") {
+                childProcess.execFile("osascript", ["-e", clipboardScriptMac(tempPath)],
+                    { timeout: 20000, maxBuffer: 1024 * 1024 }, interpret);
+            } else {
+                resolve({ kind: "error", message: "Clipboard images are supported on Windows and macOS only" });
+            }
         });
     }
 
+    /** A file already saved from these exact bytes in this folder, if any. */
+    function findPastedCopy(hash, destDir) {
+        var index = readJson(PASTE_INDEX_FILE, {});
+        var known = index["h" + hash];
+        if (!known || !fs.existsSync(known) || !samePath(path.dirname(known), destDir)) return Promise.resolve(null);
+        return fileMd5(known).then(function (h) { return h === hash ? known : null; });
+    }
+
+    function rememberPastedCopy(hash, filePath) {
+        var index = readJson(PASTE_INDEX_FILE, {});
+        delete index["h" + hash];
+        index["h" + hash] = filePath;
+        var keys = Object.keys(index);
+        for (var i = 0; i < keys.length - MAX_PASTE_INDEX; i++) delete index[keys[i]];
+        writeJson(PASTE_INDEX_FILE, index);
+    }
+
+    function pasteBinName() {
+        return sanitizeRelativePath(appState.settings.targetFolder, DEFAULT_PASTE_FOLDER);
+    }
+
+    function importPastedFile(filePath) {
+        var script = "importPastedImage(" + JSON.stringify(normPath(filePath)) + ", " +
+            (!!appState.settings.guideLayer) + ", " + (!!appState.settings.autoFit) + ", " +
+            JSON.stringify(pasteBinName()) + ")";
+        return evalScriptP(script);
+    }
+
+    function removeQuietly(p) {
+        try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch (e) {}
+    }
+
+    var pasteBtnTimer = null;
+
+    function setPasteBtnState(state, text) {
+        var btn = el.quickPasteBtn;
+        var label = btn.querySelector(".btn-text");
+        clearTimeout(pasteBtnTimer);
+        btn.className = "btn-quick-paste" + (state ? " " + state : "");
+        label.textContent = text;
+        btn.disabled = state === "processing";
+        if (state && state !== "processing") {
+            pasteBtnTimer = setTimeout(function () {
+                btn.className = "btn-quick-paste";
+                label.textContent = "Paste Image";
+            }, 2500);
+        }
+    }
+
+    function pasteFolderFor(projectFolder) {
+        if (!projectFolder) return path.join(os.homedir(), "LazyKick_Pasted_Images");
+        return path.join.apply(path, [projectFolder].concat(pasteBinName().split("/")));
+    }
+
+    function currentProjectFolder() {
+        return evalScriptRaw("getProjectFolder()").then(function (res) {
+            return (res && res !== "NO_PROJECT" && res !== "EvalScript error.") ? String(res) : null;
+        });
+    }
+
+    function handleQuickPaste() {
+        if (appState.pasteBusy) return Promise.resolve();
+        appState.pasteBusy = true;
+        setPasteBtnState("processing", "Reading Clipboard...");
+
+        var tempPath = null;
+        return currentProjectFolder().then(function (projectFolder) {
+            var destDir = pasteFolderFor(projectFolder);
+            mkdirp(destDir);
+            tempPath = path.join(destDir, ".lazykick_clipboard_" + Date.now() + ".png");
+
+            return readClipboardImage(tempPath).then(function (clip) {
+                if (clip.kind === "none") {
+                    removeQuietly(tempPath);
+                    setPasteBtnState("error", "No Image in Clipboard!");
+                    setStatus("No image found on the clipboard. Copy a picture or an image file first.", 3000);
+                    return;
+                }
+                if (clip.kind === "error") {
+                    removeQuietly(tempPath);
+                    setPasteBtnState("error", "Clipboard Error");
+                    setStatus("Could not read the clipboard: " + clip.message, 5000);
+                    return;
+                }
+
+                return fileMd5(clip.path).then(function (hash) {
+                    return (hash ? findPastedCopy(hash, destDir) : Promise.resolve(null)).then(function (existing) {
+                        var finalPath;
+                        if (existing) {
+                            finalPath = existing; // same picture pasted again: reuse file and bin item
+                        } else if (clip.kind === "file" && samePath(path.dirname(clip.path), destDir)) {
+                            finalPath = clip.path;
+                        } else {
+                            var ext = clip.kind === "file" ? path.extname(clip.path).toLowerCase() : ".png";
+                            finalPath = uniqueFilePath(destDir, makeTimestampFilename(ext));
+                            if (clip.kind === "saved") {
+                                try {
+                                    fs.renameSync(clip.path, finalPath);
+                                } catch (eRename) {
+                                    fs.copyFileSync(clip.path, finalPath);
+                                }
+                            } else {
+                                fs.copyFileSync(clip.path, finalPath);
+                            }
+                        }
+                        removeQuietly(tempPath);
+                        if (hash) rememberPastedCopy(hash, finalPath);
+
+                        setPasteBtnState("processing", "Placing on timeline...");
+                        return importPastedFile(finalPath).then(function (r) {
+                            if (r && r.ok) {
+                                addRecentPaste(finalPath);
+                                setPasteBtnState("success", r.placedOnTimeline ? "Placed on Timeline!" : "Added to Project");
+                                setStatus(r.msg + " (" + path.basename(finalPath) + ")", 4000);
+                            } else {
+                                setPasteBtnState("error", "Import Failed");
+                                setStatus("Error: " + ((r && r.msg) || "the host did not answer"), 4000);
+                            }
+                        });
+                    });
+                });
+            });
+        }).catch(function (err) {
+            removeQuietly(tempPath);
+            setPasteBtnState("error", "Paste Failed");
+            setStatus("Paste failed: " + (err && err.message ? err.message : err), 5000);
+        }).then(function () {
+            appState.pasteBusy = false;
+        });
+    }
+
+    function loadRecentPastes() {
+        var list = readJson(RECENT_PASTES_FILE, []);
+        appState.recentPastes = (list instanceof Array ? list : []).filter(function (p) {
+            return typeof p === "string" && fs.existsSync(p);
+        }).slice(0, MAX_RECENT_PASTES);
+    }
+
     function addRecentPaste(filePath) {
+        appState.recentPastes = appState.recentPastes.filter(function (p) { return !samePath(p, filePath); });
         appState.recentPastes.unshift(filePath);
-        if (appState.recentPastes.length > 8) appState.recentPastes.pop();
+        if (appState.recentPastes.length > MAX_RECENT_PASTES) appState.recentPastes.length = MAX_RECENT_PASTES;
+        writeJson(RECENT_PASTES_FILE, appState.recentPastes);
         renderRecentPastes();
     }
 
@@ -649,27 +1062,23 @@
         if (!el.recentPastesGallery) return;
         el.recentPastesGallery.innerHTML = "";
 
-        if (appState.recentPastes.length === 0) {
-            el.recentPastesGallery.innerHTML = '<div class="empty-pastes">No recent clipboard pastes yet.</div>';
+        var existing = appState.recentPastes.filter(function (p) { return fs.existsSync(p); });
+        if (existing.length === 0) {
+            el.recentPastesGallery.appendChild(makeEl("div", "empty-pastes", "No recent clipboard pastes yet."));
             return;
         }
 
-        appState.recentPastes.forEach(function (fp) {
-            var item = document.createElement("div");
-            item.className = "paste-thumb-item";
-            item.title = fp;
+        existing.forEach(function (fp) {
+            var item = makeEl("div", "paste-thumb-item");
+            item.title = fp + "\nClick to place it again";
 
             var img = document.createElement("img");
-            img.src = "file:///" + fp.replace(/\\/g, "/");
+            img.src = fileUrl(fp);
             item.appendChild(img);
 
-            // Re-paste on click
             item.addEventListener("click", function () {
-                var guideFlag = !!appState.settings.guideLayer;
-                var fitFlag = !!appState.settings.autoFit;
-                var scriptCall = "importPastedImage(" + JSON.stringify(fp.replace(/\\/g, "/")) + ", " + guideFlag + ", " + fitFlag + ")";
-                cs.evalScript(scriptCall, function () {
-                    setStatus("Re-imported: " + path.basename(fp), 2000);
+                importPastedFile(fp).then(function (r) {
+                    setStatus((r && r.ok) ? r.msg + " (" + path.basename(fp) + ")" : "Error: " + ((r && r.msg) || "could not re-import"), 3000);
                 });
             });
 
@@ -677,12 +1086,42 @@
         });
     }
 
-    el.quickPasteBtn.addEventListener("click", handleQuickPaste);
+    el.quickPasteBtn.addEventListener("click", function () { handleQuickPaste(); });
+
+    // Ctrl+V (Cmd+V) anywhere in the panel except while typing.
+    document.addEventListener("keydown", function (e) {
+        var isPaste = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.keyCode === 86 || e.key === "v" || e.key === "V");
+        if (!isPaste || isEditableTarget(e.target) || isModalOpen()) return;
+        e.preventDefault();
+        handleQuickPaste();
+    });
+
+    function registerPasteShortcut() {
+        // Ask the host to hand Ctrl/Cmd+V to the panel while it has focus.
+        var keys = process.platform === "darwin"
+            ? [{ keyCode: 9, metaKey: true }]
+            : [{ keyCode: 86, ctrlKey: true }];
+        try { cs.registerKeyEventsInterest(JSON.stringify(keys)); } catch (e) {}
+    }
 
     el.btnClearPastesHistory.addEventListener("click", function () {
         appState.recentPastes = [];
+        writeJson(RECENT_PASTES_FILE, []);
         renderRecentPastes();
     });
+
+    if (el.btnOpenPasteFolder) {
+        el.btnOpenPasteFolder.addEventListener("click", function () {
+            currentProjectFolder().then(function (projectFolder) {
+                var dir = pasteFolderFor(projectFolder);
+                if (!fs.existsSync(dir)) {
+                    setStatus("Nothing pasted into " + dir + " yet", 3000);
+                    return;
+                }
+                openInOS(dir);
+            });
+        });
+    }
 
     el.optGuideLayer.addEventListener("change", function () {
         appState.settings.guideLayer = el.optGuideLayer.checked;
@@ -693,39 +1132,41 @@
         saveGeneralSettings();
     });
     el.optTargetFolder.addEventListener("input", function () {
-        appState.settings.targetFolder = el.optTargetFolder.value.trim() || "Pasted Images";
+        appState.settings.targetFolder = sanitizeRelativePath(el.optTargetFolder.value, DEFAULT_PASTE_FOLDER);
         saveGeneralSettings();
+    });
+    el.optTargetFolder.addEventListener("change", function () {
+        el.optTargetFolder.value = appState.settings.targetFolder;
     });
 
     // ============================================================
     // WATCH BINS ENGINE (Folder-to-Bin Media Sync)
     // ============================================================
-    function binsFileFor(projId) {
-        return path.join(STORAGE_DIR, "bins_" + hashPath(projId) + ".json");
+    function loadBinsForProject() {
+        var data = readJson(binsFileFor(appState.projectId), null);
+        appState.bins = (data && data.bins instanceof Array) ? data.bins : [];
+        el.binCountBadge.textContent = appState.bins.length;
     }
 
-    function loadBinsForProject() {
-        var f = binsFileFor(appState.projectId);
-        if (fs.existsSync(f)) {
-            try {
-                var data = JSON.parse(fs.readFileSync(f, "utf8"));
-                appState.bins = data.bins || [];
-            } catch (e) { appState.bins = []; }
-        } else {
-            appState.bins = [];
-        }
-        el.binCountBadge.textContent = appState.bins.length;
+    /** Written to the project the bins belong to, even if another is open now. */
+    function writeBins(projectId, bins) {
+        if (!projectId) return;
+        writeJson(binsFileFor(projectId), { bins: bins });
+        if (isUnsavedId(projectId)) appState.touchedUnsaved = true;
     }
 
     function saveBinsForProject() {
-        try {
-            fs.writeFileSync(binsFileFor(appState.projectId), JSON.stringify({ bins: appState.bins }, null, 2), "utf8");
-        } catch (e) {}
+        writeBins(appState.projectId, appState.bins);
         el.binCountBadge.textContent = appState.bins.length;
+    }
+
+    function skippedNames(bin) {
+        return Object.keys(bin.skipped || {}).map(function (p) { return path.basename(p); });
     }
 
     function renderBinCards() {
         el.binCardsList.innerHTML = "";
+        el.binCountBadge.textContent = appState.bins.length;
         if (!appState.bins || appState.bins.length === 0) {
             el.binsEmptyHint.style.display = "flex";
             return;
@@ -733,42 +1174,58 @@
 
         el.binsEmptyHint.style.display = "none";
 
-        appState.bins.forEach(function (b, index) {
-            var card = document.createElement("div");
-            card.className = "bin-card";
+        // Built node by node: folder names come from disk and must never be
+        // parsed as HTML in a panel that can run Node.
+        appState.bins.forEach(function (b) {
+            var card = makeEl("div", "bin-card");
 
-            var filters = [];
-            if (b.filterVideo) filters.push("Video");
-            if (b.filterAudio) filters.push("Audio");
-            if (b.filterImage) filters.push("Image");
-            var filterTagsHtml = filters.map(function(t){ return '<span class="chip-tag">' + t + '</span>'; }).join(" ");
+            var top = makeEl("div", "bin-card-top");
+            top.appendChild(makeEl("div", "bin-target-title", "📁 " + (b.binPath || "Root")));
 
-            card.innerHTML =
-                '<div class="bin-card-top">' +
-                    '<div class="bin-target-title">📁 ' + (b.binPath || "Root") + '</div>' +
-                    '<div class="bin-card-actions">' +
-                        '<button class="btn-tool btn-sync-single" data-idx="' + index + '" title="Sync this folder">⚡ Sync</button>' +
-                        '<button class="btn-tool btn-open-os" data-idx="' + index + '" title="Open in Explorer/Finder">📂</button>' +
-                        '<button class="btn-tool btn-danger btn-remove-bin" data-idx="' + index + '" title="Unlink bin">✕</button>' +
-                    '</div>' +
-                '</div>' +
-                '<div class="bin-source-path" title="' + b.folderPath + '">' + b.folderPath + '</div>' +
-                '<div class="bin-card-bottom">' +
-                    '<div class="bin-filters-badges">' + filterTagsHtml + (b.recursive ? ' <span class="chip-tag">Recursive</span>' : '') + '</div>' +
-                    '<div class="bin-sync-status">' + (b.importedCount || 0) + ' items synced</div>' +
-                '</div>';
+            var actions = makeEl("div", "bin-card-actions");
+            var syncBtn = makeEl("button", "btn-tool btn-sync-single", "⚡ Sync");
+            syncBtn.title = "Sync this folder now (also retries skipped files)";
+            var openBtn = makeEl("button", "btn-tool btn-open-os", "📂");
+            openBtn.title = "Open in Explorer/Finder";
+            var removeBtn = makeEl("button", "btn-tool btn-danger btn-remove-bin", "✕");
+            removeBtn.title = "Unlink bin";
+            actions.appendChild(syncBtn);
+            actions.appendChild(openBtn);
+            actions.appendChild(removeBtn);
+            top.appendChild(actions);
+            card.appendChild(top);
 
-            card.querySelector(".btn-sync-single").addEventListener("click", function () {
-                syncSingleBin(index);
+            var source = makeEl("div", "bin-source-path", b.folderPath);
+            source.title = b.folderPath;
+            card.appendChild(source);
+
+            var bottom = makeEl("div", "bin-card-bottom");
+            var badges = makeEl("div", "bin-filters-badges");
+            if (b.filterVideo) badges.appendChild(makeEl("span", "chip-tag", "Video"));
+            if (b.filterAudio) badges.appendChild(makeEl("span", "chip-tag", "Audio"));
+            if (b.filterImage) badges.appendChild(makeEl("span", "chip-tag", "Image"));
+            if (b.recursive) badges.appendChild(makeEl("span", "chip-tag", "Recursive"));
+            bottom.appendChild(badges);
+
+            var status = makeEl("div", "bin-sync-status", (b.importedCount || 0) + " items synced");
+            var skipped = skippedNames(b);
+            if (skipped.length) {
+                var skippedTag = makeEl("span", "bin-skipped", " · " + skipped.length + " skipped");
+                skippedTag.title = "Could not be imported (unsupported or damaged):\n" + skipped.slice(0, 15).join("\n") +
+                    (skipped.length > 15 ? "\n..." : "") + "\nFix or replace them, then click Sync to retry.";
+                status.appendChild(skippedTag);
+            }
+            bottom.appendChild(status);
+            card.appendChild(bottom);
+
+            syncBtn.addEventListener("click", function () {
+                runExclusive(function () { return syncBin(b, { retrySkipped: true }); });
             });
-
-            card.querySelector(".btn-open-os").addEventListener("click", function () {
-                openInOS(b.folderPath);
-            });
-
-            card.querySelector(".btn-remove-bin").addEventListener("click", function () {
-                if (confirm("Unlink this folder from Watch Bins?")) {
-                    appState.bins.splice(index, 1);
+            openBtn.addEventListener("click", function () { openInOS(b.folderPath); });
+            removeBtn.addEventListener("click", function () {
+                if (confirm("Unlink this folder from Watch Bins?\nFiles already imported stay in the project.")) {
+                    var at = appState.bins.indexOf(b);
+                    if (at !== -1) appState.bins.splice(at, 1);
                     saveBinsForProject();
                     renderBinCards();
                 }
@@ -778,140 +1235,225 @@
         });
     }
 
-    function openInOS(folderPath) {
-        if (!folderPath || !fs.existsSync(folderPath)) {
-            alert("Folder path does not exist on disk:\n" + folderPath);
-            return;
-        }
-        try {
-            if (process.platform === "win32") {
-                execSync('explorer.exe "' + folderPath.replace(/\//g, "\\") + '"');
-            } else if (process.platform === "darwin") {
-                execSync('open "' + folderPath + '"');
-            }
-        } catch (e) {}
+    function readdirP(dir) {
+        return new Promise(function (resolve) {
+            fs.readdir(dir, function (err, names) { resolve(err ? [] : names); });
+        });
     }
 
-    function scanFolderForFiles(dirPath, recursive, filterV, filterA, filterI) {
-        var allowedExts = {};
-        if (filterV) EXT_GROUPS.video.forEach(function (e) { allowedExts[e] = true; });
-        if (filterA) EXT_GROUPS.audio.forEach(function (e) { allowedExts[e] = true; });
-        if (filterI) EXT_GROUPS.image.forEach(function (e) { allowedExts[e] = true; });
+    function lstatP(p) {
+        return new Promise(function (resolve) {
+            fs.lstat(p, function (err, st) { resolve(err ? null : st); });
+        });
+    }
 
+    function statP(p) {
+        return new Promise(function (resolve) {
+            fs.stat(p, function (err, st) { resolve(err ? null : st); });
+        });
+    }
+
+    /** Dotfiles include macOS "._clip.mp4" resource forks, which are not media. */
+    function isJunkName(name) {
+        return name.charAt(0) === "." || name.indexOf("~$") === 0;
+    }
+
+    function allowedExtensions(bin) {
+        var allowed = {};
+        if (bin.filterVideo) EXT_GROUPS.video.forEach(function (e) { allowed[e] = true; });
+        if (bin.filterAudio) EXT_GROUPS.audio.forEach(function (e) { allowed[e] = true; });
+        if (bin.filterImage) EXT_GROUPS.image.forEach(function (e) { allowed[e] = true; });
+        return allowed;
+    }
+
+    /**
+     * Every matching media file under the bin's folder, as
+     * { path, size, mtimeMs }. Asynchronous, so a big library does not freeze
+     * the panel; linked folders are not followed, so a loop cannot trap it.
+     */
+    function scanFolder(bin) {
+        var allowed = allowedExtensions(bin);
         var results = [];
 
-        function walk(current) {
-            try {
-                var entries = fs.readdirSync(current, { withFileTypes: true });
-                for (var i = 0; i < entries.length; i++) {
-                    var entry = entries[i];
-                    var full = path.join(current, entry.name);
-                    if (entry.isDirectory()) {
-                        if (recursive && !WIN_HIDDEN_FOLDERS[entry.name.toLowerCase()]) {
-                            walk(full);
-                        }
-                    } else if (entry.isFile()) {
-                        var ext = path.extname(entry.name).toLowerCase();
-                        if (allowedExts[ext]) {
-                            results.push(full);
-                        }
-                    }
-                }
-            } catch (e) {}
+        function walk(dir) {
+            return readdirP(dir).then(function (names) {
+                return Promise.all(names.map(function (name) {
+                    if (isJunkName(name)) return null;
+                    var full = path.join(dir, name);
+                    return lstatP(full).then(function (lst) {
+                        if (!lst) return null;
+                        var statPromise = lst.isSymbolicLink() ? statP(full) : Promise.resolve(lst);
+                        return statPromise.then(function (st) {
+                            if (!st) return null;
+                            if (st.isDirectory()) {
+                                if (bin.recursive && !lst.isSymbolicLink() && !WIN_HIDDEN_FOLDERS[name.toLowerCase()]) return walk(full);
+                                return null;
+                            }
+                            if (st.isFile() && allowed[path.extname(name).toLowerCase()]) {
+                                results.push({ path: full, size: st.size, mtimeMs: st.mtime.getTime() });
+                            }
+                            return null;
+                        });
+                    });
+                }));
+            });
         }
 
-        walk(dirPath);
-        return results;
+        return walk(bin.folderPath).then(function () {
+            results.sort(function (a, b) { return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0); });
+            return results;
+        });
     }
 
-    function syncSingleBin(index, callback) {
-        var bin = appState.bins[index];
-        if (!bin) { if (callback) callback(); return; }
+    /** Sync jobs run one at a time, so two of them never import the same file twice. */
+    function runExclusive(task) {
+        appState.syncPending++;
+        var run = syncChain.then(task);
+        syncChain = run.then(function () {}, function () {});
+        return run.then(function (value) {
+            appState.syncPending--;
+            return value;
+        }, function (err) {
+            appState.syncPending--;
+            setStatus("Sync error: " + (err && err.message ? err.message : err), 4000);
+            return null;
+        });
+    }
 
+    /**
+     * Import what is new in one watch folder.
+     * opts.quiet         only report when something was imported or failed
+     * opts.requireStable only import files whose size held since the last scan
+     * opts.retrySkipped  try files that failed before, even if unchanged
+     */
+    function syncBin(bin, opts) {
+        opts = opts || {};
+        var outcome = { imported: 0, failed: 0, waiting: 0 };
+        var projectId = appState.projectId;
+        var binsRef = appState.bins;
+        var label = bin.binPath || "Root";
+
+        if (!hasOpenProject()) return Promise.resolve(outcome);
         if (!fs.existsSync(bin.folderPath)) {
-            setStatus("Folder not found: " + bin.folderPath, 3000);
-            if (callback) callback();
-            return;
+            if (!opts.quiet) setStatus("Folder not found: " + bin.folderPath, 3000);
+            return Promise.resolve(outcome);
         }
-
         if (!bin.history) bin.history = {};
+        if (!bin.skipped) bin.skipped = {};
 
-        var allFiles = scanFolderForFiles(bin.folderPath, bin.recursive, bin.filterVideo, bin.filterAudio, bin.filterImage);
-        var newFiles = [];
+        return scanFolder(bin).then(function (files) {
+            if (projectId !== appState.projectId) return outcome;
 
-        allFiles.forEach(function (fp) {
-            var norm = fp.replace(/\\/g, "/");
-            if (!bin.history[norm]) {
-                newFiles.push(norm);
+            var batch = [];
+            files.forEach(function (file) {
+                var norm = normPath(file.path);
+                if (bin.history[norm] || file.size === 0) return;
+                var signature = file.size + ":" + Math.round(file.mtimeMs);
+                if (!opts.retrySkipped && bin.skipped[norm] === signature) return;
+                if (opts.requireStable && stableSizes[norm] !== file.size) {
+                    stableSizes[norm] = file.size;
+                    outcome.waiting++;
+                    return;
+                }
+                batch.push({ norm: norm, signature: signature });
+            });
+
+            if (batch.length === 0) {
+                if (!opts.quiet) setStatus(label + ": no new files", 2000);
+                return outcome;
             }
-        });
+            if (!opts.quiet) setStatus("Importing " + batch.length + " new item(s) into " + label + "...");
 
-        if (newFiles.length === 0) {
-            setStatus("Bin " + bin.binPath + ": No new files", 2000);
-            if (callback) callback();
+            var paths = batch.map(function (item) { return item.norm; });
+            var script = "importFilesToBin(" + JSON.stringify(bin.binPath) + ", " +
+                JSON.stringify(JSON.stringify(paths)) + ", " + JSON.stringify(projectId) + ")";
+
+            return evalScriptP(script).then(function (r) {
+                if (!r || !r.ok) {
+                    if (!(r && r.projectChanged)) {
+                        setStatus("Sync failed for " + label + ": " + ((r && r.msg) || "no reply from the host"), 4000);
+                    }
+                    return outcome;
+                }
+
+                var failedSet = {};
+                (r.failedFiles || []).forEach(function (p) { failedSet[normPath(p)] = true; });
+                batch.forEach(function (item) {
+                    delete stableSizes[item.norm];
+                    if (failedSet[item.norm]) {
+                        // Remembered with its size and date: tried again only
+                        // once the file changes, or on a manual Sync.
+                        bin.skipped[item.norm] = item.signature;
+                        outcome.failed++;
+                    } else {
+                        bin.history[item.norm] = true;
+                        delete bin.skipped[item.norm];
+                        outcome.imported++;
+                    }
+                });
+                bin.importedCount = Object.keys(bin.history).length;
+                writeBins(projectId, binsRef);
+                if (projectId === appState.projectId) renderBinCards();
+
+                if (outcome.imported || outcome.failed || !opts.quiet) {
+                    var msg = "Synced " + outcome.imported + " item(s) into " + label;
+                    if (outcome.failed) msg += ", " + outcome.failed + " could not be imported";
+                    setStatus(msg, 3000);
+                }
+                return outcome;
+            });
+        });
+    }
+
+    function syncBins(bins, opts) {
+        var total = { imported: 0, failed: 0, waiting: 0 };
+        return bins.reduce(function (chain, bin) {
+            return chain.then(function () {
+                return syncBin(bin, opts).then(function (o) {
+                    total.imported += o.imported;
+                    total.failed += o.failed;
+                    total.waiting += o.waiting;
+                });
+            });
+        }, Promise.resolve()).then(function () { return total; });
+    }
+
+    el.btnSyncAll.addEventListener("click", function () {
+        if (!appState.bins.length) {
+            setStatus("No watch bins to sync yet", 2000);
             return;
         }
+        if (!hasOpenProject()) {
+            setStatus("Open a project first", 2000);
+            return;
+        }
+        var bins = appState.bins.slice();
+        runExclusive(function () {
+            return syncBins(bins, { retrySkipped: true, quiet: true });
+        }).then(function (total) {
+            if (!total) return;
+            var msg = "Sync All complete: " + total.imported + " imported";
+            if (total.failed) msg += ", " + total.failed + " could not be imported";
+            setStatus(msg, 3000);
+        });
+    });
 
-        setStatus("Importing " + newFiles.length + " new items into " + bin.binPath + "...");
-
-        var scriptCall = "importFilesToBin(" + JSON.stringify(bin.binPath) + ", " + JSON.stringify(JSON.stringify(newFiles)) + ")";
-        cs.evalScript(scriptCall, function (res) {
-            try {
-                var r = (typeof res === "string") ? JSON.parse(res) : res;
-                if (r && r.ok) {
-                    newFiles.forEach(function (fp) { bin.history[fp] = true; });
-                    bin.importedCount = Object.keys(bin.history).length;
-                    saveBinsForProject();
-                    renderBinCards();
-                    setStatus("Synced " + (r.imported || newFiles.length) + " items to " + bin.binPath, 3000);
-                }
-            } catch (e) {}
-            if (callback) callback();
+    function autoSyncTick() {
+        if (appState.syncPending > 0 || !appState.bins.length || !hasOpenProject()) return;
+        el.autoSyncDot.className = "status-dot syncing";
+        var bins = appState.bins.slice();
+        runExclusive(function () {
+            return syncBins(bins, { quiet: true, requireStable: true });
+        }).then(function () {
+            el.autoSyncDot.className = appState.autoSync ? "status-dot active" : "status-dot";
         });
     }
 
-    function syncAllBins() {
-        if (!appState.bins || appState.bins.length === 0) return;
-        var idx = 0;
-        function next() {
-            if (idx < appState.bins.length) {
-                syncSingleBin(idx, function () {
-                    idx++;
-                    next();
-                });
-            } else {
-                setStatus("Sync All complete!", 3000);
-            }
-        }
-        next();
-    }
-
-    el.btnSyncAll.addEventListener("click", syncAllBins);
-
-    // Auto-Sync background loop
     function updateAutoSyncState() {
         if (appState.autoSync) {
             el.autoSyncDot.className = "status-dot active";
             if (!appState.autoSyncTimer) {
-                appState.autoSyncTimer = setInterval(function () {
-                    if (!appState.autoSyncBusy && appState.bins.length > 0) {
-                        appState.autoSyncBusy = true;
-                        el.autoSyncDot.className = "status-dot syncing";
-                        var idx = 0;
-                        function step() {
-                            if (idx < appState.bins.length) {
-                                syncSingleBin(idx, function () {
-                                    idx++;
-                                    step();
-                                });
-                            } else {
-                                appState.autoSyncBusy = false;
-                                el.autoSyncDot.className = "status-dot active";
-                            }
-                        }
-                        step();
-                    }
-                }, 6000);
+                appState.autoSyncTimer = setInterval(autoSyncTick, AUTO_SYNC_INTERVAL_MS);
             }
         } else {
             el.autoSyncDot.className = "status-dot";
@@ -932,6 +1474,10 @@
     // Add / Edit Watch Bin Modal
     // ============================================================
     el.btnAddBin.addEventListener("click", function () {
+        if (!hasOpenProject()) {
+            alert("Open or create a project first. Watch bins belong to a project.");
+            return;
+        }
         el.modalFolderInput.value = "";
         el.modalBinNameInput.value = "";
         el.filterVideo.checked = true;
@@ -950,14 +1496,27 @@
 
     el.btnModalSaveBin.addEventListener("click", function () {
         var folderPath = el.modalFolderInput.value.trim();
-        var binPath = el.modalBinNameInput.value.trim() || path.basename(folderPath) || "Media";
-
-        if (!folderPath || !fs.existsSync(folderPath)) {
+        var isFolder = false;
+        try { isFolder = !!folderPath && fs.statSync(folderPath).isDirectory(); } catch (e) { isFolder = false; }
+        if (!isFolder) {
             alert("Please select a valid folder on your computer.");
             return;
         }
+        if (!el.filterVideo.checked && !el.filterAudio.checked && !el.filterImage.checked) {
+            alert("Turn on at least one media filter (Video, Audio or Image).");
+            return;
+        }
 
-        appState.bins.push({
+        var binPath = sanitizeRelativePath(el.modalBinNameInput.value, sanitizeRelativePath(path.basename(folderPath), "Media"));
+        var duplicate = appState.bins.some(function (b) {
+            return samePath(b.folderPath, folderPath) && b.binPath === binPath;
+        });
+        if (duplicate) {
+            alert("This folder is already linked to the '" + binPath + "' bin.");
+            return;
+        }
+
+        var bin = {
             folderPath: folderPath,
             binPath: binPath,
             filterVideo: el.filterVideo.checked,
@@ -965,13 +1524,15 @@
             filterImage: el.filterImage.checked,
             recursive: el.modalRecursiveCheck.checked,
             history: {},
+            skipped: {},
             importedCount: 0
-        });
+        };
+        appState.bins.push(bin);
 
         saveBinsForProject();
         renderBinCards();
         closeBinModal();
-        syncSingleBin(appState.bins.length - 1);
+        runExclusive(function () { return syncBin(bin, {}); });
     });
 
     // ============================================================
@@ -979,10 +1540,11 @@
     // ============================================================
     function openFolderBrowser(initialPath, callback) {
         fb.callback = callback;
-        fb.selectedPath = initialPath || (process.platform === "win32" ? "C:\\" : os.homedir());
+        var start = initialPath && fs.existsSync(initialPath) ? initialPath : (process.platform === "win32" ? "C:\\" : os.homedir());
+        fb.selectedPath = start;
         el.fbOverlay.classList.remove("hidden");
         loadDrives();
-        navigateFB(fb.selectedPath);
+        navigateFB(start);
     }
 
     function closeFolderBrowser() {
@@ -990,52 +1552,68 @@
         fb.callback = null;
     }
 
+    function addDriveButton(label, target) {
+        var btn = makeEl("button", "fb-drive-btn", label);
+        btn.title = target;
+        btn.addEventListener("click", function () { navigateFB(target); });
+        el.fbDrivesBar.appendChild(btn);
+    }
+
     function loadDrives() {
         el.fbDrivesBar.innerHTML = "";
         if (process.platform === "win32") {
-            var letters = "CDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-            letters.forEach(function (ltr) {
+            "CDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(function (ltr) {
                 var p = ltr + ":\\";
-                if (fs.existsSync(p)) {
-                    var btn = document.createElement("button");
-                    btn.className = "fb-drive-btn";
-                    btn.textContent = ltr + ":";
-                    btn.addEventListener("click", function () { navigateFB(p); });
-                    el.fbDrivesBar.appendChild(btn);
-                }
+                if (fs.existsSync(p)) addDriveButton(ltr + ":", p);
             });
+        } else {
+            addDriveButton("Home", os.homedir());
+            addDriveButton("Desktop", path.join(os.homedir(), "Desktop"));
+            if (fs.existsSync("/Volumes")) addDriveButton("Volumes", "/Volumes");
         }
+    }
+
+    /** Visible subfolder names, sorted. Node 10.10+ answers without a stat per entry. */
+    function listSubfolders(dir) {
+        var names = [];
+        try {
+            var entries = fs.readdirSync(dir, { withFileTypes: true });
+            names = entries.map(function (entry) {
+                if (typeof entry === "string") {
+                    // Node 8 ignores withFileTypes and returns plain names.
+                    try { return fs.statSync(path.join(dir, entry)).isDirectory() ? entry : null; } catch (e) { return null; }
+                }
+                return entry.isDirectory() ? entry.name : null;
+            });
+        } catch (e) {
+            names = [];
+        }
+        return names.filter(function (name) {
+            return name && !isJunkName(name) && !WIN_HIDDEN_FOLDERS[name.toLowerCase()];
+        }).sort(function (a, b) {
+            return a.toLowerCase() < b.toLowerCase() ? -1 : (a.toLowerCase() > b.toLowerCase() ? 1 : 0);
+        });
     }
 
     function navigateFB(targetPath) {
         fb.currentPath = targetPath;
+        fb.selectedPath = targetPath;
         el.fbPathInput.value = targetPath;
         el.fbSelectedHint.textContent = targetPath;
         el.fbList.innerHTML = "";
 
-        try {
-            var items = fs.readdirSync(targetPath, { withFileTypes: true });
-            items.forEach(function (it) {
-                if (it.isDirectory() && !WIN_HIDDEN_FOLDERS[it.name.toLowerCase()]) {
-                    var div = document.createElement("div");
-                    div.className = "fb-item";
-                    div.innerHTML = "📁 " + it.name;
-
-                    div.addEventListener("click", function () {
-                        el.fbList.querySelectorAll(".fb-item").forEach(function (e) { e.classList.remove("selected"); });
-                        div.classList.add("selected");
-                        fb.selectedPath = path.join(targetPath, it.name);
-                        el.fbSelectedHint.textContent = fb.selectedPath;
-                    });
-
-                    div.addEventListener("dblclick", function () {
-                        navigateFB(path.join(targetPath, it.name));
-                    });
-
-                    el.fbList.appendChild(div);
-                }
+        listSubfolders(targetPath).forEach(function (name) {
+            var full = path.join(targetPath, name);
+            var div = makeEl("div", "fb-item", "📁 " + name);
+            div.addEventListener("click", function () {
+                el.fbList.querySelectorAll(".fb-item").forEach(function (node) { node.classList.remove("selected"); });
+                div.classList.add("selected");
+                fb.selectedPath = full;
+                el.fbSelectedHint.textContent = full;
             });
-        } catch (e) {}
+            div.addEventListener("dblclick", function () { navigateFB(full); });
+            el.fbList.appendChild(div);
+        });
     }
 
     el.fbUpBtn.addEventListener("click", function () {
@@ -1046,6 +1624,13 @@
     el.fbGoBtn.addEventListener("click", function () {
         var p = el.fbPathInput.value.trim();
         if (fs.existsSync(p)) navigateFB(p);
+    });
+
+    el.fbPathInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+            var p = el.fbPathInput.value.trim();
+            if (fs.existsSync(p)) navigateFB(p);
+        }
     });
 
     el.fbCloseBtn.addEventListener("click", closeFolderBrowser);
@@ -1072,13 +1657,27 @@
         setStatus("Refreshed project info", 1500);
     });
 
+    if (el.devLink) {
+        el.devLink.addEventListener("click", function (e) {
+            e.preventDefault();
+            openExternal(el.devLink.getAttribute("href"));
+        });
+    }
+
+    window.addEventListener("beforeunload", function () {
+        if (appState.notesSaveTimer) saveCurrentNote();
+    });
+
     // ============================================================
     // Initialization
     // ============================================================
+    if (el.brandTag) el.brandTag.textContent = "LazyKick v" + PANEL_VERSION.replace(/\.0$/, "");
     loadGeneralSettings();
-    updateAutoSyncState();
+    loadRecentPastes();
     renderRecentPastes();
+    updateAutoSyncState();
+    registerPasteShortcut();
     pollProject();
-    setInterval(pollProject, 2500);
+    setInterval(pollProject, PROJECT_POLL_MS);
 
 })();

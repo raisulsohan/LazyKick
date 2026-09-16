@@ -279,6 +279,19 @@ body, html {
     font-weight: 600;
 }
 
+.sub-tab-rename {
+    background: var(--bg-input);
+    border: 1px solid var(--accent-blue);
+    color: var(--text-primary);
+    padding: 2px 6px;
+    font-size: 11px;
+    border-radius: 3px;
+    outline: none;
+    width: 110px;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
 .notes-actions {
     display: flex;
     align-items: center;
@@ -567,6 +580,12 @@ input:checked + .slider:before { transform: translateX(12px); }
 
 .bin-sync-status {
     color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.bin-skipped {
+    color: var(--warning-orange);
+    cursor: help;
 }
 
 /* ================= TAB 3: TOOLS ================= */
@@ -631,6 +650,10 @@ input:checked + .slider:before { transform: translateX(12px); }
 }
 
 .setting-row-input input {
+    flex: 1;
+    min-width: 0;
+    user-select: text;
+    -webkit-user-select: text;
     background: var(--bg-input);
     border: 1px solid var(--border-color);
     border-radius: 3px;
@@ -793,6 +816,8 @@ input:checked + .slider:before { transform: translateX(12px); }
 }
 
 .form-group input[type="text"] {
+    user-select: text;
+    -webkit-user-select: text;
     background: var(--bg-input);
     border: 1px solid var(--border-color);
     border-radius: 3px;
