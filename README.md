@@ -22,13 +22,14 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.2** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ---
 
 ## 📑 Contents
 
-- [What's New in 1.1](#-whats-new-in-11)
+- [What's New in 1.2](#-whats-new-in-12)
+- [What's New in 1.1](#whats-new-in-11)
 - [Overview](#-overview)
 - [Features](#-features)
 - [Installation](#-installation)
@@ -47,13 +48,27 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.1** · F
 
 ---
 
-## 🆕 What's New in 1.1
+## 🆕 What's New in 1.2
+
+**Watch Bins**
+- **No more duplicates when you link a folder whose files are already in the project** (imported by hand, or into another bin). LazyKick checks the whole project first, leaves those files where they are and counts them as synced. The status bar says how many were already there.
+- **✎ Edit a bin**: change its folder, bin name, filters or subfolder scan without unlinking and re-adding it.
+- **↺ Reset a bin**: sync it again from scratch. Files you deleted from the project come back; files still in it are not imported twice.
+- **Browse…** reopens at the last folder you picked, also after a restart.
+- Fixed: a Sync waiting in the queue could import into a project you had just switched to.
+
+**LazyPaste**
+- QuickPaste is now **LazyPaste**, matching the rest of LazySuite. Your settings and Recent Pastes carry over.
+
+LazyKick now covers everything from the older **QuickPaste** and **QuickBinSync** panels.
+
+## What's New in 1.1
 
 **Install & compatibility**
 - **Signed `.zxp` release with one-click installers** for Windows and macOS: no extension manager, no debug mode. Updating keeps your notes and watch bins.
 - **Manifest schema 9.0** so older CEP 9 hosts read it too, and the panel code stays within CEP 9's Chromium 61 / Node 8.
 
-**QuickPaste**
+**LazyPaste** (called QuickPaste in 1.1)
 - **Premiere Pro no longer shifts your edit.** v1.0 used an *insert* edit that pushed later clips to the right. 1.1 places the still with an overwrite edit into **empty space only**: on the lowest unlocked video track that is free at the playhead for the still's whole duration. If no track is free, the image goes into the bin and the panel tells you why.
 - **Keeps transparency**: a PNG on the clipboard is saved as-is before falling back to the plain bitmap copy.
 - **Copied image files work**: copy a `.png/.jpg/.psd/...` in Explorer or Finder and paste it.
@@ -94,7 +109,7 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.1** · F
 
 | | Feature | In one sentence |
 | :-: | :--- | :--- |
-| ⚡ | **QuickPaste** | Screenshot or copy an image → one click (or Ctrl+V) → it's saved next to your project and sitting on your timeline at the playhead. |
+| ⚡ | **LazyPaste** | Screenshot or copy an image → one click (or Ctrl+V) → it's saved next to your project and sitting on your timeline at the playhead. |
 | 📝 | **Notes & Tasks** | Per-project notes with tabs, checklists and one-click timecode stamps, plus a global scratchpad shared by every project. |
 | 📂 | **Watch Bins** | Link folders like *Downloads*, *SFX* or *Client uploads* to project bins; new media is imported automatically, once, and never while it's still copying. |
 
@@ -104,7 +119,7 @@ The same panel runs in **After Effects** and **Premiere Pro**. Open one project 
 
 ## 🚀 Features
 
-### 1. ⚡ QuickPaste: clipboard to timeline
+### 1. ⚡ LazyPaste: clipboard to timeline
 
 Always available in the panel header.
 
@@ -139,10 +154,12 @@ Always available in the panel header.
 - **Filters:** 🎬 Video, 🎵 Audio, 🖼️ Image; optional **recursive** scan of subfolders.
 - **⚡ Sync** one bin, **Sync All**, or **Auto-Sync** in the background (every 6 seconds).
 - **Imports each file once.** Every imported path is remembered per project.
+- **Never duplicates what the project already has:** a file already in the project, in any bin, is left where it is and counts as synced. Linking a folder you had imported by hand is safe.
+- **✎ Edit** a bin's folder, name, filters or subfolder scan in place. **↺ Reset** syncs it again from scratch and brings back only the files that are no longer in the project.
 - **Waits for copies to finish:** Auto-Sync only imports a file after its size stayed the same between two scans.
 - **Skipped files are visible:** anything the app refuses (unsupported or damaged) is marked *skipped* on the card, with the file names on hover. It is retried automatically once the file changes, or immediately when you click **Sync**.
 - **Safe with project switches:** files are never imported into a project other than the one they were scanned for.
-- **Built-in folder browser** (drive letters on Windows; Home, Desktop and Volumes on macOS) and a 📂 button to open the folder in Explorer/Finder.
+- **Built-in folder browser** (drive letters on Windows; Home, Desktop and Volumes on macOS) that reopens at the last folder you picked, and a 📂 button to open the folder in Explorer/Finder.
 
 ---
 
@@ -150,7 +167,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.1.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.2.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -216,12 +233,13 @@ Don't keep a source copy and the signed install side by side: they share one ext
 3. **Save Watch Bin**: the first sync runs immediately.
 4. Turn on **Auto-Sync** to keep importing new files as they appear.
 5. Seeing **· N skipped**? Hover it to see which files the app refused; fix or replace them and click **⚡ Sync**.
+6. Need another folder or bin name? Click **✎** on the card. Deleted some imported files from the project and want them back? Click **↺** (Reset).
 
 ### Keyboard shortcuts
 
 | Shortcut | Where | Action |
 | :--- | :--- | :--- |
-| `Ctrl+V` / `Cmd+V` | Panel focused, outside text fields | QuickPaste |
+| `Ctrl+V` / `Cmd+V` | Panel focused, outside text fields | LazyPaste |
 | `Ctrl+V` / `Cmd+V` | Notes editor | Paste text (plain) |
 | Double-click | Note tab | Rename (Enter saves, Esc cancels) |
 | `Enter` | Folder browser path box | Go to that path |
@@ -254,7 +272,7 @@ Don't keep a source copy and the signed install side by side: they share one ext
 
 Whether a file actually imports is up to the host app and its version. Anything it refuses shows up as *skipped*. Ignored: hidden files (starting with `.`, including macOS `._` forks), Office lock files (`~$`), empty files, and camera raw (`.cr2`, `.nef`, `.arw`...) because After Effects opens a dialog for each.
 
-**QuickPaste copied files:** `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.tif` `.tiff` `.webp` `.psd`.
+**LazyPaste copied files:** `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.tif` `.tiff` `.webp` `.psd`.
 
 ---
 
@@ -272,7 +290,7 @@ Everything stays on your computer, in:
 | `proj_<hash>.json` | Note tabs of one project (key: host + project path) |
 | `bins_proj_<hash>.json` | Watch bins of one project, with imported and skipped file lists |
 | `global_scratchpad.txt` | The 🌐 Global tab |
-| `lazykick_settings.json` | Paste options and Auto-Sync |
+| `lazykick_settings.json` | Paste options, Auto-Sync and the last folder picked in Browse |
 | `recent_pastes.json` | Recent Pastes gallery |
 | `paste_index.json` | Checksums of pasted images, for duplicate detection |
 
@@ -313,7 +331,7 @@ LazyKick is a standard **CEP extension**: an HTML/JS panel (Chromium with Node.j
 | `getProjectFolder()` | Folder of the saved project, or `NO_PROJECT` (plain string) |
 | `getCurrentTimecode()` | `timecode` at the playhead (AE: project display format + comp start; PPro: sequence format) |
 | `importPastedImage(path, guide, fit, binName)` | Imports or reuses the item, places it; `placedOnTimeline`, `reused`, `track`, `binPath` |
-| `importFilesToBin(binPath, filesJson, expectedProjectId)` | `importedFiles`, `failedFiles`; `projectChanged: true` if another project is open |
+| `importFilesToBin(binPath, filesJson, expectedProjectId)` | `importedFiles`, `failedFiles`, and `existingFiles` (already in the project, left alone); `projectChanged: true` if another project is open |
 
 **Why some choices were made:**
 - **Premiere placement** uses `Track.overwriteClip` only into verified empty space (`choosePremiereTrack`). `insertClip` would ripple later clips, including on sync-locked tracks.
@@ -330,7 +348,7 @@ LazyKick/
 │   └── manifest.xml              # Extension ID, hosts (AEFT, PPRO), panel size, Node flags
 ├── client/
 │   ├── index.html                # Panel markup
-│   ├── main.js                   # Panel controller (notes, QuickPaste, watch bins)
+│   ├── main.js                   # Panel controller (notes, LazyPaste, watch bins)
 │   └── style.css                 # Adobe-style dark theme
 ├── host/
 │   └── host.jsx                  # ExtendScript engine for After Effects & Premiere Pro
@@ -341,6 +359,7 @@ LazyKick/
 │   ├── check-extendscript.js     # ES3 syntax + lint check of host.jsx (Windows Script Host)
 │   ├── test-host.js              # host.jsx against mocked AE & Premiere APIs (Windows Script Host)
 │   ├── test-panel.mjs            # main.js against a fake DOM, fake host and real files (Node)
+│   ├── ae-smoke-host.jsx         # host.jsx inside the real After Effects
 │   ├── get-zxpsigncmd.mjs        # Downloads Adobe's ZXPSignCmd into tools/vendor/
 │   ├── package-zxp.mjs           # Signs the panel as .zxp and builds the release zip
 │   └── zip.mjs                   # Small ZIP writer (forward slashes, executable .command files)
@@ -364,10 +383,16 @@ npm test
 Runs, in order (Windows, as two steps use Windows Script Host):
 
 1. `tools/check-extendscript.js`: `host.jsx` compiles as ES3 and avoids names and constructs real ExtendScript rejects.
-2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, timecode formatting, partial import failures and the project-changed guard.
-3. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting and the CEP 9 syntax guard.
+2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, media already in the project, timecode formatting, partial import failures and the project-changed guard.
+3. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting and the CEP 9 syntax guard.
 
-The mocks follow the documented host APIs, but they are not the real apps. **Try a release in After Effects and Premiere Pro before publishing it.**
+The mocks follow the documented host APIs, but they are not the real apps. `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close After Effects first; results in `%TEMP%\lazykick-ae-smoke-results.txt`):
+
+```bat
+"C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\AfterFX.com" -r "<repo>\tools\ae-smoke-host.jsx"
+```
+
+Premiere Pro has no such command line, so **try a release in Premiere Pro by hand before publishing it.**
 
 ### Building a release
 
@@ -426,6 +451,8 @@ It's a **guide layer** by default: visible while you work, excluded from renders
 - Check the filter (Video/Audio/Image) for that file type is on, and the extension is in the [supported list](#-supported-file-types).
 - With Auto-Sync, a new file is imported on the scan **after** its size stopped changing, so allow ~12 seconds.
 - **· N skipped** on the card means the host app refused those files. Hover for names, then fix or convert them and click **⚡ Sync**.
+- A file that is **already in the project** (in any bin) is not imported again; it counts as synced. The status bar says *N already in the project*.
+- You deleted imported files from the project and want them back: click **↺** (Reset) on the card.
 - A project must be open: watch bins belong to a project.
 </details>
 
@@ -445,7 +472,6 @@ Notes are keyed by app and project file, so an `.aep` and a `.prproj` have separ
 
 ## 🗺️ Roadmap Ideas
 
-- Edit an existing watch bin (path, filters) instead of unlink + re-add.
 - Shrink-to-fit for Premiere Pro stills.
 - Timecode stamps you can click to jump the playhead.
 - Search across all project notes.

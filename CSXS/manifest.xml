@@ -7,12 +7,12 @@
 -->
 <ExtensionManifest Version="9.0"
     ExtensionBundleId="com.sohan.LazyKick"
-    ExtensionBundleVersion="1.1.0"
+    ExtensionBundleVersion="1.2.0"
     ExtensionBundleName="LazyKick"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 
     <ExtensionList>
-        <Extension Id="com.sohan.LazyKick.panel" Version="1.1.0" />
+        <Extension Id="com.sohan.LazyKick.panel" Version="1.2.0" />
     </ExtensionList>
 
     <ExecutionEnvironment>

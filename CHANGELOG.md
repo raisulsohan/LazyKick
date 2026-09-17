@@ -2,8 +2,24 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
-## Unreleased
+## 1.2.0
+
+### Watch Bins
+- **Fixed: linking a folder whose files were already in the project imported them again** as duplicates. The host now checks the whole project (any bin, any folder; path compared the way the file system does) and leaves those files alone. They count as synced, and the status says how many were already there.
+- **✎ Edit** on a bin card: change the folder, bin name, filters or subfolder scan without unlinking. What was synced from a folder or file type the bin no longer uses is forgotten, and the bin syncs straight away.
+- **↺ Reset** on a bin card: forget what was synced and sync again. Only files that are no longer in the project come back.
+- An empty bin or folder is no longer created when every file is already in the project.
+- Fixed: a Sync clicked in one project and still waiting in the queue when another project opened could import into the new project.
+- **Browse…** opens at the last folder you picked, also after a restart.
+- Bin names that don't fit are shortened with "…" so the card buttons stay visible.
+- These features came from QuickBinSync, which LazyKick replaces.
+
+### LazyPaste
+- QuickPaste is now called **LazyPaste**, like the other LazySuite tools. Settings and Recent Pastes carry over.
+
+### Other
 - LazyKick is free and open source under the MIT License (`LICENSE` added; README, `package.json`, source headers and the install guide updated).
+- `tools/ae-smoke-host.jsx` runs `host.jsx` inside the real After Effects: watch-bin import with Bengali file names, media already in the project, paste placement, timecode and project identity.
 
 ## 1.1.0
 
