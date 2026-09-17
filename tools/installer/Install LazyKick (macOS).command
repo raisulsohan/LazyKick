@@ -67,7 +67,7 @@ echo "    Premiere Pro   Window > Extensions > LazyKick"
 echo
 echo "  Your notes and watch bins from an earlier LazyKick are kept."
 echo
-echo "  QuickPaste reads the clipboard with AppleScript: allow it if macOS"
+echo "  LazyPaste reads the clipboard with AppleScript: allow it if macOS"
 echo "  asks whether After Effects or Premiere Pro may control this Mac."
 echo
 echo "  If the panel opens blank, run this in Terminal and restart the app:"

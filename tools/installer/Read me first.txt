@@ -57,8 +57,13 @@ THE THREE TABS
     uploads...) to a bin in the project. "Sync" imports what is
     new; turn on Auto-Sync and new files come in by themselves
     every few seconds - once they have finished copying.
-    Files that cannot be imported are shown as "skipped" and
-    tried again when they change, or when you click Sync.
+    Files that are already in the project are never imported
+    a second time. Files that cannot be imported are shown as
+    "skipped" and tried again when they change, or when you
+    click Sync. On each folder's card:
+      pencil     change its folder, bin name or filters
+      Reset      (circle arrow) sync it again from scratch:
+                 brings back files you removed from the project
 
 
 ------------------------------------------------------------

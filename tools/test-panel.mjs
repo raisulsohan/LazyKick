@@ -11,7 +11,7 @@
  * What it guards: notes survive tab deletion and project switches, notes made
  * before the first save follow the project, watch bins import each file once
  * (skipping failures, waiting for files still being copied, never racing), and
- * QuickPaste reuses identical images, never overwrites, and honours the folder
+ * LazyPaste reuses identical images, never overwrites, and honours the folder
  * setting. Also a guard that main.js stays within CEP 9's Chromium 61 / Node 8.
  */
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
@@ -216,6 +216,8 @@ const host = {
   calls: [],
   pastes: [],
   binImports: [],
+  projectFiles: new Set(),   // lower-cased paths the "project" already holds
+  imported: [],              // what the host really imported, in order
   failNames: new Set(),
   refuseProject: false,
   timecode: { ok: true, timecode: "00:00:05:00" },
@@ -247,9 +249,14 @@ function answer(script) {
       if (host.refuseProject || args[2] !== host.info.fullId) return JSON.stringify({ ok: false, projectChanged: true, msg: "changed" });
       const files = JSON.parse(args[1]);
       host.binImports.push({ bin: args[0], files });
-      const failed = files.filter((f) => host.failNames.has(f.split("/").pop()));
-      const imported = files.filter((f) => !failed.includes(f));
-      return JSON.stringify({ ok: true, imported: imported.length, failed: failed.length, importedFiles: imported, failedFiles: failed });
+      const existing = files.filter((f) => host.projectFiles.has(f.toLowerCase()));
+      const failed = files.filter((f) => !existing.includes(f) && host.failNames.has(f.split("/").pop()));
+      const imported = files.filter((f) => !existing.includes(f) && !failed.includes(f));
+      imported.forEach((f) => { host.projectFiles.add(f.toLowerCase()); host.imported.push({ bin: args[0], file: f }); });
+      return JSON.stringify({
+        ok: true, imported: imported.length, failed: failed.length, existing: existing.length,
+        importedFiles: imported, failedFiles: failed, existingFiles: existing,
+      });
     }
     default: return "EvalScript error.";
   }
@@ -311,7 +318,13 @@ doc.getElementById("optTargetFolder").value = "Pasted Images";
 const alerts = [];
 let confirmAnswer = true;
 class FakeCSInterface {
-  evalScript(script, cb) { const res = answer(script); setImmediate(() => cb && cb(res)); }
+  evalScript(script, cb) {
+    const res = answer(script);
+    const deliver = () => setImmediate(() => cb && cb(res));
+    // host.gate holds watch-bin imports, like a slow import in the real app.
+    if (host.gate && script.startsWith("importFilesToBin")) host.gate.then(deliver);
+    else deliver();
+  }
   registerKeyEventsInterest(json) { host.keys = json; }
   openURLInDefaultBrowser(url) { host.openedUrl = url; }
 }
@@ -522,12 +535,146 @@ try {
   const open = spawned[spawned.length - 1];
   check("open folder: no shell, path as argument", open && open.cmd === "explorer.exe" && open.args.length === 1 && !open.opts.shell, JSON.stringify(open));
 
-  // ---- QuickPaste
+  // ---- watch bins: media already in the project, Reset, Edit
+  const actionsOf = (i) => $("binCardsList").children[i].children[0].children[1].children;
+  const lib = join(work, "Media", "Library");
+  mkdirSync(lib, { recursive: true });
+  writeFileSync(join(lib, "x.mp4"), "xxxx");
+  writeFileSync(join(lib, "y.mp4"), "yyyy");
+  host.projectFiles.add(toFwd(join(lib, "x.mp4")).toLowerCase());   // imported by hand earlier
+  const importedBefore = host.imported.length;
+  const importedNames = () => host.imported.slice(importedBefore).map((i) => i.file.split("/").pop()).join(",");
+
+  $("btnAddBin").click();
+  eq("add: dialog title", $("binModalTitle").textContent, "Link Folder to Bin");
+  eq("add: save label", $("btnModalSaveBin").textContent, "Save Watch Bin");
+  $("modalFolderInput").value = lib;
+  $("modalBinNameInput").value = "Library";
+  let calls = host.binImports.length;
+  $("btnModalSaveBin").click();
+  await waitFor(() => host.binImports.length === calls + 1, "library link");
+  await settle();
+  eq("existing: only the new file imported", importedNames(), "y.mp4");
+  let libBin = readJson(binsFile(aId)).bins[1];
+  check("existing: both count as synced", libBin.history[toFwd(join(lib, "x.mp4"))] && libBin.history[toFwd(join(lib, "y.mp4"))]);
+  eq("existing: count", libBin.importedCount, 2);
+  check("existing: status says so", /1 already in the project/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  eq("card: sync, open, edit, reset, unlink", Array.from(actionsOf(1)).map((b) => b.textContent).join(" "), "⚡ Sync 📂 ✎ ↺ ✕");
+
+  // Reset after y.mp4 was deleted from the project; x.mp4 is still there.
+  host.projectFiles.delete(toFwd(join(lib, "y.mp4")).toLowerCase());
+  confirmAnswer = false;
+  calls = host.binImports.length;
+  actionsOf(1)[3].click();
+  await settle(20);
+  eq("reset cancelled: nothing synced", host.binImports.length, calls);
+  eq("reset cancelled: history kept", readJson(binsFile(aId)).bins[1].importedCount, 2);
+  confirmAnswer = true;
+  actionsOf(1)[3].click();
+  await waitFor(() => host.binImports.length === calls + 1, "reset sync");
+  await settle();
+  eq("reset: both files looked at again", host.binImports[calls].files.map((f) => f.split("/").pop()).join(","), "x.mp4,y.mp4");
+  eq("reset: only the removed file comes back", importedNames(), "y.mp4,y.mp4");
+  eq("reset: history rebuilt", readJson(binsFile(aId)).bins[1].importedCount, 2);
+
+  // Edit: open, save unchanged, then move the bin to another folder.
+  const music = join(work, "Media", "Music");
+  mkdirSync(join(music, "deep"), { recursive: true });
+  writeFileSync(join(music, "song.wav"), "song");
+  writeFileSync(join(music, "deep", "stem.wav"), "stem");
+  actionsOf(1)[2].click();
+  check("edit: dialog open", !$("binModalOverlay").classList.contains("hidden"));
+  eq("edit: title", $("binModalTitle").textContent, "Edit Watch Bin");
+  eq("edit: save label", $("btnModalSaveBin").textContent, "Save Changes");
+  eq("edit: folder filled in", $("modalFolderInput").value, lib);
+  eq("edit: bin name filled in", $("modalBinNameInput").value, "Library");
+  eq("edit: recursive filled in", $("modalRecursiveCheck").checked, true);
+  alerts.length = 0;
+  calls = host.binImports.length;
+  $("btnModalSaveBin").click();
+  await settle(20);
+  eq("edit unchanged: not a duplicate of itself", alerts.length, 0);
+  eq("edit unchanged: still two bins", readJson(binsFile(aId)).bins.length, 2);
+  eq("edit unchanged: nothing to import", host.binImports.length, calls);
+
+  actionsOf(1)[2].click();
+  $("modalFolderInput").value = music;
+  $("modalBinNameInput").value = "Music/Beds";
+  $("modalRecursiveCheck").checked = false;
+  $("btnModalSaveBin").click();
+  check("edit: dialog closed", $("binModalOverlay").classList.contains("hidden"));
+  await waitFor(() => host.binImports.length === calls + 1, "edited bin sync");
+  await settle();
+  libBin = readJson(binsFile(aId)).bins[1];
+  eq("edit: still two bins", readJson(binsFile(aId)).bins.length, 2);
+  eq("edit: same bin, new folder", toFwd(libBin.folderPath), toFwd(music));
+  eq("edit: new bin name", libBin.binPath, "Music/Beds");
+  const lastImport = host.binImports[host.binImports.length - 1];
+  eq("edit: new folder into the new bin, subfolders off", `${lastImport.bin}:${lastImport.files.map((f) => f.split("/").pop()).join(",")}`, "Music/Beds:song.wav");
+  eq("edit: old folder's history dropped", Object.keys(libBin.history).map((p) => p.split("/").pop()).join(","), "song.wav");
+  eq("edit: count follows", libBin.importedCount, 1);
+  eq("edit: card shows the new bin", $("binCardsList").children[1].children[0].children[0].textContent, "📁 Music/Beds");
+
+  actionsOf(1)[2].click();
+  $("modalFolderInput").value = media;
+  $("modalBinNameInput").value = "SFX/<Hits>";
+  alerts.length = 0;
+  $("btnModalSaveBin").click();
+  check("edit: cannot turn into a copy of another bin", alerts.some((a) => /already linked/.test(a)), alerts.join(" | "));
+  $("btnModalCancel").click();
+  eq("edit cancelled: bin unchanged", readJson(binsFile(aId)).bins[1].binPath, "Music/Beds");
+  $("btnAddBin").click();
+  eq("add after edit: empty again", $("modalFolderInput").value + "|" + $("binModalTitle").textContent, "|Link Folder to Bin");
+  $("modalFolderInput").value = music;
+  $("btnBrowseFolder").click();
+  check("browse: opens at the typed folder", $("fbPathInput").value === music, $("fbPathInput").value);
+  $("fbSelectBtn").click();
+  eq("browse: last folder remembered across restarts", readJson(join(storage, "lazykick_settings.json")).lastPickerPath, music);
+  $("modalFolderInput").value = "";
+  $("btnBrowseFolder").click();
+  eq("browse: empty field opens at the last folder", $("fbPathInput").value, music);
+  $("fbCancelBtn").click();
+  $("btnModalCancel").click();
+
+  // The project changes while the edit dialog is open: nothing is written anywhere.
+  actionsOf(1)[2].click();
+  $("modalBinNameInput").value = "Wrong/Project";
+  setProject("saved", fileB);
+  await advance(2500);
+  $("btnModalSaveBin").click();
+  await settle(20);
+  check("edit across a project switch: refused", /project changed/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  eq("edit across a project switch: A untouched", readJson(binsFile(aId)).bins[1].binPath, "Music/Beds");
+  check("edit across a project switch: B gets no bin", !existsSync(binsFile(`ae|saved|${fileB}`)));
+  setProject("saved", fileA);
+  await advance(2500);
+
+  // A Sync clicked in project A, still queued when B opens, must not run in B.
+  writeFileSync(join(media, "held.mp4"), "held");
+  let release;
+  host.gate = new Promise((r) => { release = r; });
+  $("btnSyncAll").click();
+  await waitFor(() => host.binImports.some((b) => b.files.some((f) => f.endsWith("held.mp4"))), "held sync");
+  writeFileSync(join(media, "later.mp4"), "later");
+  actionsOf(0)[0].click();                    // queued behind the held sync
+  setProject("saved", fileB);
+  await advance(2500);
+  calls = host.binImports.length;
+  host.gate = null;
+  release();
+  await settle(40);
+  eq("queued sync after a project switch: not run in the new project", host.binImports.length, calls);
+  check("queued sync after a project switch: B gets no bin", !existsSync(binsFile(`ae|saved|${fileB}`)));
+  check("held sync still recorded in A", !!readJson(binsFile(aId)).bins[0].history[toFwd(join(media, "held.mp4"))]);
+  setProject("saved", fileA);
+  await advance(2500);
+
+  // ---- LazyPaste
   const pasteDir = join(projA, "Pasted Images");
   const pngs = () => (existsSync(pasteDir) ? readdirSync(pasteDir).sort() : []);
   clipboard.mode = "image";
   clipboard.bytes = Buffer.from("PNG-ONE");
-  $("quickPasteBtn").click();
+  $("lazyPasteBtn").click();
   await waitFor(() => host.pastes.length === 1, "first paste");
   await settle();
   eq("paste: one file, no temp left", pngs().length, 1);
@@ -538,17 +685,17 @@ try {
   check("paste: PNG format tried first (transparency)", clipboard.lastScript.indexOf("GetDataPresent('PNG')") < clipboard.lastScript.indexOf("GetImage()"));
   eq("paste: recent list saved", readJson(join(storage, "recent_pastes.json")).length, 1);
 
-  $("quickPasteBtn").click();
+  $("lazyPasteBtn").click();
   await waitFor(() => host.pastes.length === 2, "same paste");
   await settle();
   eq("paste same picture: no new file", pngs().length, 1);
   eq("paste same picture: same file reused", host.pastes[1].path, host.pastes[0].path);
 
   clipboard.bytes = Buffer.from("PNG-TWO");
-  $("quickPasteBtn").click();
+  $("lazyPasteBtn").click();
   await waitFor(() => host.pastes.length === 3, "second picture");
   clipboard.bytes = Buffer.from("PNG-THREE");
-  $("quickPasteBtn").click();
+  $("lazyPasteBtn").click();
   await waitFor(() => host.pastes.length === 4, "third picture");
   await settle();
   eq("paste different pictures quickly: never overwritten", pngs().length, 3);
@@ -559,14 +706,14 @@ try {
   writeFileSync(outside, "JPEG!");
   clipboard.mode = "file";
   clipboard.file = outside;
-  $("quickPasteBtn").click();
+  $("lazyPasteBtn").click();
   await waitFor(() => host.pastes.length === 5, "copied file paste");
   await settle();
   check("paste copied file: copied into project with its extension", /\.jpg$/.test(host.pastes[4].path) && host.pastes[4].path.includes("Pasted Images"), host.pastes[4].path);
   check("paste copied file: original untouched", existsSync(outside));
 
   clipboard.mode = "none";
-  $("quickPasteBtn").click();
+  $("lazyPasteBtn").click();
   await settle(20);
   eq("paste nothing: host not called", host.pastes.length, 5);
   check("paste nothing: says so", /No image/.test($("globalStatus").textContent), $("globalStatus").textContent);
@@ -596,7 +743,7 @@ try {
   clipboard.bytes = Buffer.from("PNG-FIVE");
   $("optTargetFolder").value = "Pasted Images";
   $("optTargetFolder").dispatch("input");
-  $("quickPasteBtn").click();
+  $("lazyPasteBtn").click();
   await waitFor(() => host.pastes.length === 7, "apostrophe paste");
   await settle();
   check("apostrophe path: quoted for PowerShell", clipboard.lastScript.includes("It''s New"));

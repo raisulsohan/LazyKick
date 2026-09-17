@@ -255,6 +255,25 @@ section("Premiere Pro", function () {
     eq("ppro sync: imported list", s.importedFiles.join("|"), "D:/Media/a.mp4|D:/Media/b.wav");
     eq("ppro sync: failed list", s.failedFiles.join("|"), "D:/Media/gone.mov|D:/Media/c.heic");
     eq("ppro sync: one batch, dialogs suppressed", ppro.imports.length + ":" + ppro.imports[0].suppressUI, "1:true");
+
+    // Media already in the project, in any bin, is reported and not imported again.
+    setupPremiere([new PTrack(false, [])], 0);
+    var oldBin = app.project.rootItem.createBin("Old Stuff");
+    addChild(oldBin, new PItem(1, "a.mp4", "D:\\MEDIA\\a.mp4", 5)); // other case and slashes
+    var ex = parse(importFilesToBin("SFX", '["D:/Media/a.mp4","D:/Media/b.wav"]', "ppro|saved|D:\\Work\\Edit.prproj"));
+    eq("ppro existing: reported", ex.existingFiles.join("|"), "D:/Media/a.mp4");
+    eq("ppro existing: counted", ex.existing, 1);
+    eq("ppro existing: only the new file sent to Premiere", ppro.imports.length + ":" + ppro.imports[0].paths.join("|"), "1:D:/Media/b.wav");
+    eq("ppro existing: imported list", ex.importedFiles.join("|"), "D:/Media/b.wav");
+
+    var allThere = parse(importFilesToBin("Fresh/Bin", '["D:/Media/a.mp4","D:/Media/b.wav"]', "ppro|saved|D:\\Work\\Edit.prproj"));
+    eq("ppro all existing: nothing imported", ppro.imports.length, 1);
+    eq("ppro all existing: both reported", allThere.imported + ":" + allThere.existing + ":" + allThere.failed, "0:2:0");
+    var madeFresh = false;
+    for (var rb = 0; rb < app.project.rootItem.children.numItems; rb++) {
+        if (app.project.rootItem.children[rb].name === "Fresh") madeFresh = true;
+    }
+    eq("ppro all existing: no empty bin made", madeFresh, false);
 });
 
 // ========================================================== After Effects
@@ -369,6 +388,23 @@ section("After Effects", function () {
     eq("ae sync: failed", s.failedFiles.join("|"), "D:/Media/c.heic|D:/Media/gone.wav");
     eq("ae sync: one undo step", undoGroups - groupsBefore, 1);
     eq("ae sync: undo balanced", undoDepth, 0);
+
+    // a.mp4 is in the project now; c2.mov is new.
+    existingFiles[norm("D:/Media/c2.mov")] = {};
+    var importsBefore = imports;
+    var ex = parse(importFilesToBin("SFX", '["D:/MEDIA/A.MP4","D:/Media/c2.mov"]', "ae|unsaved|untitled"));
+    eq("ae existing: reported", ex.existingFiles.join("|"), "D:/MEDIA/A.MP4");
+    eq("ae existing: new one imported", ex.importedFiles.join("|"), "D:/Media/c2.mov");
+    eq("ae existing: one import", imports - importsBefore, 1);
+    var allThere = parse(importFilesToBin("Never Made", '["D:/Media/a.mp4","D:/Media/c2.mov"]', "ae|unsaved|untitled"));
+    eq("ae all existing: none imported", allThere.imported + ":" + allThere.existing + ":" + allThere.failed, "0:2:0");
+    eq("ae all existing: still one import", imports - importsBefore, 1);
+    var madeFolder = false;
+    for (var rf = 1; rf <= root.items.length; rf++) {
+        if (root.items[rf].name === "Never Made") madeFolder = true;
+    }
+    eq("ae all existing: no empty folder made", madeFolder, false);
+    eq("ae existing: undo balanced", undoDepth, 0);
 
     app.project.file = new File("D:/Work/Promo.aep");
     eq("ae: saved id", getProjectPath(), "ae|saved|D:\\Work\\Promo.aep");

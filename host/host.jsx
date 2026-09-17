@@ -4,7 +4,7 @@
   Author: Raisul Sohan (raisulsohan.com)
   Developed By: RaisulSohan
   Description: Unified backend host script for After Effects & Premiere Pro.
-               Powers Project Notepad, Watch Bins (QuickBinSync) & QuickPaste.
+               Powers Notes & Tasks, Watch Bins and LazyPaste.
   Copyright (c) 2026 Raisul Sohan. Free and open source under the MIT License.
 ========================================================================
 
@@ -39,7 +39,7 @@ if (typeof JSON === "undefined" || !JSON.stringify) {
 var LazyKickHost = (function () {
     "use strict";
 
-    var VERSION = "1.1.0";
+    var VERSION = "1.2.0";
     var PASTE_BIN_DEFAULT = "Pasted Images";
     var TIME_EPSILON = 0.0005; // seconds; clip edges and the playhead are floats
 
@@ -344,6 +344,39 @@ var LazyKickHost = (function () {
         return null;
     }
 
+    /**
+     * Normalised paths of every file the project already holds. A watch folder
+     * linked to media that is already in the project (imported by hand, or
+     * before the bin was reset or relinked) then does not import it again.
+     * Built once per sync, not once per file.
+     */
+    function projectMediaIndexAE() {
+        var index = {};
+        for (var j = 1; j <= app.project.items.length; j++) {
+            try {
+                var it = app.project.items[j];
+                if (it instanceof FootageItem && it.file) index[normalizeMediaPath(it.file.fsName)] = true;
+            } catch (e) {}
+        }
+        return index;
+    }
+
+    function projectMediaIndexPPRO(bin, index) {
+        if (!bin || !bin.children) return index;
+        for (var k = 0; k < bin.children.numItems; k++) {
+            try {
+                var cItem = bin.children[k];
+                if (cItem.type === 2) {
+                    projectMediaIndexPPRO(cItem, index);
+                } else if (typeof cItem.getMediaPath === "function") {
+                    var mediaPath = cItem.getMediaPath();
+                    if (mediaPath) index[normalizeMediaPath(mediaPath)] = true;
+                }
+            } catch (e) {}
+        }
+        return index;
+    }
+
     function childIdsPPRO(bin) {
         var ids = {};
         for (var i = 0; i < bin.children.numItems; i++) {
@@ -461,7 +494,7 @@ var LazyKickHost = (function () {
     }
 
     // ============================================================
-    // QuickPaste Engine (Clipboard Image to Timeline/Bin)
+    // LazyPaste Engine (Clipboard Image to Timeline/Bin)
     // ============================================================
     function importPastedImage(filePath, asGuideLayer, autoFit, binName) {
         try {
@@ -560,19 +593,22 @@ var LazyKickHost = (function () {
     }
 
     // ============================================================
-    // QuickBinSync Engine (Folder-to-Bin Sync)
+    // Watch Bins Engine (Folder-to-Bin Sync)
     // ============================================================
 
     /**
-     * Import files into a (nested) bin. Reports exactly which files went in and
-     * which did not, so the panel only remembers the ones that really did.
+     * Import files into a (nested) bin. Reports exactly which files went in,
+     * which were already in the project (left alone, wherever they are), and
+     * which failed, so the panel only remembers the ones that really are in.
      * `expectedProjectId` guards against the user switching projects while the
      * panel was scanning: the files are then not dropped into the wrong one.
      */
     function importFilesToBin(binPath, filePathsJson, expectedProjectId) {
         try {
             var filePaths = (typeof filePathsJson === "string") ? JSON.parse(filePathsJson) : filePathsJson;
-            if (!filePaths || !filePaths.length) return reply(true, "No files to import", { imported: 0, failed: 0, importedFiles: [], failedFiles: [] });
+            if (!filePaths || !filePaths.length) {
+                return reply(true, "No files to import", { imported: 0, failed: 0, existing: 0, importedFiles: [], failedFiles: [], existingFiles: [] });
+            }
 
             if (expectedProjectId && getProjectPath() !== expectedProjectId) {
                 return reply(false, "The open project changed; sync skipped", { projectChanged: true });
@@ -581,12 +617,14 @@ var LazyKickHost = (function () {
             var host = getHostName();
             var importedFiles = [];
             var failedFiles = [];
+            var existingFiles = [];
 
             // ---------- AFTER EFFECTS ----------
             if (host === "ae") {
                 app.beginUndoGroup("LazyKick: Watch Bin Sync");
                 try {
-                    var targetFolder = resolveBinPathAE(binPath);
+                    var inProject = projectMediaIndexAE();
+                    var targetFolder = null;
                     for (var i = 0; i < filePaths.length; i++) {
                         try {
                             var f = new File(filePaths[i]);
@@ -594,8 +632,17 @@ var LazyKickHost = (function () {
                                 failedFiles.push(filePaths[i]);
                                 continue;
                             }
+                            var key = normalizeMediaPath(f.fsName);
+                            if (inProject[key] === true) {
+                                existingFiles.push(filePaths[i]);
+                                continue;
+                            }
                             var footage = app.project.importFile(new ImportOptions(f));
+                            // Made only when something goes in, so a bin of files
+                            // that are all elsewhere in the project stays unmade.
+                            if (!targetFolder) targetFolder = resolveBinPathAE(binPath);
                             footage.parentFolder = targetFolder;
+                            inProject[key] = true;
                             importedFiles.push(filePaths[i]);
                         } catch (eAE) {
                             failedFiles.push(filePaths[i]);
@@ -604,22 +651,29 @@ var LazyKickHost = (function () {
                 } finally {
                     app.endUndoGroup();
                 }
-                return reply(true, "Import finished", { imported: importedFiles.length, failed: failedFiles.length, importedFiles: importedFiles, failedFiles: failedFiles });
+                return reply(true, "Import finished", {
+                    imported: importedFiles.length, failed: failedFiles.length, existing: existingFiles.length,
+                    importedFiles: importedFiles, failedFiles: failedFiles, existingFiles: existingFiles
+                });
             }
 
             // ---------- PREMIERE PRO ----------
             if (host === "ppro") {
-                var targetBin = resolveBinPathPPRO(binPath);
+                var inProjectP = projectMediaIndexPPRO(app.project.rootItem, {});
                 var validPaths = [];
                 for (var j = 0; j < filePaths.length; j++) {
-                    if (new File(filePaths[j]).exists) {
-                        validPaths.push(filePaths[j]);
-                    } else {
+                    var pf = new File(filePaths[j]);
+                    if (!pf.exists) {
                         failedFiles.push(filePaths[j]);
+                    } else if (inProjectP[normalizeMediaPath(pf.fsName)] === true) {
+                        existingFiles.push(filePaths[j]);
+                    } else {
+                        validPaths.push(filePaths[j]);
                     }
                 }
 
                 if (validPaths.length > 0) {
+                    var targetBin = resolveBinPathPPRO(binPath);
                     var before = childIdsPPRO(targetBin);
                     var batchThrew = false;
                     try {
@@ -662,7 +716,10 @@ var LazyKickHost = (function () {
                         }
                     }
                 }
-                return reply(true, "Import finished", { imported: importedFiles.length, failed: failedFiles.length, importedFiles: importedFiles, failedFiles: failedFiles });
+                return reply(true, "Import finished", {
+                    imported: importedFiles.length, failed: failedFiles.length, existing: existingFiles.length,
+                    importedFiles: importedFiles, failedFiles: failedFiles, existingFiles: existingFiles
+                });
             }
 
             return reply(false, "Unsupported host");

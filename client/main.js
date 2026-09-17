@@ -3,7 +3,7 @@
   LazyKick — Frontend Controller (main.js)
   Developed By: RaisulSohan
   Website: https://raisulsohan.com
-  Description: Unified frontend for Notes, Watch Bins, and QuickPaste.
+  Description: Unified frontend for Notes, Watch Bins, and LazyPaste.
   Copyright (c) 2026 Raisul Sohan. Free and open source under the MIT License.
 ========================================================================
 
@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.1.0";
+    var PANEL_VERSION = "1.2.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -116,7 +116,7 @@
         syncPending: 0,
         lastPickerPath: "",
 
-        // QuickPaste & Tools Settings
+        // LazyPaste & Tools Settings
         settings: {
             guideLayer: true,
             autoFit: false,
@@ -144,7 +144,7 @@
     var el = {
         hostBadge:             document.getElementById("hostBadge"),
         projectName:           document.getElementById("projectName"),
-        quickPasteBtn:         document.getElementById("quickPasteBtn"),
+        lazyPasteBtn:         document.getElementById("lazyPasteBtn"),
         refreshBtn:            document.getElementById("refreshBtn"),
         globalStatus:          document.getElementById("globalStatus"),
         navTabs:               document.querySelectorAll(".nav-tab"),
@@ -400,6 +400,7 @@
         if (s.autoFit !== undefined) appState.settings.autoFit = !!s.autoFit;
         if (s.targetFolder) appState.settings.targetFolder = sanitizeRelativePath(s.targetFolder, DEFAULT_PASTE_FOLDER);
         if (s.autoSync !== undefined) appState.autoSync = !!s.autoSync;
+        if (typeof s.lastPickerPath === "string") appState.lastPickerPath = s.lastPickerPath;
 
         el.optGuideLayer.checked = appState.settings.guideLayer;
         el.optAutoFit.checked = appState.settings.autoFit;
@@ -412,7 +413,8 @@
             guideLayer: appState.settings.guideLayer,
             autoFit: appState.settings.autoFit,
             targetFolder: appState.settings.targetFolder,
-            autoSync: appState.autoSync
+            autoSync: appState.autoSync,
+            lastPickerPath: appState.lastPickerPath
         });
     }
 
@@ -814,7 +816,7 @@
     });
 
     // ============================================================
-    // QUICKPASTE ENGINE (Clipboard Image to Timeline)
+    // LAZYPASTE ENGINE (Clipboard Image to Timeline)
     // ============================================================
 
     /**
@@ -947,15 +949,15 @@
     var pasteBtnTimer = null;
 
     function setPasteBtnState(state, text) {
-        var btn = el.quickPasteBtn;
+        var btn = el.lazyPasteBtn;
         var label = btn.querySelector(".btn-text");
         clearTimeout(pasteBtnTimer);
-        btn.className = "btn-quick-paste" + (state ? " " + state : "");
+        btn.className = "btn-lazy-paste" + (state ? " " + state : "");
         label.textContent = text;
         btn.disabled = state === "processing";
         if (state && state !== "processing") {
             pasteBtnTimer = setTimeout(function () {
-                btn.className = "btn-quick-paste";
+                btn.className = "btn-lazy-paste";
                 label.textContent = "Paste Image";
             }, 2500);
         }
@@ -972,7 +974,7 @@
         });
     }
 
-    function handleQuickPaste() {
+    function handleLazyPaste() {
         if (appState.pasteBusy) return Promise.resolve();
         appState.pasteBusy = true;
         setPasteBtnState("processing", "Reading Clipboard...");
@@ -1086,14 +1088,14 @@
         });
     }
 
-    el.quickPasteBtn.addEventListener("click", function () { handleQuickPaste(); });
+    el.lazyPasteBtn.addEventListener("click", function () { handleLazyPaste(); });
 
     // Ctrl+V (Cmd+V) anywhere in the panel except while typing.
     document.addEventListener("keydown", function (e) {
         var isPaste = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.keyCode === 86 || e.key === "v" || e.key === "V");
         if (!isPaste || isEditableTarget(e.target) || isModalOpen()) return;
         e.preventDefault();
-        handleQuickPaste();
+        handleLazyPaste();
     });
 
     function registerPasteShortcut() {
@@ -1187,10 +1189,16 @@
             syncBtn.title = "Sync this folder now (also retries skipped files)";
             var openBtn = makeEl("button", "btn-tool btn-open-os", "📂");
             openBtn.title = "Open in Explorer/Finder";
+            var editBtn = makeEl("button", "btn-tool btn-edit-bin", "✎");
+            editBtn.title = "Edit: change the folder, bin name or filters";
+            var resetBtn = makeEl("button", "btn-tool btn-reset-bin", "↺");
+            resetBtn.title = "Reset: forget what was synced and sync again. Files still in the project are not imported twice.";
             var removeBtn = makeEl("button", "btn-tool btn-danger btn-remove-bin", "✕");
             removeBtn.title = "Unlink bin";
             actions.appendChild(syncBtn);
             actions.appendChild(openBtn);
+            actions.appendChild(editBtn);
+            actions.appendChild(resetBtn);
             actions.appendChild(removeBtn);
             top.appendChild(actions);
             card.appendChild(top);
@@ -1222,6 +1230,8 @@
                 runExclusive(function () { return syncBin(b, { retrySkipped: true }); });
             });
             openBtn.addEventListener("click", function () { openInOS(b.folderPath); });
+            editBtn.addEventListener("click", function () { openBinModal(b); });
+            resetBtn.addEventListener("click", function () { resetBin(b); });
             removeBtn.addEventListener("click", function () {
                 if (confirm("Unlink this folder from Watch Bins?\nFiles already imported stay in the project.")) {
                     var at = appState.bins.indexOf(b);
@@ -1232,6 +1242,30 @@
             });
 
             el.binCardsList.appendChild(card);
+        });
+    }
+
+    /**
+     * Forget which files were synced from this folder, then sync it again.
+     * Files still in the project count as synced without a second import, so
+     * this brings back only what was removed from the project.
+     */
+    function resetBin(bin) {
+        var label = bin.binPath || "Root";
+        if (!confirm("Reset \"" + label + "\"?\n\nLazyKick forgets which files it synced from this folder and syncs it again. " +
+                     "Files that are no longer in the project come back; files still in it are not imported twice.")) {
+            return;
+        }
+        var projectId = appState.projectId;
+        var binsRef = appState.bins;
+        runExclusive(function () {
+            if (appState.bins !== binsRef || binsRef.indexOf(bin) === -1) return null;
+            bin.history = {};
+            bin.skipped = {};
+            bin.importedCount = 0;
+            writeBins(projectId, binsRef);
+            renderBinCards();
+            return syncBin(bin, { retrySkipped: true });
         });
     }
 
@@ -1328,12 +1362,14 @@
      */
     function syncBin(bin, opts) {
         opts = opts || {};
-        var outcome = { imported: 0, failed: 0, waiting: 0 };
+        var outcome = { imported: 0, failed: 0, waiting: 0, existing: 0 };
         var projectId = appState.projectId;
         var binsRef = appState.bins;
         var label = bin.binPath || "Root";
 
         if (!hasOpenProject()) return Promise.resolve(outcome);
+        // Queued before a project switch: this bin belongs to the other project.
+        if (binsRef.indexOf(bin) === -1) return Promise.resolve(outcome);
         if (!fs.existsSync(bin.folderPath)) {
             if (!opts.quiet) setStatus("Folder not found: " + bin.folderPath, 3000);
             return Promise.resolve(outcome);
@@ -1377,7 +1413,9 @@
                 }
 
                 var failedSet = {};
+                var existingSet = {};
                 (r.failedFiles || []).forEach(function (p) { failedSet[normPath(p)] = true; });
+                (r.existingFiles || []).forEach(function (p) { existingSet[normPath(p)] = true; });
                 batch.forEach(function (item) {
                     delete stableSizes[item.norm];
                     if (failedSet[item.norm]) {
@@ -1386,33 +1424,43 @@
                         bin.skipped[item.norm] = item.signature;
                         outcome.failed++;
                     } else {
+                        // Already in the project counts as synced: it is there,
+                        // and importing it again would only make a duplicate.
                         bin.history[item.norm] = true;
                         delete bin.skipped[item.norm];
-                        outcome.imported++;
+                        if (existingSet[item.norm]) outcome.existing++;
+                        else outcome.imported++;
                     }
                 });
                 bin.importedCount = Object.keys(bin.history).length;
                 writeBins(projectId, binsRef);
                 if (projectId === appState.projectId) renderBinCards();
 
-                if (outcome.imported || outcome.failed || !opts.quiet) {
-                    var msg = "Synced " + outcome.imported + " item(s) into " + label;
-                    if (outcome.failed) msg += ", " + outcome.failed + " could not be imported";
-                    setStatus(msg, 3000);
+                if (outcome.imported || outcome.failed || outcome.existing || !opts.quiet) {
+                    setStatus("Synced " + label + ": " + describeOutcome(outcome), 3000);
                 }
                 return outcome;
             });
         });
     }
 
+    /** "3 imported, 2 already in the project, 1 could not be imported" */
+    function describeOutcome(o) {
+        var msg = o.imported + " imported";
+        if (o.existing) msg += ", " + o.existing + " already in the project";
+        if (o.failed) msg += ", " + o.failed + " could not be imported";
+        return msg;
+    }
+
     function syncBins(bins, opts) {
-        var total = { imported: 0, failed: 0, waiting: 0 };
+        var total = { imported: 0, failed: 0, waiting: 0, existing: 0 };
         return bins.reduce(function (chain, bin) {
             return chain.then(function () {
                 return syncBin(bin, opts).then(function (o) {
                     total.imported += o.imported;
                     total.failed += o.failed;
                     total.waiting += o.waiting;
+                    total.existing += o.existing;
                 });
             });
         }, Promise.resolve()).then(function () { return total; });
@@ -1432,9 +1480,7 @@
             return syncBins(bins, { retrySkipped: true, quiet: true });
         }).then(function (total) {
             if (!total) return;
-            var msg = "Sync All complete: " + total.imported + " imported";
-            if (total.failed) msg += ", " + total.failed + " could not be imported";
-            setStatus(msg, 3000);
+            setStatus("Sync All complete: " + describeOutcome(total), 3000);
         });
     });
 
@@ -1473,26 +1519,61 @@
     // ============================================================
     // Add / Edit Watch Bin Modal
     // ============================================================
-    el.btnAddBin.addEventListener("click", function () {
+    var editingBin = null;
+
+    /** The watch-bin dialog: empty for a new bin, or filled in to edit `bin`. */
+    function openBinModal(bin) {
         if (!hasOpenProject()) {
             alert("Open or create a project first. Watch bins belong to a project.");
             return;
         }
-        el.modalFolderInput.value = "";
-        el.modalBinNameInput.value = "";
-        el.filterVideo.checked = true;
-        el.filterAudio.checked = true;
-        el.filterImage.checked = true;
-        el.modalRecursiveCheck.checked = true;
+        editingBin = bin || null;
+        el.binModalTitle.textContent = bin ? "Edit Watch Bin" : "Link Folder to Bin";
+        el.btnModalSaveBin.textContent = bin ? "Save Changes" : "Save Watch Bin";
+        el.modalFolderInput.value = bin ? bin.folderPath : "";
+        el.modalBinNameInput.value = bin ? (bin.binPath || "") : "";
+        el.filterVideo.checked = bin ? !!bin.filterVideo : true;
+        el.filterAudio.checked = bin ? !!bin.filterAudio : true;
+        el.filterImage.checked = bin ? !!bin.filterImage : true;
+        el.modalRecursiveCheck.checked = bin ? !!bin.recursive : true;
         el.binModalOverlay.classList.remove("hidden");
-    });
+    }
+
+    el.btnAddBin.addEventListener("click", function () { openBinModal(null); });
 
     function closeBinModal() {
         el.binModalOverlay.classList.add("hidden");
+        editingBin = null;
     }
 
     el.btnModalClose.addEventListener("click", closeBinModal);
     el.btnModalCancel.addEventListener("click", closeBinModal);
+
+    /** Whether a synced file is one this bin still looks at (folder, depth, filters). */
+    function inBinScope(bin, filePath) {
+        var folder = normPath(path.resolve(bin.folderPath)).replace(/\/+$/, "") + "/";
+        var file = normPath(filePath);
+        if (process.platform === "win32") {
+            folder = folder.toLowerCase();
+            file = file.toLowerCase();
+        }
+        if (file.indexOf(folder) !== 0) return false;
+        var rest = file.substring(folder.length);
+        if (!bin.recursive && rest.indexOf("/") !== -1) return false;
+        return !!allowedExtensions(bin)[path.extname(rest).toLowerCase()];
+    }
+
+    /** After an edit, drop what was synced from a folder or filter the bin no longer uses. */
+    function pruneToScope(bin) {
+        ["history", "skipped"].forEach(function (key) {
+            var kept = {};
+            Object.keys(bin[key] || {}).forEach(function (p) {
+                if (inBinScope(bin, p)) kept[p] = bin[key][p];
+            });
+            bin[key] = kept;
+        });
+        bin.importedCount = Object.keys(bin.history).length;
+    }
 
     el.btnModalSaveBin.addEventListener("click", function () {
         var folderPath = el.modalFolderInput.value.trim();
@@ -1507,26 +1588,50 @@
             return;
         }
 
+        var editing = editingBin;
         var binPath = sanitizeRelativePath(el.modalBinNameInput.value, sanitizeRelativePath(path.basename(folderPath), "Media"));
         var duplicate = appState.bins.some(function (b) {
-            return samePath(b.folderPath, folderPath) && b.binPath === binPath;
+            return b !== editing && samePath(b.folderPath, folderPath) && b.binPath === binPath;
         });
         if (duplicate) {
             alert("This folder is already linked to the '" + binPath + "' bin.");
             return;
         }
 
-        var bin = {
+        var settings = {
             folderPath: folderPath,
             binPath: binPath,
             filterVideo: el.filterVideo.checked,
             filterAudio: el.filterAudio.checked,
             filterImage: el.filterImage.checked,
-            recursive: el.modalRecursiveCheck.checked,
-            history: {},
-            skipped: {},
-            importedCount: 0
+            recursive: el.modalRecursiveCheck.checked
         };
+
+        if (editing) {
+            var projectId = appState.projectId;
+            var binsRef = appState.bins;
+            closeBinModal();
+            if (binsRef.indexOf(editing) === -1) {
+                setStatus("The project changed while the dialog was open; the watch bin was not edited", 4000);
+                return;
+            }
+            // Applied in the sync queue, so a sync still running for the old
+            // folder cannot write its results over the new settings.
+            runExclusive(function () {
+                if (binsRef.indexOf(editing) === -1) return null;
+                Object.keys(settings).forEach(function (k) { editing[k] = settings[k]; });
+                pruneToScope(editing);
+                writeBins(projectId, binsRef);
+                if (appState.bins === binsRef) renderBinCards();
+                return syncBin(editing, {});
+            });
+            return;
+        }
+
+        var bin = settings;
+        bin.history = {};
+        bin.skipped = {};
+        bin.importedCount = 0;
         appState.bins.push(bin);
 
         saveBinsForProject();
@@ -1648,7 +1753,9 @@
             if (!el.modalBinNameInput.value) {
                 el.modalBinNameInput.value = path.basename(chosen) || "Media";
             }
+            // Remembered across restarts: the next Browse opens here.
             appState.lastPickerPath = chosen;
+            saveGeneralSettings();
         });
     });
 
