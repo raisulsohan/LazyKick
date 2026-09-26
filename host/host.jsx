@@ -39,7 +39,7 @@ if (typeof JSON === "undefined" || !JSON.stringify) {
 var LazyKickHost = (function () {
     "use strict";
 
-    var VERSION = "1.3.0";
+    var VERSION = "1.4.0";
     var PASTE_BIN_DEFAULT = "Pasted Images";
     var TIME_EPSILON = 0.0005; // seconds; clip edges and the playhead are floats
 
@@ -344,10 +344,20 @@ var LazyKickHost = (function () {
         return null;
     }
 
+    /** An item's identity in a bin: its nodeId, or its name and media path if Premiere gives none. */
+    function itemKeyPPRO(item) {
+        var key = "";
+        try { key = item.nodeId ? String(item.nodeId) : ""; } catch (eId) {}
+        if (key) return "i" + key;
+        var mediaPath = "";
+        try { mediaPath = String(item.getMediaPath() || ""); } catch (ePath) {}
+        return "n" + item.name + "|" + mediaPath;
+    }
+
     function childIdsPPRO(bin) {
         var ids = {};
         for (var i = 0; i < bin.children.numItems; i++) {
-            try { ids[bin.children[i].nodeId] = true; } catch (e) {}
+            try { ids[itemKeyPPRO(bin.children[i])] = true; } catch (e) {}
         }
         return ids;
     }
@@ -356,7 +366,7 @@ var LazyKickHost = (function () {
         var added = [];
         for (var i = 0; i < bin.children.numItems; i++) {
             var c = bin.children[i];
-            try { if (!before[c.nodeId]) added.push(c); } catch (e) {}
+            try { if (!before[itemKeyPPRO(c)]) added.push(c); } catch (e) {}
         }
         return added;
     }
@@ -572,8 +582,10 @@ var LazyKickHost = (function () {
     //   tree.bins[id] = { bin: <FolderItem | bin ProjectItem>, name, parent: id }
     //   tree.kids[id] = [ids of the bins inside it]
     //   tree.media    = [{ item: <FootageItem | ProjectItem>, path, parent: id }]
+    //   tree.others   = [{ item, parent: id }]  (comps, sequences: moved when bins merge)
     //
-    // plus four host operations: create, move, relink and importInto.
+    // plus the host operations create, move, moveBin, removeEmptyBin, relink
+    // and importInto.
 
     var ROOT_ID = "root";
 
@@ -582,8 +594,9 @@ var LazyKickHost = (function () {
         return s.substr(s.lastIndexOf("/") + 1);
     }
 
-    function joinBinPath(a, b) {
-        return sanitizeBinPath(String(a || "") + "/" + String(b || ""), "");
+    /** Bin names compared the way people read them: case, and runs of spaces, do not matter. */
+    function normName(s) {
+        return String(s || "").replace(/\s+/g, " ").replace(/^ | $/g, "").toLowerCase();
     }
 
     /** How many trailing names two paths share: "D:/A/Day 1/x.mp4" and "E:/Day 1/x.mp4" share 2. */
@@ -603,37 +616,39 @@ var LazyKickHost = (function () {
     }
 
     function newTree(rootBin) {
-        var tree = { bins: {}, kids: {}, media: [] };
+        var tree = { bins: {}, kids: {}, media: [], others: [], nextId: 1 };
         tree.bins[ROOT_ID] = { bin: rootBin, name: "", parent: null };
         tree.kids[ROOT_ID] = [];
         return tree;
     }
 
-    function addTreeBin(tree, id, bin, name, parentId) {
+    /** Ids are made here, not taken from the host, so they are unique whatever the host reports. */
+    function addTreeBin(tree, bin, name, parentId) {
+        var id = "b" + (tree.nextId++);
         tree.bins[id] = { bin: bin, name: String(name), parent: parentId };
-        if (!tree.kids[id]) tree.kids[id] = [];
+        tree.kids[id] = [];
         if (!tree.kids[parentId]) tree.kids[parentId] = [];
         tree.kids[parentId].push(id);
         return id;
     }
 
-    /** The bin called `name` inside `parentId`: the exact name first, then ignoring case, as folders on disk do. */
+    /** The bin called `name` inside `parentId`: the exact name first, then as people read it. */
     function childBinId(tree, parentId, name) {
         var kids = tree.kids[parentId] || [];
-        var lower = String(name).toLowerCase();
+        var wanted = normName(name);
         var loose = null;
         for (var i = 0; i < kids.length; i++) {
             var b = tree.bins[kids[i]];
             if (b.name === name) return kids[i];
-            if (loose === null && b.name.toLowerCase() === lower) loose = kids[i];
+            if (loose === null && normName(b.name) === wanted) loose = kids[i];
         }
         return loose;
     }
 
-    /** Id of the bin at "A/B/C", made on the way when `create` is set; null when it is not there. */
-    function resolveTreeBin(tree, pathStr, create) {
+    /** Id of the bin at "A/B/C" under `fromId` (the project root by default), made on the way when `create` is set; null when it is not there. */
+    function resolveTreeBin(tree, pathStr, create, fromId) {
         var clean = sanitizeBinPath(pathStr, "");
-        var id = ROOT_ID;
+        var id = fromId || ROOT_ID;
         if (!clean) return id;
         var parts = clean.split("/");
         for (var i = 0; i < parts.length && id !== null; i++) {
@@ -642,15 +657,6 @@ var LazyKickHost = (function () {
             id = next;
         }
         return id;
-    }
-
-    /** A bin id that is made the first time it is asked for, so nothing is made for a batch that imports nothing. */
-    function lazyBin(tree, pathStr) {
-        var id;
-        return function () {
-            if (id === undefined) id = resolveTreeBin(tree, pathStr, true);
-            return id;
-        };
     }
 
     function insideBin(tree, binId, ancestorId) {
@@ -662,35 +668,252 @@ var LazyKickHost = (function () {
         return false;
     }
 
-    function projectTreeAE() {
-        var rootFolder = app.project.rootFolder;
-        var rootKey = String(rootFolder.id);
-        var tree = newTree(rootFolder);
-        function key(folder) {
-            var k = String(folder.id);
-            return k === rootKey ? ROOT_ID : "f" + k;
+    function binPathOf(tree, id) {
+        var names = [];
+        for (var guard = 0; id && id !== ROOT_ID && tree.bins[id] && guard < 1000; guard++) {
+            names.unshift(tree.bins[id].name);
+            id = tree.bins[id].parent;
+        }
+        return names.join("/");
+    }
+
+    function depthOf(tree, id) {
+        var d = 0;
+        for (var guard = 0; id && id !== ROOT_ID && tree.bins[id] && guard < 1000; guard++) {
+            d++;
+            id = tree.bins[id].parent;
+        }
+        return d;
+    }
+
+    function detachKid(tree, parentId, id) {
+        var kids = tree.kids[parentId] || [];
+        for (var i = 0; i < kids.length; i++) {
+            if (kids[i] === id) {
+                kids.splice(i, 1);
+                return;
+            }
+        }
+    }
+
+    function moveTreeBin(tree, id, intoId) {
+        tree.moveBin(tree.bins[id].bin, tree.bins[intoId].bin);
+        detachKid(tree, tree.bins[id].parent, id);
+        tree.bins[id].parent = intoId;
+        tree.kids[intoId].push(id);
+    }
+
+    /** Deletes a bin only when nothing at all is left in it, in LazyKick's view and in the host's. */
+    function removeIfEmpty(tree, id) {
+        if ((tree.kids[id] || []).length) return false;
+        var i;
+        for (i = 0; i < tree.media.length; i++) if (tree.media[i].parent === id) return false;
+        for (i = 0; i < tree.others.length; i++) if (tree.others[i].parent === id) return false;
+        if (!tree.removeEmptyBin(tree.bins[id].bin)) return false;
+        detachKid(tree, tree.bins[id].parent, id);
+        delete tree.bins[id];
+        delete tree.kids[id];
+        return true;
+    }
+
+    /**
+     * Moves everything in `fromId` into `intoId`: bins with the same name are
+     * merged in turn, the rest moves across, and `fromId` is deleted once it
+     * is empty. Nothing is ever deleted that still holds anything.
+     */
+    function mergeBin(tree, fromId, intoId) {
+        var kids = (tree.kids[fromId] || []).slice();
+        for (var k = 0; k < kids.length; k++) {
+            try {
+                var same = childBinId(tree, intoId, tree.bins[kids[k]].name);
+                if (same !== null) mergeBin(tree, kids[k], same);
+                else moveTreeBin(tree, kids[k], intoId);
+            } catch (eKid) {}
+        }
+        var lists = [tree.media, tree.others];
+        for (var l = 0; l < lists.length; l++) {
+            for (var i = 0; i < lists[l].length; i++) {
+                if (lists[l][i].parent !== fromId) continue;
+                try { tree.move(lists[l][i], intoId); } catch (eMove) {}
+            }
+        }
+        return removeIfEmpty(tree, fromId);
+    }
+
+    /** Two bins of the same name side by side inside the watch bin become one (they mirror one folder). */
+    function mergeTwinsWithin(tree, id, out) {
+        var kids = (tree.kids[id] || []).slice();
+        var first = {};
+        for (var k = 0; k < kids.length; k++) {
+            if (!tree.bins[kids[k]]) continue;
+            var nm = "n" + normName(tree.bins[kids[k]].name);
+            if (first.hasOwnProperty(nm)) {
+                mergeBin(tree, kids[k], first[nm]);
+                out.merged++;
+            } else {
+                first[nm] = kids[k];
+            }
+        }
+        var after = (tree.kids[id] || []).slice();
+        for (var a = 0; a < after.length; a++) mergeTwinsWithin(tree, after[a], out);
+    }
+
+    /**
+     * The watch bin itself: { id, path } (id null while it does not exist yet).
+     *
+     * Found at its path first. When there is nothing there yet (a folder just
+     * linked), a bin that already holds this folder's media and carries its
+     * name (the watch bin's name or the folder's) becomes the watch bin, even
+     * nested elsewhere or spelled with other capitals, so linking a folder the
+     * project already has never makes a second copy of it.
+     *
+     * With `merge` (a full sync), copies of it are folded in and deleted once
+     * empty: bins of the same name beside it, whatever they hold, and bins of
+     * that name elsewhere that hold nothing but this folder's media. A bin
+     * that also holds other work is left alone.
+     */
+    function watchRoot(tree, rootPath, folder, files, merge, out) {
+        var clean = sanitizeBinPath(rootPath, "");
+        if (!clean) return { id: ROOT_ID, path: "" };
+        var root = { id: resolveTreeBin(tree, clean, false), path: clean };
+        if (!folder) return root; // the flat 1.2 call goes by path only
+
+        var folderKey = normalizeMediaPath(folder).replace(/\/+$/, "") + "/";
+        var listed = {};
+        for (var f = 0; f < files.length; f++) listed["n" + fileNameOf(normalizeMediaPath(files[f].p))] = true;
+
+        // How much of this folder's media each bin holds (with its sub-bins),
+        // and which bins hold anything else too.
+        var ours = {};
+        var foreign = {};
+        var id;
+        var guard;
+        for (var m = 0; m < tree.media.length; m++) {
+            var key = normalizeMediaPath(tree.media[m].path);
+            var mine = key.indexOf(folderKey) === 0 || listed.hasOwnProperty("n" + fileNameOf(key));
+            for (id = tree.media[m].parent, guard = 0; id && id !== ROOT_ID && tree.bins[id] && guard < 1000; id = tree.bins[id].parent, guard++) {
+                if (mine) ours[id] = (ours[id] || 0) + 1;
+                else foreign[id] = true;
+            }
+        }
+        for (var o = 0; o < tree.others.length; o++) {
+            for (id = tree.others[o].parent, guard = 0; id && id !== ROOT_ID && tree.bins[id] && guard < 1000; id = tree.bins[id].parent, guard++) foreign[id] = true;
         }
 
-        // One pass over the flat item list; a folder may come after its contents.
-        for (var j = 1; j <= app.project.items.length; j++) {
+        var names = {};
+        names["n" + normName(clean.substr(clean.lastIndexOf("/") + 1))] = true;
+        names["n" + normName(fileNameOf(String(folder).replace(/[\\\/]+$/, "")))] = true;
+        var namesakes = [];
+        for (var b in tree.bins) {
+            if (!tree.bins.hasOwnProperty(b) || b === ROOT_ID) continue;
+            if (ours[b] && names.hasOwnProperty("n" + normName(tree.bins[b].name))) namesakes.push(b);
+        }
+
+        if (root.id === null) {
+            var best = null;
+            for (var c = 0; c < namesakes.length; c++) {
+                var cand = namesakes[c];
+                if (best === null || ours[cand] > ours[best] || (ours[cand] === ours[best] && depthOf(tree, cand) < depthOf(tree, best))) best = cand;
+            }
+            if (best !== null) {
+                root.id = best;
+                out.adopted = true;
+            }
+        }
+        if (root.id === null) return root;
+
+        if (merge) {
+            var parentId = tree.bins[root.id].parent;
+            var rootName = normName(tree.bins[root.id].name);
+            var copies = [];
+            var beside = (tree.kids[parentId] || []).slice();
+            for (var s = 0; s < beside.length; s++) {
+                if (beside[s] !== root.id && normName(tree.bins[beside[s]].name) === rootName) copies.push(beside[s]);
+            }
+            for (var n = 0; n < namesakes.length; n++) {
+                var other = namesakes[n];
+                if (other === root.id || tree.bins[other].parent === parentId || foreign[other]) continue;
+                copies.push(other);
+            }
+            for (var q = 0; q < copies.length; q++) {
+                var copy = copies[q];
+                // Gone already (merged with another), inside the watch bin now, or holding it.
+                if (!tree.bins[copy] || insideBin(tree, copy, root.id) || insideBin(tree, root.id, copy)) continue;
+                mergeBin(tree, copy, root.id);
+                out.merged++;
+            }
+        }
+        root.path = binPathOf(tree, root.id);
+        return root;
+    }
+
+    function projectTreeAE() {
+        var rootFolder = app.project.rootFolder;
+        var tree = newTree(rootFolder);
+        var idOf = {}; // After Effects item id -> tree id
+        idOf["i" + rootFolder.id] = ROOT_ID;
+        function treeIdOf(folder) {
+            var t = idOf["i" + folder.id];
+            return t === undefined ? ROOT_ID : t;
+        }
+
+        // Folders first (one may come after its contents in the flat list), then the rest.
+        var count = app.project.items.length;
+        var folders = [];
+        var j;
+        for (j = 1; j <= count; j++) {
             try {
                 var it = app.project.items[j];
                 if (it instanceof FolderItem) {
-                    addTreeBin(tree, key(it), it, it.name, key(it.parentFolder));
-                } else if (it instanceof FootageItem && it.file) {
-                    tree.media.push({ item: it, path: String(it.file.fsName), parent: key(it.parentFolder) });
+                    var fid = "b" + (tree.nextId++);
+                    idOf["i" + it.id] = fid;
+                    folders.push({ id: fid, item: it });
                 }
-            } catch (e) {}
+            } catch (eFolder) {}
+        }
+        for (var f = 0; f < folders.length; f++) {
+            try {
+                var parentId = treeIdOf(folders[f].item.parentFolder);
+                tree.bins[folders[f].id] = { bin: folders[f].item, name: String(folders[f].item.name), parent: parentId };
+                if (!tree.kids[folders[f].id]) tree.kids[folders[f].id] = [];
+                if (!tree.kids[parentId]) tree.kids[parentId] = [];
+                tree.kids[parentId].push(folders[f].id);
+            } catch (eTree) {}
+        }
+        for (j = 1; j <= count; j++) {
+            try {
+                var item = app.project.items[j];
+                if (item instanceof FolderItem) continue;
+                var rec = { item: item, parent: treeIdOf(item.parentFolder) };
+                if (item instanceof FootageItem && item.file) {
+                    rec.path = String(item.file.fsName);
+                    tree.media.push(rec);
+                } else {
+                    tree.others.push(rec); // comps, solids: moved along when bins merge
+                }
+            } catch (eItem) {}
         }
 
         tree.create = function (parentId, name) {
             var folder = app.project.items.addFolder(name);
             folder.parentFolder = tree.bins[parentId].bin;
-            return addTreeBin(tree, key(folder), folder, name, parentId);
+            var id = addTreeBin(tree, folder, name, parentId);
+            idOf["i" + folder.id] = id;
+            return id;
         };
         tree.move = function (rec, binId) {
             rec.item.parentFolder = tree.bins[binId].bin;
             rec.parent = binId;
+        };
+        tree.moveBin = function (folder, into) {
+            folder.parentFolder = into;
+        };
+        tree.removeEmptyBin = function (folder) {
+            for (var i = 1; i <= app.project.items.length; i++) {
+                try { if (app.project.items[i].parentFolder.id === folder.id) return false; } catch (eScan) {}
+            }
+            folder.remove();
+            return true;
         };
         // Replace Footage: layers using the item follow it to the new file.
         tree.relink = function (rec, newPath) {
@@ -719,11 +942,13 @@ var LazyKickHost = (function () {
                 try {
                     var c = bin.children[k];
                     if (c.type === 2) {
-                        walk(c, addTreeBin(tree, "n" + c.nodeId, c, c.name, binId));
-                    } else if (typeof c.getMediaPath === "function") {
-                        var mediaPath = c.getMediaPath();
-                        if (mediaPath) tree.media.push({ item: c, path: String(mediaPath), parent: binId });
+                        walk(c, addTreeBin(tree, c, c.name, binId));
+                        continue;
                     }
+                    var mediaPath = "";
+                    try { mediaPath = typeof c.getMediaPath === "function" ? String(c.getMediaPath() || "") : ""; } catch (ePath) {}
+                    if (mediaPath) tree.media.push({ item: c, path: mediaPath, parent: binId });
+                    else tree.others.push({ item: c, parent: binId }); // sequences and the like
                 } catch (e) {}
             }
         }
@@ -731,22 +956,37 @@ var LazyKickHost = (function () {
 
         tree.create = function (parentId, name) {
             var parent = tree.bins[parentId].bin;
+            var known = 0;
+            var kids = tree.kids[parentId] || [];
+            for (var n = 0; n < kids.length; n++) if (tree.bins[kids[n]].name === name) known++;
             var made = null;
             try { made = parent.createBin(name); } catch (eCreate) { made = null; }
             if (!made || made.type !== 2) {
-                // createBin is documented to return 0 when it fails: look for
-                // a bin by that name that was not there before.
+                // createBin is documented to return 0 when it fails: if a bin
+                // by that name appeared anyway, it is the last one.
                 made = null;
-                for (var i = parent.children.numItems - 1; i >= 0 && !made; i--) {
+                var seen = [];
+                for (var i = 0; i < parent.children.numItems; i++) {
                     var c = parent.children[i];
-                    if (c.type === 2 && c.name === name && !tree.bins["n" + c.nodeId]) made = c;
+                    if (c.type === 2 && c.name === name) seen.push(c);
                 }
+                if (seen.length > known) made = seen[seen.length - 1];
             }
-            return made ? addTreeBin(tree, "n" + made.nodeId, made, name, parentId) : null;
+            return made ? addTreeBin(tree, made, name, parentId) : null;
         };
         tree.move = function (rec, binId) {
             rec.item.moveBin(tree.bins[binId].bin);
             rec.parent = binId;
+        };
+        tree.moveBin = function (bin, into) {
+            bin.moveBin(into);
+        };
+        // deleteBin takes everything inside with it, so only a bin Premiere
+        // itself reports as empty is deleted.
+        tree.removeEmptyBin = function (bin) {
+            if (!bin.children || bin.children.numItems !== 0) return false;
+            bin.deleteBin();
+            return true;
         };
         // Relinks the clip itself, so every sequence using it follows.
         tree.relink = function (rec, newPath) {
@@ -818,10 +1058,9 @@ var LazyKickHost = (function () {
      * folder, and the longest shared tail of folder names being unique for
      * both the new file and the missing clip. Everything else is imported.
      */
-    function relinkMoved(tree, rootPath, folder, toAdd, out) {
-        var root = sanitizeBinPath(rootPath, "");
-        var rootId = root ? resolveTreeBin(tree, root, false) : null;
+    function relinkMoved(tree, rootId, folder, toAdd, out) {
         var folderKey = folder ? normalizeMediaPath(folder).replace(/\/+$/, "") + "/" : "";
+        var watched = rootId !== null && rootId !== ROOT_ID ? rootId : null;
 
         var newByName = {};
         for (var a = 0; a < toAdd.length; a++) {
@@ -839,7 +1078,7 @@ var LazyKickHost = (function () {
             var key = normalizeMediaPath(rec.path);
             var name = "n" + fileNameOf(key);
             if (!newByName.hasOwnProperty(name)) continue;
-            var ours = (rootId !== null && insideBin(tree, rec.parent, rootId)) || (folderKey !== "" && key.indexOf(folderKey) === 0);
+            var ours = (watched !== null && insideBin(tree, rec.parent, watched)) || (folderKey !== "" && key.indexOf(folderKey) === 0);
             if (!ours) continue;
             var pk = "p" + key;
             if (!goneByPath.hasOwnProperty(pk)) {
@@ -897,11 +1136,8 @@ var LazyKickHost = (function () {
      * Media outside the watch bin stays where the user put it, and the
      * project root is never rearranged.
      */
-    function arrangeInto(tree, rootPath, files) {
-        var root = sanitizeBinPath(rootPath, "");
-        if (!root || !files.length) return 0;
-        var rootId = resolveTreeBin(tree, root, false);
-        if (rootId === null) return 0;
+    function arrangeInto(tree, rootId, files) {
+        if (rootId === null || rootId === ROOT_ID || !files.length) return 0;
 
         var byPath = {};
         for (var m = 0; m < tree.media.length; m++) {
@@ -917,14 +1153,14 @@ var LazyKickHost = (function () {
         for (var i = 0; i < files.length; i++) {
             var recs = byPath["p" + normalizeMediaPath(files[i].p)];
             if (!recs) continue;
-            var target = joinBinPath(root, files[i].s);
-            var tk = "b" + target.toLowerCase();
+            var sub = sanitizeBinPath(files[i].s, "");
+            var tk = "b" + normName(sub);
             for (var r = 0; r < recs.length; r++) {
-                var want = targets.hasOwnProperty(tk) ? targets[tk] : resolveTreeBin(tree, target, false);
+                var want = targets.hasOwnProperty(tk) ? targets[tk] : resolveTreeBin(tree, sub, false, rootId);
                 if (want !== null) targets[tk] = want;
                 if (want === recs[r].parent) continue;
                 if (want === null) {
-                    want = resolveTreeBin(tree, target, true);
+                    want = resolveTreeBin(tree, sub, true, rootId);
                     if (want === null) continue;
                     targets[tk] = want;
                 }
@@ -937,16 +1173,28 @@ var LazyKickHost = (function () {
         return moved;
     }
 
+    /** A sub-bin of the watch bin that is made (with the watch bin) the first time it is asked for. */
+    function subBin(tree, root, sub) {
+        var id;
+        return function () {
+            if (id !== undefined) return id;
+            if (root.id === null) root.id = resolveTreeBin(tree, root.path, true);
+            id = root.id === null ? null : resolveTreeBin(tree, sub, true, root.id);
+            return id;
+        };
+    }
+
     /**
      * One watch-bin sync against a project tree.
      *   files    [{ p: path, s: "Sub/Folder" it sits in, n: true when new }]
-     *   folder   the watch folder on disk, for relinking moved files
-     *   arrange  true: sort every listed file already in the watch bin into
-     *            its bin; false: only the files relinked now
+     *   folder   the watch folder on disk (relinking, finding its bin)
+     *   arrange  true (a full sync): fold copies of the watch bin into it and
+     *            sort every listed file already in it into its bin; false:
+     *            only the files relinked now
      * New files that are already in the project anywhere are left alone.
      */
     function syncTree(tree, rootPath, files, folder, arrange) {
-        var out = { importedFiles: [], failedFiles: [], existingFiles: [], relinkedFiles: [], moved: 0 };
+        var out = { importedFiles: [], failedFiles: [], existingFiles: [], relinkedFiles: [], moved: 0, merged: 0, adopted: false, rootPath: "" };
         var inProject = {};
         for (var m = 0; m < tree.media.length; m++) inProject[normalizeMediaPath(tree.media[m].path)] = true;
 
@@ -966,35 +1214,39 @@ var LazyKickHost = (function () {
             }
         }
 
-        var relinked = toAdd.length ? relinkMoved(tree, rootPath, folder, toAdd, out) : [];
+        var root = watchRoot(tree, rootPath, folder, files, arrange, out);
+        var relinked = toAdd.length ? relinkMoved(tree, root.id, folder, toAdd, out) : [];
 
         // One import per bin, in the order the files are listed.
         var groups = [];
         var byBin = {};
         for (var a = 0; a < toAdd.length; a++) {
             if (toAdd[a].done) continue;
-            var target = joinBinPath(rootPath, toAdd[a].s);
-            var gk = "b" + target.toLowerCase();
+            var sub = sanitizeBinPath(toAdd[a].s, "");
+            var gk = "b" + normName(sub);
             if (!byBin.hasOwnProperty(gk)) {
-                byBin[gk] = { path: target, paths: [] };
+                byBin[gk] = { sub: sub, paths: [] };
                 groups.push(byBin[gk]);
             }
             byBin[gk].paths.push(toAdd[a].p);
         }
         for (var g = 0; g < groups.length; g++) {
-            tree.importInto(lazyBin(tree, groups[g].path), groups[g].paths, out.importedFiles, out.failedFiles);
+            tree.importInto(subBin(tree, root, groups[g].sub), groups[g].paths, out.importedFiles, out.failedFiles);
         }
 
-        out.moved = arrangeInto(tree, rootPath, arrange ? files : relinked);
+        if (arrange && root.id !== null && root.id !== ROOT_ID) mergeTwinsWithin(tree, root.id, out);
+        out.moved = arrangeInto(tree, root.id, arrange ? files : relinked);
+        out.rootPath = root.id === null ? root.path : binPathOf(tree, root.id);
         return out;
     }
 
     /**
      * Runs a sync and reports exactly which files went in, which were already
      * in the project, which were relinked and which failed, so the panel only
-     * remembers the ones that really are in. `expectedProjectId` guards
-     * against the user switching projects while the panel was scanning: the
-     * files are then not dropped into the wrong one.
+     * remembers the ones that really are in. `rootPath` is where the watch bin
+     * really is (an existing bin may have been taken over). `expectedProjectId`
+     * guards against the user switching projects while the panel was
+     * scanning: the files are then not dropped into the wrong one.
      */
     function runWatchSync(binPath, files, folder, arrange, expectedProjectId) {
         if (expectedProjectId && getProjectPath() !== expectedProjectId) {
@@ -1016,7 +1268,7 @@ var LazyKickHost = (function () {
         }
         return reply(true, "Sync finished", {
             imported: out.importedFiles.length, failed: out.failedFiles.length, existing: out.existingFiles.length,
-            relinked: out.relinkedFiles.length, moved: out.moved,
+            relinked: out.relinkedFiles.length, moved: out.moved, merged: out.merged, adopted: out.adopted, rootPath: out.rootPath,
             importedFiles: out.importedFiles, failedFiles: out.failedFiles, existingFiles: out.existingFiles,
             relinkedFiles: out.relinkedFiles
         });
@@ -1051,6 +1303,358 @@ var LazyKickHost = (function () {
         }
     }
 
+    // ============================================================
+    // Script to Audio (voiceover timing and subtitles)
+    // ============================================================
+    //
+    // The panel does the listening (client/align.js); the host only hands it
+    // the timeline's audio and places the finished subtitles. Premiere
+    // exports the sequence mix to a WAV the panel reads; After Effects has no
+    // audio export without the render queue, so its own Convert Audio to
+    // Keyframes measures the loudness of every frame instead.
+
+    var TICKS_PER_SECOND = 254016000000;
+    var CONVERT_AUDIO_TO_KEYFRAMES = 4218; // Animation > Keyframe Assistant; the same id in every language
+
+    function timelinePPRO() {
+        var seq = app.project.activeSequence;
+        if (!seq) return null;
+        var offset = 0;
+        var duration = 0;
+        try { offset = Number(seq.zeroPoint) / TICKS_PER_SECOND || 0; } catch (e1) {}
+        try { duration = Number(seq.end) / TICKS_PER_SECOND || 0; } catch (e2) {}
+        return { seq: seq, name: String(seq.name), fps: sequenceFps(seq), offset: offset, duration: duration };
+    }
+
+    function timelineAE() {
+        var comp = app.project.activeItem;
+        if (!comp || !(comp instanceof CompItem)) return null;
+        var offset = 0;
+        try { offset = comp.displayStartTime || 0; } catch (e) {}
+        return { comp: comp, name: String(comp.name), fps: comp.frameRate || 30, offset: offset, duration: comp.duration };
+    }
+
+    /** The open sequence or composition: name, fps, the time its timecode starts at, and length (seconds). */
+    function getTimelineInfo() {
+        try {
+            var host = getHostName();
+            var t = host === "ae" ? timelineAE() : (host === "ppro" ? timelinePPRO() : null);
+            if (!t) return reply(false, host === "ae" ? "Open a composition first" : "Open a sequence first", { host: host });
+            return reply(true, "OK", { host: host, name: t.name, fps: t.fps, offset: t.offset, duration: t.duration });
+        } catch (e) {
+            return reply(false, "Error: " + e.toString());
+        }
+    }
+
+    /** Premiere's own "Waveform Audio 48kHz 16-bit" export preset, wherever Premiere is installed. */
+    function wavPresetPPRO() {
+        var starts = [];
+        try { starts.push(new File(String(app.path))); } catch (e1) {}
+        try { starts.push(Folder.appPackage); } catch (e2) {}
+        var subPaths = ["MediaIO/systempresets", "Contents/MediaIO/systempresets"];
+        for (var s = 0; s < starts.length; s++) {
+            // app.path may name the executable or its folder; look a few levels up.
+            var dir = starts[s];
+            for (var up = 0; up < 4 && dir; up++) {
+                for (var p = 0; p < subPaths.length; p++) {
+                    var presets = new Folder(dir.fsName + "/" + subPaths[p]);
+                    if (!presets.exists) continue;
+                    var exact = new File(presets.fsName + "/3F3F3F3F_57415645/Waveform Audio 48kHz 16-bit.epr");
+                    if (exact.exists) return exact.fsName;
+                    // "57415645" is WAVE: any preset of Premiere's WAV exporter will do.
+                    var groups = presets.getFiles();
+                    for (var g = 0; g < groups.length; g++) {
+                        if (!(groups[g] instanceof Folder) || !/57415645$/i.test(groups[g].name)) continue;
+                        var eprs = groups[g].getFiles("*.epr");
+                        if (eprs.length) return eprs[0].fsName;
+                    }
+                }
+                dir = dir.parent;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * With audio clips selected, only their tracks are heard while the audio
+     * is read: the other audio tracks are muted and unmuted again after.
+     */
+    function soloSelectedTracksPPRO(seq) {
+        var tracks = seq.audioTracks;
+        var chosen = [];
+        var any = false;
+        for (var t = 0; t < tracks.numTracks; t++) {
+            var has = false;
+            try {
+                for (var c = 0; c < tracks[t].clips.numItems && !has; c++) {
+                    if (tracks[t].clips[c].isSelected()) has = true;
+                }
+            } catch (eSel) {}
+            chosen.push(has);
+            if (has) any = true;
+        }
+        var muted = [];
+        if (!any) return { used: "all", muted: muted };
+        for (var m = 0; m < tracks.numTracks; m++) {
+            if (chosen[m]) continue;
+            try {
+                if (!tracks[m].isMuted()) {
+                    tracks[m].setMute(1);
+                    muted.push(tracks[m]);
+                }
+            } catch (eMute) {}
+        }
+        return { used: "selected", muted: muted };
+    }
+
+    function timelineAudioPPRO(wavPath) {
+        var t = timelinePPRO();
+        if (!t) return reply(false, "Open a sequence first");
+        var preset = wavPresetPPRO();
+        if (!preset) return reply(false, "Premiere's WAV export preset (Waveform Audio 48kHz 16-bit) was not found");
+        var out = new File(wavPath);
+        try { if (out.exists) out.remove(); } catch (eOld) {}
+        var solo = soloSelectedTracksPPRO(t.seq);
+        try {
+            t.seq.exportAsMediaDirect(out.fsName, preset, 0); // 0: the entire sequence
+        } finally {
+            for (var i = 0; i < solo.muted.length; i++) {
+                try { solo.muted[i].setMute(0); } catch (eUnmute) {}
+            }
+        }
+        if (!new File(out.fsName).exists) return reply(false, "Premiere did not export the sequence audio");
+        return reply(true, "OK", { kind: "wav", path: out.fsName, used: solo.used, name: t.name, fps: t.fps, offset: t.offset, duration: t.duration });
+    }
+
+    function timelineAudioAE() {
+        var t = timelineAE();
+        if (!t) return reply(false, "Open a composition first");
+        var comp = t.comp;
+
+        // With audio layers selected, only they are heard while measuring.
+        var picked = {};
+        var any = false;
+        var sel = comp.selectedLayers;
+        var userSelection = [];
+        for (var s = 0; s < sel.length; s++) {
+            try {
+                userSelection.push(sel[s].index);
+                if (sel[s].hasAudio && sel[s].audioEnabled) {
+                    picked[sel[s].index] = true;
+                    any = true;
+                }
+            } catch (eSel) {}
+        }
+        var audible = 0;
+        for (var a = 1; a <= comp.numLayers; a++) {
+            try { if (comp.layer(a).hasAudio && comp.layer(a).audioEnabled && (!any || picked[a])) audible++; } catch (eA) {}
+        }
+        if (!audible) return reply(false, "This composition has no audio to listen to");
+
+        var silenced = [];
+        var workStart = comp.workAreaStart;
+        var workDuration = comp.workAreaDuration;
+        var values = [];
+        var step = comp.frameDuration;
+        var start = 0;
+        var layersBefore = comp.numLayers;
+        var failure = "";
+        app.beginUndoGroup("LazyKick: Read Audio");
+        try {
+            if (any) {
+                for (var i = 1; i <= comp.numLayers; i++) {
+                    var layer = comp.layer(i);
+                    try {
+                        if (layer.hasAudio && layer.audioEnabled && !picked[i]) {
+                            layer.audioEnabled = false;
+                            silenced.push(layer);
+                        }
+                    } catch (eSilence) {}
+                }
+            }
+            // Convert Audio to Keyframes measures the selected layers, so select
+            // exactly the ones to hear (a selected text layer would give silence).
+            for (var d = 1; d <= comp.numLayers; d++) {
+                try {
+                    var each = comp.layer(d);
+                    each.selected = !!(each.hasAudio && each.audioEnabled);
+                } catch (eSelect) {}
+            }
+            comp.workAreaStart = 0;
+            comp.workAreaDuration = comp.duration;
+            try { comp.openInViewer(); } catch (eView) {}
+            try { app.beginSuppressDialogs(); } catch (eSup) {}
+            try {
+                app.executeCommand(CONVERT_AUDIO_TO_KEYFRAMES);
+            } finally {
+                try { app.endSuppressDialogs(false); } catch (eEnd) {}
+            }
+            if (comp.numLayers !== layersBefore + 1) {
+                failure = "After Effects could not measure the audio";
+            } else {
+                var amp = comp.layer(1);
+                var effects = amp.property("ADBE Effect Parade");
+                // Left, Right, Both Channels: the last one, a Slider Control.
+                var both = effects.property(effects.numProperties).property(1);
+                var keys = both.numKeys;
+                for (var k = 1; k <= keys; k++) values.push(Math.round(both.keyValue(k) * 1000) / 1000);
+                if (keys) start = both.keyTime(1);
+                if (keys > 1) step = both.keyTime(2) - both.keyTime(1);
+                amp.remove();
+            }
+        } finally {
+            for (var r = 0; r < silenced.length; r++) {
+                try { silenced[r].audioEnabled = true; } catch (eRestore) {}
+            }
+            try {
+                comp.workAreaStart = workStart;
+                comp.workAreaDuration = workDuration;
+            } catch (eWork) {}
+            // The user's own selection back, by index (the helper layer is gone).
+            var wasSelected = {};
+            for (var u = 0; u < userSelection.length; u++) wasSelected[userSelection[u]] = true;
+            for (var q = 1; q <= comp.numLayers; q++) {
+                try { comp.layer(q).selected = !!wasSelected[q]; } catch (eReselect) {}
+            }
+            app.endUndoGroup();
+        }
+        if (failure) return reply(false, failure);
+        return reply(true, "OK", { kind: "levels", step: step, start: start, values: values, used: any ? "selected" : "all",
+                                   name: t.name, fps: t.fps, offset: t.offset, duration: t.duration });
+    }
+
+    /**
+     * The open timeline's audio, for timing a script to it. Premiere writes a
+     * WAV to `wavPath` ({ kind: "wav", path }); After Effects measures it in
+     * place ({ kind: "levels", step, start, values }). Both report `used`
+     * ("selected" when only the selected clips or layers were heard), and the
+     * timeline's name, fps, timecode offset and duration.
+     */
+    function getTimelineAudio(wavPath) {
+        try {
+            var host = getHostName();
+            if (host === "ppro") return timelineAudioPPRO(wavPath);
+            if (host === "ae") return timelineAudioAE();
+            return reply(false, "Unsupported host application");
+        } catch (e) {
+            return reply(false, "Could not read the audio: " + e.toString());
+        }
+    }
+
+    function pad2(n) { return n < 10 ? "0" + n : String(n); }
+
+    /** A font that has Bengali letters, when the subtitles need one; "" to keep the default. */
+    function bengaliFontAE() {
+        var names = ["NirmalaUI", "Vrinda", "ShonarBangla", "KohinoorBangla-Regular", "BanglaSangamMN", "NotoSansBengali-Regular"];
+        try {
+            if (app.fonts && typeof app.fonts.getFontsByPostScriptName === "function") {
+                for (var i = 0; i < names.length; i++) {
+                    var found = app.fonts.getFontsByPostScriptName(names[i]);
+                    if (found && found.length) return names[i];
+                }
+            }
+        } catch (e) {}
+        return "";
+    }
+
+    function hasBengali(text) {
+        return /[\u0980-\u09FF]/.test(String(text || ""));
+    }
+
+    /** One text layer per cue, lower third, white with a dark outline, first cue on top. */
+    function subtitlesAE(cues) {
+        var t = timelineAE();
+        if (!t) return reply(false, "Open a composition first");
+        var comp = t.comp;
+        var fontSize = Math.max(12, Math.round(comp.height * 0.045));
+        var box = [Math.round(comp.width * 0.84), Math.round(fontSize * 3.4)];
+        var anyBengali = false;
+        for (var b = 0; b < cues.length; b++) if (hasBengali(cues[b].t)) anyBengali = true;
+        var bengaliFont = anyBengali ? bengaliFontAE() : "";
+        var made = 0;
+        var skipped = 0;
+        app.beginUndoGroup("LazyKick: Subtitles");
+        try {
+            for (var i = cues.length - 1; i >= 0; i--) {
+                var cue = cues[i];
+                if (!(cue.s < comp.duration) || !(cue.e > cue.s)) {
+                    skipped++;
+                    continue;
+                }
+                var layer = comp.layers.addBoxText(box, String(cue.t));
+                var textProp = layer.property("ADBE Text Properties").property("ADBE Text Document");
+                var doc = textProp.value;
+                doc.fontSize = fontSize;
+                doc.applyFill = true;
+                doc.fillColor = [1, 1, 1];
+                doc.applyStroke = true;
+                doc.strokeColor = [0, 0, 0];
+                doc.strokeWidth = Math.max(2, Math.round(fontSize * 0.1));
+                doc.strokeOverFill = false;
+                doc.justification = ParagraphJustification.CENTER_JUSTIFY;
+                if (bengaliFont && hasBengali(cue.t)) {
+                    try { doc.font = bengaliFont; } catch (eFont) {}
+                    // Bengali letters join correctly only with the Universal Type Engine.
+                    try { doc.composerEngine = ComposerEngine.UNIVERSAL_TYPE_ENGINE; } catch (eEngine) {}
+                }
+                textProp.setValue(doc);
+                layer.property("ADBE Transform Group").property("ADBE Position").setValue([Math.round(comp.width / 2), Math.round(comp.height * 0.84)]);
+                layer.inPoint = cue.s;
+                layer.outPoint = Math.min(cue.e, comp.duration);
+                layer.name = "Sub " + pad2(i + 1) + "  " + String(cue.t).replace(/\s+/g, " ").substr(0, 40);
+                made++;
+            }
+        } finally {
+            app.endUndoGroup();
+        }
+        var msg = made + " subtitle layer" + (made === 1 ? "" : "s") + " added to '" + t.name + "'";
+        if (skipped) msg += " (" + skipped + " past the end of the composition left out)";
+        return reply(true, msg, { placed: made > 0, count: made, skipped: skipped, font: bengaliFont });
+    }
+
+    /** Imports the SRT into a "Subtitles" bin and lays it on the sequence as a subtitle caption track. */
+    function subtitlesPPRO(srtPath) {
+        var t = timelinePPRO();
+        if (!t) return reply(false, "Open a sequence first");
+        var f = new File(srtPath);
+        if (!f.exists) return reply(false, "The subtitle file was not written");
+        var bin = resolveBinPathPPRO("Subtitles");
+        var before = childIdsPPRO(bin);
+        app.project.importFiles([f.fsName], true, bin, false);
+        var added = newChildrenPPRO(bin, before);
+        var item = null;
+        for (var i = 0; i < added.length && !item; i++) {
+            try { if (normalizeMediaPath(added[i].getMediaPath()) === normalizeMediaPath(f.fsName)) item = added[i]; } catch (eItem) {}
+        }
+        if (!item && added.length) item = added[0];
+        if (!item) return reply(false, "Premiere Pro did not import the subtitle file");
+        if (typeof t.seq.createCaptionTrack !== "function") {
+            return reply(true, "Subtitles are in the 'Subtitles' bin: drag them onto the sequence (this Premiere Pro cannot place them by script)", { placed: false });
+        }
+        var format;
+        try { format = Sequence.CAPTION_FORMAT_SUBTITLE; } catch (eFormat) { format = undefined; }
+        var ok = format !== undefined ? t.seq.createCaptionTrack(item, 0, format) : t.seq.createCaptionTrack(item, 0);
+        if (ok === false) return reply(true, "Subtitles are in the 'Subtitles' bin, but Premiere Pro did not make the caption track", { placed: false });
+        return reply(true, "Subtitles placed on a new caption track in '" + t.name + "'", { placed: true });
+    }
+
+    /**
+     * Put subtitles on the open timeline.
+     * payloadJson: { srtPath: "...", cues: [{ s, e, t }] } in seconds from the
+     * timeline's start. Premiere uses the SRT, After Effects the cues.
+     */
+    function placeSubtitles(payloadJson) {
+        try {
+            var payload = ((typeof payloadJson === "string") ? JSON.parse(payloadJson) : payloadJson) || {};
+            var host = getHostName();
+            if (host === "ppro") return subtitlesPPRO(payload.srtPath || "");
+            if (host === "ae") return subtitlesAE(payload.cues || []);
+            return reply(false, "Unsupported host application");
+        } catch (e) {
+            return reply(false, "Could not place the subtitles: " + e.toString());
+        }
+    }
+
     // Public API Object
     return {
         VERSION: VERSION,
@@ -1065,6 +1669,9 @@ var LazyKickHost = (function () {
         importPastedImage: importPastedImage,
         importFilesToBin: importFilesToBin,
         syncWatchBin: syncWatchBin,
+        getTimelineInfo: getTimelineInfo,
+        getTimelineAudio: getTimelineAudio,
+        placeSubtitles: placeSubtitles,
         // Pure helpers, exported for tools/test-host.js
         sanitizeBinPath: sanitizeBinPath,
         formatFramesTimecode: formatFramesTimecode,
@@ -1087,3 +1694,6 @@ function importFilesToBin(binPath, filePathsJson, expectedProjectId) {
 function syncWatchBin(binPath, payloadJson, expectedProjectId) {
     return LazyKickHost.syncWatchBin(binPath, payloadJson, expectedProjectId);
 }
+function getTimelineInfo() { return LazyKickHost.getTimelineInfo(); }
+function getTimelineAudio(wavPath) { return LazyKickHost.getTimelineAudio(wavPath); }
+function placeSubtitles(payloadJson) { return LazyKickHost.placeSubtitles(payloadJson); }

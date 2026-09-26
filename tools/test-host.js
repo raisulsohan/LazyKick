@@ -52,6 +52,8 @@ var existingFiles = {};   // normalised path -> { width, height }
 
 function norm(p) { return String(p).replace(/\//g, "\\").toLowerCase(); }
 
+var existingFolders = {}; // normalised path -> true
+
 function File(p) {
     this.fsName = String(p).replace(/\//g, "\\");
     var info = existingFiles[norm(p)];
@@ -59,7 +61,39 @@ function File(p) {
     this.info = info;
     var cut = this.fsName.lastIndexOf("\\");
     this.name = this.fsName.substr(cut + 1).replace(/ /g, "%20");
-    this.parent = { fsName: this.fsName.substr(0, cut) };
+    this.parent = cut > 0 ? new Folder(this.fsName.substr(0, cut)) : null;
+}
+File.prototype.remove = function () {
+    delete existingFiles[norm(this.fsName)];
+    this.exists = false;
+    return true;
+};
+
+function Folder(p) {
+    this.fsName = String(p).replace(/\//g, "\\").replace(/\\+$/, "");
+    this.exists = !!existingFolders[norm(this.fsName)];
+    var cut = this.fsName.lastIndexOf("\\");
+    this.name = this.fsName.substr(cut + 1);
+    this.parent = cut > 0 ? new Folder(this.fsName.substr(0, cut)) : null;
+}
+/** Direct children, from the existingFolders / existingFiles maps (mask: "*.ext"). */
+Folder.prototype.getFiles = function (mask) {
+    var base = norm(this.fsName) + "\\";
+    var out = [];
+    var k;
+    for (k in existingFolders) {
+        if (k.indexOf(base) === 0 && k.substr(base.length).indexOf("\\") === -1) out.push(new Folder(k));
+    }
+    var ext = mask ? mask.replace(/^\*/, "").toLowerCase() : "";
+    for (k in existingFiles) {
+        if (k.indexOf(base) === 0 && k.substr(base.length).indexOf("\\") === -1 && (!ext || k.substr(k.length - ext.length) === ext)) out.push(new File(k));
+    }
+    return out;
+};
+
+function addFolderChain(p) {
+    var parts = norm(p).split("\\");
+    for (var i = 1; i <= parts.length; i++) existingFolders[parts.slice(0, i).join("\\")] = true;
 }
 
 // After Effects classes (set to undefined while testing Premiere).
@@ -107,7 +141,7 @@ section("pure helpers", function () {
 function PItem(type, name, mediaPath, duration) {
     this.type = type;
     this.name = name;
-    this.nodeId = "node" + (PItem.next++);
+    this.nodeId = ppro.noNodeIds ? undefined : "node" + (PItem.next++);
     this.children = { numItems: 0 };
     this.mediaPath = mediaPath;
     this.duration = duration || 0;
@@ -123,6 +157,13 @@ PItem.prototype.moveBin = function (dest) {
     removeChild(this.parentBin, this);
     addChild(dest, this);
     ppro.moves++;
+    return 0;
+};
+PItem.prototype.deleteBin = function () {
+    // The real one deletes the bin with everything in it: never call it on a full bin.
+    if (this.children.numItems) throw new Error("deleteBin on a bin that still holds " + this.children.numItems + " items");
+    removeChild(this.parentBin, this);
+    ppro.deleted.push(this.name);
     return 0;
 };
 PItem.prototype.canChangeMediaPath = function () { return true; };
@@ -173,6 +214,7 @@ function setupPremiere(tracks, playhead) {
     ppro.imports = [];
     ppro.unsupported = {};
     ppro.moves = 0;
+    ppro.deleted = [];
     ppro.relinks = [];
     var root = new PItem(2, "root");
     var seq = {
@@ -538,7 +580,7 @@ section("After Effects", function () {
     function aeKids(folder) {
         var names = [];
         for (var i = 1; i <= items.length; i++) {
-            if (items[i].parentFolder === folder) names.push(items[i] instanceof AEFolder ? items[i].name + "/" : items[i].file.fsName.replace(/^.*\\/, ""));
+            if (items[i].parentFolder === folder) names.push(items[i] instanceof AEFolder ? items[i].name + "/" : (items[i].file ? items[i].file.fsName.replace(/^.*\\/, "") : items[i].name));
         }
         return names.join(",");
     }
@@ -679,6 +721,50 @@ section("After Effects", function () {
     eq("ae relink: moved into Footage/Day 3", bItem && bItem.parentFolder.name + "<" + bItem.parentFolder.parentFolder.name, "Day 3<Footage");
     eq("ae mirror: undo balanced", undoDepth, 0);
 
+    // ---- the folder's existing bin: two "03. Videos" folders become one
+    AEFolder.prototype.remove = function () {
+        var kept = [];
+        for (var i = 1; i <= items.length; i++) if (items[i] !== this) kept.push(items[i]);
+        for (var j = 1; j <= items.length; j++) delete items[j];
+        items.length = 0;
+        for (var k = 0; k < kept.length; k++) addItem(kept[k]);
+        aeRemoved.push(this.name);
+    };
+    var aeRemoved = [];
+    var vids = ["D:/Proj/03. Videos/01. Desktop/chunk-01.mp4", "D:/Proj/03. Videos/01. Desktop/chunk-02.mp4", "D:/Proj/03. Videos/02. Smartphone/chunk-01-4x5.mp4"];
+    for (var vf = 0; vf < vids.length; vf++) existingFiles[norm(vids[vf])] = {};
+    function footageIn(folder, filePath) {
+        var it = app.project.importFile(new ImportOptions(new File(filePath)));
+        it.parentFolder = folder;
+        return it;
+    }
+    function folderIn(parent, name) {
+        var fo = items.addFolder(name);
+        fo.parentFolder = parent;
+        return fo;
+    }
+    var oldVideos = folderIn(root, "03. Videos");
+    footageIn(oldVideos, vids[0]);
+    footageIn(oldVideos, vids[2]);
+    var aeComp = { name: "Main Comp", parentFolder: oldVideos };   // a comp kept in that folder
+    addItem(aeComp);
+    var madeVideos = folderIn(root, "03. Videos");
+    footageIn(folderIn(madeVideos, "01. Desktop"), vids[1]);
+    var twinFiles = [];
+    twinFiles.push([vids[0], "01. Desktop"], [vids[1], "01. Desktop"], [vids[2], "02. Smartphone"]);
+    var aeTwins = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, twinFiles), "ae|unsaved|untitled"));
+    check("ae twins: ok", aeTwins.ok === true, aeTwins.msg);
+    var videosLeft = 0;
+    for (var vl = 1; vl <= items.length; vl++) if (items[vl] instanceof AEFolder && items[vl].parentFolder === root && items[vl].name === "03. Videos") videosLeft++;
+    eq("ae twins: one '03. Videos' folder left", videosLeft, 1);
+    eq("ae twins: the emptied copy removed", aeRemoved.join(","), "03. Videos");
+    eq("ae twins: the user's folder kept, comp included", aeKids(oldVideos).split(",").sort().join(","), "01. Desktop/,02. Smartphone/,Main Comp");
+    eq("ae twins: the comp stays in it", aeComp.parentFolder === oldVideos, true);
+    eq("ae twins: Desktop sorted", aeKids(aeFolder(oldVideos, "01. Desktop")).split(",").sort().join(","), "chunk-01.mp4,chunk-02.mp4");
+    eq("ae twins: Smartphone sorted", aeKids(aeFolder(oldVideos, "02. Smartphone")), "chunk-01-4x5.mp4");
+    eq("ae twins: reported", aeTwins.merged + ":" + aeTwins.rootPath, "1:03. Videos");
+    eq("ae twins: undo balanced", undoDepth, 0);
+
     app.project.file = new File("D:/Work/Promo.aep");
     eq("ae: saved id", getProjectPath(), "ae|saved|D:\\Work\\Promo.aep");
     var info = parse(getProjectInfo());
@@ -686,6 +772,441 @@ section("After Effects", function () {
     check("ae info: version reported", /^\d+\.\d+\.\d+$/.test(info.version) && info.version === LazyKickHost.VERSION, info.version);
     var refused = parse(importFilesToBin("SFX", '["D:/Media/a.mp4"]', "ae|unsaved|untitled"));
     eq("ae sync: refused after project changed", refused.projectChanged, true);
+});
+
+// ======================================= Premiere Pro: the folder's existing bin
+function binsNamed(parent, name) {
+    var n = 0;
+    for (var i = 0; i < parent.children.numItems; i++) if (parent.children[i].type === 2 && parent.children[i].name === name) n++;
+    return n;
+}
+function binIn(parent, name) {
+    for (var i = 0; i < parent.children.numItems; i++) if (parent.children[i].type === 2 && parent.children[i].name === name) return parent.children[i];
+    return null;
+}
+var VID = "D:\\Proj\\03. Videos";
+function videoFiles(newOnes) {
+    var list = [
+        ["D:/Proj/03. Videos/01. Desktop/chunk-01.mp4", "01. Desktop"],
+        ["D:/Proj/03. Videos/01. Desktop/chunk-02.mp4", "01. Desktop"],
+        ["D:/Proj/03. Videos/02. Smartphone/chunk-01-4x5.mp4", "02. Smartphone"],
+        ["D:/Proj/03. Videos/02. Smartphone/chunk-02-4x5.mp4", "02. Smartphone"]
+    ];
+    for (var i = 0; i < list.length; i++) if (newOnes && newOnes[list[i][0].replace(/^.*\//, "")]) list[i].push(true);
+    return list;
+}
+
+function existingBinSection(noNodeIds) {
+    var tag = noNodeIds ? " (no nodeId)" : "";
+    ppro.noNodeIds = noNodeIds;
+    existingFiles = {};
+    var all = videoFiles();
+    for (var f = 0; f < all.length; f++) existingFiles[norm(all[f][0])] = {};
+
+    // What 1.3 left: the user's own "03. Videos" (flat) and a second one it made beside it.
+    setupPremiere([new PTrack(false, [])], 0);
+    var root = app.project.rootItem;
+    var old = root.createBin("03. Videos");
+    clip(old, VID + "\\01. Desktop\\chunk-01.mp4");
+    clip(old, VID + "\\02. Smartphone\\chunk-01-4x5.mp4");
+    clip(old, "D:\\Old\\chunk-02-v2.mp4");             // not in the folder any more
+    addChild(old, new PItem(1, "Edit v1", "", 0));      // a sequence
+    var made = root.createBin("03. Videos");
+    clip(made.createBin("01. Desktop"), VID + "\\01. Desktop\\chunk-02.mp4");
+    clip(made.createBin("02. Smartphone"), VID + "\\02. Smartphone\\chunk-02-4x5.mp4");
+    addChild(made, new PItem(1, "Rough cut", "", 0));   // a sequence made in the copy
+    var r = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, videoFiles()), PPRO_ID));
+    check("twins" + tag + ": ok", r.ok === true, r.msg);
+    eq("twins" + tag + ": one '03. Videos' left", binsNamed(root, "03. Videos"), 1);
+    eq("twins" + tag + ": the emptied copy deleted, nothing else", ppro.deleted.join(","), "03. Videos");
+    eq("twins" + tag + ": reported", r.merged + ":" + r.rootPath, "1:03. Videos");
+    var videos = binIn(root, "03. Videos");
+    eq("twins" + tag + ": the user's bin kept, with its leftovers and the copy's sequence", videos === old && pproKids(old), "chunk-02-v2.mp4,Edit v1,01. Desktop/,02. Smartphone/,Rough cut");
+    eq("twins" + tag + ": Desktop sorted", pproKids(binIn(old, "01. Desktop")), "chunk-02.mp4,chunk-01.mp4");
+    eq("twins" + tag + ": Smartphone sorted", pproKids(binIn(old, "02. Smartphone")), "chunk-02-4x5.mp4,chunk-01-4x5.mp4");
+
+    // First link, the folder's bin nested elsewhere: it becomes the watch bin.
+    setupPremiere([new PTrack(false, [])], 0);
+    root = app.project.rootItem;
+    var assets = root.createBin("Assets");
+    var nested = assets.createBin("03. Videos");
+    clip(nested, VID + "\\01. Desktop\\chunk-01.mp4");
+    clip(nested, VID + "\\02. Smartphone\\chunk-01-4x5.mp4");
+    clip(nested, "D:\\Old\\chunk-02-v2.mp4");
+    delete existingFiles[norm("D:/Proj/03. Videos/01. Desktop/chunk-02.mp4")];
+    existingFiles[norm("D:/Proj/03. Videos/01. Desktop/chunk-02.mp4")] = {};
+    var first = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, videoFiles({ "chunk-02.mp4": 1, "chunk-02-4x5.mp4": 1 })), PPRO_ID));
+    eq("adopt" + tag + ": no second bin at the top", pproKids(root), "Assets/");
+    eq("adopt" + tag + ": watch bin is the existing one", first.adopted + ":" + first.rootPath, "true:Assets/03. Videos");
+    eq("adopt" + tag + ": new files imported there", first.imported + ":" + first.failed, "2:0");
+    eq("adopt" + tag + ": sorted like the disk", pproKids(nested), "chunk-02-v2.mp4,01. Desktop/,02. Smartphone/");
+    eq("adopt" + tag + ": Desktop", pproKids(binIn(nested, "01. Desktop")), "chunk-02.mp4,chunk-01.mp4");
+    eq("adopt" + tag + ": Smartphone", pproKids(binIn(nested, "02. Smartphone")), "chunk-02-4x5.mp4,chunk-01-4x5.mp4");
+    var again = parse(syncWatchBin("Assets/03. Videos", payload("D:/Proj/03. Videos", true, videoFiles()), PPRO_ID));
+    eq("adopt" + tag + ": next sync finds it by its path, nothing to do", again.moved + ":" + again.merged + ":" + again.adopted, "0:0:false");
+}
+
+section("Premiere Pro: the folder's existing bin", function () {
+    existingBinSection(false);
+    existingBinSection(true);
+
+    // No nodeId from Premiere: a new file imported into a sub-bin that already has clips is still seen.
+    setupPremiere([new PTrack(false, [])], 0);
+    var fullBin = app.project.rootItem.createBin("03. Videos").createBin("01. Desktop");
+    clip(fullBin, VID + "\\01. Desktop\\chunk-01.mp4");
+    var intoFull = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", false, [["D:/Proj/03. Videos/01. Desktop/chunk-02.mp4", "01. Desktop", true]]), PPRO_ID));
+    eq("no nodeId: import into a bin with clips counted right", intoFull.imported + ":" + intoFull.failed + ":" + pproKids(fullBin), "1:0:chunk-01.mp4,chunk-02.mp4");
+    ppro.noNodeIds = false;
+
+    existingFiles = {};
+    var all = videoFiles();
+    for (var f = 0; f < all.length; f++) existingFiles[norm(all[f][0])] = {};
+    existingFiles[norm("D:/Other/x.mp4")] = {};
+
+    // Spelled differently (spaces, capitals): still the folder's bin.
+    setupPremiere([new PTrack(false, [])], 0);
+    var root = app.project.rootItem;
+    var odd = root.createBin("Footage").createBin("03.  videos ");
+    clip(odd, VID + "\\01. Desktop\\chunk-01.mp4");
+    var spelled = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, videoFiles()), PPRO_ID));
+    eq("spelling: adopted", spelled.adopted + ":" + spelled.rootPath, "true:Footage/03.  videos ");
+
+    // Same name but none of the folder's media: not the folder's bin.
+    setupPremiere([new PTrack(false, [])], 0);
+    root = app.project.rootItem;
+    var unrelated = root.createBin("Archive").createBin("03. Videos");
+    clip(unrelated, "D:\\Other\\x.mp4");
+    var fresh = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, videoFiles({ "chunk-01.mp4": 1 })), PPRO_ID));
+    eq("unrelated: a new watch bin at its own path", fresh.adopted + ":" + fresh.rootPath + ":" + pproKids(root), "false:03. Videos:Archive/,03. Videos/");
+    eq("unrelated: left alone", pproKids(unrelated), "x.mp4");
+
+    // Copies elsewhere: folded in only when they hold nothing but the folder's media.
+    setupPremiere([new PTrack(false, [])], 0);
+    root = app.project.rootItem;
+    var watch = root.createBin("03. Videos");
+    clip(watch.createBin("01. Desktop"), VID + "\\01. Desktop\\chunk-02.mp4");
+    var pure = root.createBin("Old Import").createBin("03. Videos");
+    clip(pure, VID + "\\01. Desktop\\chunk-01.mp4");
+    var mixed = root.createBin("Client").createBin("03. Videos");
+    clip(mixed, VID + "\\02. Smartphone\\chunk-01-4x5.mp4");
+    clip(mixed, "D:\\Other\\x.mp4");
+    var folded = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, videoFiles()), PPRO_ID));
+    eq("copies: only the pure copy folded in", folded.merged + ":" + ppro.deleted.join(","), "1:03. Videos");
+    eq("copies: its clip now in the watch bin", pproKids(binIn(watch, "01. Desktop")), "chunk-02.mp4,chunk-01.mp4");
+    eq("copies: a bin that also holds other work is left alone", pproKids(mixed), "chunk-01-4x5.mp4,x.mp4");
+
+    // Twin sub-bins inside the watch bin become one.
+    setupPremiere([new PTrack(false, [])], 0);
+    root = app.project.rootItem;
+    watch = root.createBin("03. Videos");
+    var desk1 = watch.createBin("01. Desktop");
+    clip(desk1, VID + "\\01. Desktop\\chunk-01.mp4");
+    var desk2 = watch.createBin("01. desktop");
+    clip(desk2, VID + "\\01. Desktop\\chunk-02.mp4");
+    var twinsInside = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, videoFiles()), PPRO_ID));
+    eq("twins inside: one Desktop bin with both clips", twinsInside.merged + ":" + pproKids(watch) + ":" + pproKids(desk1), "1:01. Desktop/:chunk-01.mp4,chunk-02.mp4");
+
+    // A subfolder with the root's own name stays a sub-bin.
+    setupPremiere([new PTrack(false, [])], 0);
+    root = app.project.rootItem;
+    existingFiles[norm("D:/Proj/03. Videos/03. Videos/inner.mp4")] = {};
+    watch = root.createBin("03. Videos");
+    var inner = watch.createBin("03. Videos");
+    clip(inner, VID + "\\03. Videos\\inner.mp4");
+    var same = parse(syncWatchBin("03. Videos", payload("D:/Proj/03. Videos", true, [["D:/Proj/03. Videos/03. Videos/inner.mp4", "03. Videos"]]), PPRO_ID));
+    eq("inner namesake: not merged into its parent", same.merged + ":" + pproKids(watch) + ":" + pproKids(inner), "0:03. Videos/:inner.mp4");
+
+    // An Auto-Sync import (no sorting) still lands in the folder's existing bin, and merges nothing.
+    setupPremiere([new PTrack(false, [])], 0);
+    root = app.project.rootItem;
+    var assets = root.createBin("Assets");
+    var nested = assets.createBin("03. Videos");
+    clip(nested, VID + "\\01. Desktop\\chunk-01.mp4");
+    var twin = root.createBin("03. Videos");
+    clip(twin, VID + "\\02. Smartphone\\chunk-01-4x5.mp4");
+    var auto = parse(syncWatchBin("Assets/03. Videos", payload("D:/Proj/03. Videos", false, [["D:/Proj/03. Videos/01. Desktop/chunk-02.mp4", "01. Desktop", true]]), PPRO_ID));
+    eq("auto import: into the existing bin's sub-bin", pproKids(binIn(nested, "01. Desktop")), "chunk-02.mp4");
+    eq("auto import: nothing merged or sorted", auto.merged + ":" + auto.moved + ":" + pproKids(nested), "0:0:chunk-01.mp4,01. Desktop/");
+    eq("auto import: the other bin untouched", pproKids(twin), "chunk-01-4x5.mp4");
+});
+
+// ================================================ Premiere Pro: script to audio
+var TICKS = 254016000000;
+var PRESET_DIR = "C:\\Program Files\\Adobe\\Adobe Premiere Pro 2026\\MediaIO\\systempresets\\3F3F3F3F_57415645";
+var PRESET = PRESET_DIR + "\\Waveform Audio 48kHz 16-bit.epr";
+
+function PAudioTrack(name, muted, selectedClips) {
+    this.name = name;
+    this.muted = muted;
+    this.clips = { numItems: selectedClips.length };
+    for (var i = 0; i < selectedClips.length; i++) {
+        this.clips[i] = { sel: selectedClips[i], isSelected: function () { return this.sel; } };
+    }
+}
+PAudioTrack.prototype.isMuted = function () { return this.muted; };
+PAudioTrack.prototype.setMute = function (v) { this.muted = !!v; ppro.muteCalls++; };
+
+function setupPremiereAudio(audioTracks) {
+    var seq = setupPremiere([new PTrack(false, [])], 0);
+    ppro.exports = [];
+    ppro.captions = [];
+    ppro.muteCalls = 0;
+    seq.zeroPoint = String(3600 * TICKS);         // timecode starts at 01:00:00:00
+    seq.end = String(3600 * TICKS + 90 * TICKS);
+    seq.audioTracks = { numTracks: audioTracks.length };
+    for (var i = 0; i < audioTracks.length; i++) seq.audioTracks[i] = audioTracks[i];
+    seq.exportAsMediaDirect = function (out, preset, range) {
+        var mutes = [];
+        for (var t = 0; t < audioTracks.length; t++) mutes.push(audioTracks[t].muted ? "M" : "-");
+        ppro.exports.push({ out: out, preset: preset, range: range, mutes: mutes.join("") });
+        if (!ppro.exportFails) existingFiles[norm(out)] = {};
+        return !ppro.exportFails;
+    };
+    seq.createCaptionTrack = function (item, start, format) {
+        ppro.captions.push({ item: item, start: start, format: format });
+        return true;
+    };
+    app.path = "C:\\Program Files\\Adobe\\Adobe Premiere Pro 2026\\Adobe Premiere Pro.exe";
+    return seq;
+}
+
+var Sequence = { CAPTION_FORMAT_SUBTITLE: 11 };
+
+section("Premiere Pro: script to audio", function () {
+    existingFiles = {};
+    existingFolders = {};
+    addFolderChain(PRESET_DIR);
+    existingFiles[norm(PRESET)] = {};
+    ppro.exportFails = false;
+
+    var a1 = new PAudioTrack("A1", false, [false]);
+    var a2 = new PAudioTrack("A2", false, [false, true]);   // the voiceover clip is selected
+    var a3 = new PAudioTrack("A3", true, [false]);          // muted by the user
+    setupPremiereAudio([a1, a2, a3]);
+
+    var info = parse(getTimelineInfo());
+    eq("ppro info: sequence", info.ok + ":" + info.name + ":" + info.fps, "true:Seq 01:25");
+    eq("ppro info: timecode offset and length", info.offset + ":" + info.duration, "3600:3690");
+
+    var r = parse(getTimelineAudio("C:/Temp/voice.wav"));
+    check("ppro audio: ok", r.ok === true, r.msg);
+    eq("ppro audio: a WAV", r.kind + ":" + r.path, "wav:C:\\Temp\\voice.wav");
+    eq("ppro audio: Premiere's own WAV preset", ppro.exports[0].preset, PRESET);
+    eq("ppro audio: the whole sequence", ppro.exports[0].range, 0);
+    eq("ppro audio: only the selected clip's track heard", ppro.exports[0].mutes, "M-M");
+    eq("ppro audio: reported", r.used, "selected");
+    eq("ppro audio: tracks as they were", (a1.muted ? "M" : "-") + (a2.muted ? "M" : "-") + (a3.muted ? "M" : "-"), "--M");
+    eq("ppro audio: the user's own mute never touched", ppro.muteCalls, 2);
+    eq("ppro audio: timeline facts", r.fps + ":" + r.offset, "25:3600");
+
+    a2.clips[1].sel = false;
+    var all = parse(getTimelineAudio("C:/Temp/voice2.wav"));
+    eq("ppro audio: nothing selected, everything heard", all.used + ":" + ppro.exports[1].mutes, "all:--M");
+
+    a2.clips[1].sel = true;
+    ppro.exportFails = true;
+    var failed = parse(getTimelineAudio("C:/Temp/voice3.wav"));
+    eq("ppro audio: export failed, said so", failed.ok, false);
+    eq("ppro audio: mutes put back after a failure too", (a1.muted ? "M" : "-") + (a2.muted ? "M" : "-") + (a3.muted ? "M" : "-"), "--M");
+    ppro.exportFails = false;
+
+    // The preset found by its folder when the file has another name.
+    delete existingFiles[norm(PRESET)];
+    existingFiles[norm(PRESET_DIR + "\\Custom WAV.epr")] = {};
+    var other = parse(getTimelineAudio("C:/Temp/voice4.wav"));
+    eq("ppro audio: any preset of the WAV exporter", other.ok && ppro.exports[ppro.exports.length - 1].preset.toLowerCase(), norm(PRESET_DIR + "\\Custom WAV.epr"));
+    delete existingFiles[norm(PRESET_DIR + "\\Custom WAV.epr")];
+    var none = parse(getTimelineAudio("C:/Temp/voice5.wav"));
+    check("ppro audio: no preset, clear message", none.ok === false && /preset/.test(none.msg), none.msg);
+
+    app.project.activeSequence = null;
+    eq("ppro audio: no sequence", parse(getTimelineAudio("C:/Temp/x.wav")).msg, "Open a sequence first");
+    eq("ppro info: no sequence", parse(getTimelineInfo()).ok, false);
+
+    // Subtitles: the SRT goes into a Subtitles bin and onto a caption track.
+    setupPremiereAudio([new PAudioTrack("A1", false, [])]);
+    existingFiles[norm("D:/Work/LazyKick Subtitles/Seq 01.srt")] = {};
+    var subs = parse(placeSubtitles(JSON.stringify({ srtPath: "D:/Work/LazyKick Subtitles/Seq 01.srt", cues: [] })));
+    check("ppro subtitles: ok", subs.ok === true && subs.placed === true, subs.msg);
+    eq("ppro subtitles: imported into a Subtitles bin", ppro.imports[0].bin, "Subtitles");
+    eq("ppro subtitles: caption track from the imported file", ppro.captions.length && ppro.captions[0].item.mediaPath, "D:\\Work\\LazyKick Subtitles\\Seq 01.srt");
+    eq("ppro subtitles: at the sequence start, as subtitles", ppro.captions[0].start + ":" + ppro.captions[0].format, "0:11");
+
+    var seq2 = setupPremiereAudio([]);
+    seq2.createCaptionTrack = undefined;
+    var older = parse(placeSubtitles(JSON.stringify({ srtPath: "D:/Work/LazyKick Subtitles/Seq 01.srt" })));
+    check("ppro subtitles: older Premiere, left in the bin with a hint", older.ok === true && older.placed === false && /drag/.test(older.msg), older.msg);
+    var missing = parse(placeSubtitles(JSON.stringify({ srtPath: "D:/Nowhere/none.srt" })));
+    eq("ppro subtitles: missing file", missing.ok, false);
+});
+
+// ============================================== After Effects: script to audio
+section("After Effects: script to audio", function () {
+    var fps = 25;
+    var comp;
+    var commands = [];
+    function AELayer(name, loud) {
+        this.name = name;
+        this.loud = loud;           // loudness at time t, or null for no audio
+        this.hasAudio = !!loud;
+        this.audioEnabled = !!loud;
+        this.inPoint = 0;
+        this.outPoint = 0;
+        this.index = 0;
+    }
+    AELayer.prototype.remove = function () {
+        for (var i = 0; i < comp.list.length; i++) if (comp.list[i] === this) comp.list.splice(i, 1);
+        comp.reindex();
+    };
+    function TextLayer(box, text) {
+        this.box = box;
+        var self = this;
+        this.doc = { text: text, font: "ArialMT", fontSize: 0, justification: 0 };
+        this.position = null;
+        this.hasAudio = false;
+        this.property = function (name) {
+            if (name === "ADBE Text Properties") return { property: function () { return { value: self.doc, setValue: function (d) { self.doc = d; } }; } };
+            return { property: function () { return { setValue: function (v) { self.position = v; } }; } };
+        };
+    }
+    TextLayer.prototype.remove = AELayer.prototype.remove;
+
+    CompItem = function () {};
+    FolderItem = function () {};
+    FootageItem = function () {};
+    ImportOptions = function () {};
+    ParagraphJustification = { CENTER_JUSTIFY: 7 };
+    ComposerEngine = { UNIVERSAL_TYPE_ENGINE: 2 };
+    comp = new CompItem();
+    comp.name = "Explainer";
+    comp.frameRate = fps;
+    comp.frameDuration = 1 / fps;
+    comp.duration = 10;
+    comp.width = 1920;
+    comp.height = 1080;
+    comp.displayStartTime = 0;
+    comp.workAreaStart = 2;
+    comp.workAreaDuration = 3;
+    comp.list = [];
+    comp.selectedLayers = [];
+    comp.reindex = function () {
+        this.numLayers = this.list.length;
+        for (var i = 0; i < this.list.length; i++) this.list[i].index = i + 1;
+    };
+    comp.layer = function (i) { return this.list[i - 1]; };
+    comp.openInViewer = function () { commands.push("view"); };
+    comp.layers = {
+        addBoxText: function (box, text) {
+            var l = new TextLayer(box, text);
+            comp.list.unshift(l);
+            comp.reindex();
+            return l;
+        }
+    };
+    // Voice speaks 1-3 s and 5-8 s; music plays throughout, quieter.
+    var voice = new AELayer("Voice", function (t) { return (t >= 1 && t < 3) || (t >= 5 && t < 8) ? 10 : 0; });
+    var music = new AELayer("Music", function () { return 1; });
+    var title = new AELayer("Title", null);
+    comp.list = [title, voice, music];
+    comp.reindex();
+
+    app = {
+        project: { file: null, activeItem: comp, items: { length: 0 }, rootFolder: {}, importFile: function () {} },
+        beginUndoGroup: function () { undoDepth++; undoGroups++; },
+        endUndoGroup: function () { undoDepth--; },
+        beginSuppressDialogs: function () { commands.push("quiet"); },
+        endSuppressDialogs: function () { commands.push("loud"); },
+        fonts: { getFontsByPostScriptName: function (n) { return n === "NirmalaUI" ? [{}] : []; } },
+        executeCommand: function (id) {
+            commands.push(id);
+            // Convert Audio to Keyframes: one keyframe a frame over the work area.
+            var keys = [];
+            for (var f = 0; f < Math.round(comp.workAreaDuration * fps); f++) {
+                var t = comp.workAreaStart + f / fps;
+                var v = 0;
+                for (var i = 0; i < comp.list.length; i++) {
+                    var l = comp.list[i];
+                    if (l.hasAudio && l.audioEnabled && l.selected) v += l.loud(t); // as in After Effects: selected layers only
+                }
+                keys.push([t, v]);
+            }
+            var slider = {
+                numKeys: keys.length,
+                keyValue: function (k) { return keys[k - 1][1]; },
+                keyTime: function (k) { return keys[k - 1][0]; }
+            };
+            var amp = new AELayer("Audio Amplitude", null);
+            amp.property = function () {
+                return { numProperties: 3, property: function (n) { return { property: function () { return n === 3 ? slider : null; } }; } };
+            };
+            comp.list.unshift(amp);
+            comp.reindex();
+        }
+    };
+
+    eq("ae script: host detected", LazyKickHost.getHostName(), "ae");
+    var info = parse(getTimelineInfo());
+    eq("ae info: composition", info.ok + ":" + info.name + ":" + info.fps + ":" + info.duration, "true:Explainer:25:10");
+
+    var groupsBefore = undoGroups;
+    // The title (no audio) is selected, as layers often are: still everything is heard.
+    comp.selectedLayers = [title];
+    title.selected = true;
+    var r = parse(getTimelineAudio(""));
+    check("ae audio: ok", r.ok === true, r.msg);
+    eq("ae audio: the user's selection put back", (title.selected ? "T" : "-") + (voice.selected ? "V" : "-") + (music.selected ? "M" : "-"), "T--");
+    eq("ae audio: levels, one a frame over the whole comp", r.kind + ":" + r.values.length + ":" + r.step + ":" + r.start, "levels:250:0.04:0");
+    eq("ae audio: the Convert Audio to Keyframes command, dialogs held back", commands.slice(0, 4).join(","), "view,quiet,4218,loud");
+    eq("ae audio: everything heard (voice + music)", r.values[25 * 2] + ":" + r.values[25 * 4], "11:1");
+    eq("ae audio: helper layer removed", comp.numLayers + ":" + comp.layer(1).name, "3:Title");
+    eq("ae audio: work area put back", comp.workAreaStart + ":" + comp.workAreaDuration, "2:3");
+    eq("ae audio: one undo step, balanced", (undoGroups - groupsBefore) + ":" + undoDepth, "1:0");
+    eq("ae audio: reported", r.used, "all");
+
+    comp.selectedLayers = [voice];
+    title.selected = false;
+    voice.selected = true;
+    var solo = parse(getTimelineAudio(""));
+    eq("ae audio: only the selected voice heard", solo.values[25 * 2] + ":" + solo.values[25 * 4], "10:0");
+    eq("ae audio: selection put back again", (title.selected ? "T" : "-") + (voice.selected ? "V" : "-") + (music.selected ? "M" : "-"), "-V-");
+    eq("ae audio: the music's audio switched back on", music.audioEnabled, true);
+    eq("ae audio: reported selected", solo.used, "selected");
+
+    comp.selectedLayers = [title];
+    voice.audioEnabled = false;
+    music.audioEnabled = false;
+    commands = [];
+    var silent = parse(getTimelineAudio(""));
+    check("ae audio: nothing to hear, said so without running the command", silent.ok === false && commands.length === 0, silent.msg);
+    voice.audioEnabled = true;
+    music.audioEnabled = true;
+    comp.selectedLayers = [];
+
+    // Subtitles as text layers.
+    var cues = [
+        { s: 1, e: 2.9, t: "Hello and welcome." },
+        { s: 5, e: 7.9, t: "\u0986\u09AE\u09BF \u09AC\u09BE\u0982\u09B2\u09BE\u09AF\u09BC \u0995\u09A5\u09BE \u09AC\u09B2\u09BF" },
+        { s: 12, e: 13, t: "Past the end" }
+    ];
+    groupsBefore = undoGroups;
+    var subs = parse(placeSubtitles(JSON.stringify({ cues: cues })));
+    check("ae subtitles: ok", subs.ok === true, subs.msg);
+    eq("ae subtitles: two made, one past the end left out", subs.count + ":" + subs.skipped, "2:1");
+    var first = comp.layer(1);
+    var second = comp.layer(2);
+    eq("ae subtitles: first cue on top", first.doc.text, "Hello and welcome.");
+    eq("ae subtitles: timed", first.inPoint + "-" + first.outPoint + " " + second.inPoint + "-" + second.outPoint, "1-2.9 5-7.9");
+    eq("ae subtitles: named in order", first.name.substr(0, 6) + "|" + second.name.substr(0, 6), "Sub 01|Sub 02");
+    eq("ae subtitles: lower third, centred", first.position.join(","), "960,907");
+    eq("ae subtitles: size from the comp height, box 84% wide", first.doc.fontSize + ":" + first.box.join("x"), "49:1613x167");
+    eq("ae subtitles: white with an outline, centred text", first.doc.fillColor.join(",") + "|" + first.doc.applyStroke + "|" + first.doc.justification, "1,1,1|true|7");
+    eq("ae subtitles: English keeps the default font", first.doc.font, "ArialMT");
+    eq("ae subtitles: Bengali gets a Bengali font and the Universal engine", second.doc.font + ":" + second.doc.composerEngine, "NirmalaUI:2");
+    eq("ae subtitles: one undo step, balanced", (undoGroups - groupsBefore) + ":" + undoDepth, "1:0");
+
+    app.project.activeItem = null;
+    eq("ae subtitles: no comp", parse(placeSubtitles(JSON.stringify({ cues: cues }))).msg, "Open a composition first");
+    eq("ae audio: no comp", parse(getTimelineAudio("")).msg, "Open a composition first");
 });
 
 // ------------------------------------------------------------------ report

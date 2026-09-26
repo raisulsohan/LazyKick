@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.3.0";
+    var PANEL_VERSION = "1.4.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -169,6 +169,8 @@
         btnCopyNote:           document.getElementById("btnCopyNote"),
         btnExportNote:         document.getElementById("btnExportNote"),
         btnDeleteNoteTab:      document.getElementById("btnDeleteNoteTab"),
+        btnTimeToAudio:        document.getElementById("btnTimeToAudio"),
+        btnSubtitles:          document.getElementById("btnSubtitles"),
 
         // Bins Elements
         btnAddBin:             document.getElementById("btnAddBin"),
@@ -823,6 +825,246 @@
     });
 
     // ============================================================
+    // SCRIPT TO AUDIO (timecodes from the voiceover, then subtitles)
+    // ============================================================
+    //
+    // Each line of the note is one subtitle. 🎙️ reads the open timeline's
+    // audio from the host, finds where each line is spoken (client/align.js)
+    // and starts the line with a timecode tag. The tag keeps the measured
+    // start and end in data-t / data-e (seconds from the timeline start);
+    // a tag edited by hand is read from its text instead. 💬 turns the tagged
+    // lines into an .srt next to the project and has the host place it.
+
+    var BLOCK_TAGS = { DIV: true, P: true, LI: true, UL: true, OL: true, BLOCKQUOTE: true, PRE: true,
+                       H1: true, H2: true, H3: true, H4: true, H5: true, H6: true };
+    var NBSP = String.fromCharCode(160);
+    var scriptBusy = false;
+
+    function isTimecodeTag(node) {
+        return !!(node && node.nodeType === 1 && node.classList && node.classList.contains("timecode-tag"));
+    }
+
+    function isBlankText(node) {
+        return node.nodeType === 3 && !String(node.textContent).split(NBSP).join("").trim();
+    }
+
+    /** Every line its own block: Chromium leaves the first line loose, and pasted text may use <br>. */
+    function normalizeEditorBlocks() {
+        var editor = el.noteEditor;
+        var node = editor.firstChild;
+        var run = null;
+        while (node) {
+            var next = node.nextSibling;
+            if (node.nodeType === 1 && BLOCK_TAGS[node.nodeName]) {
+                run = null;
+            } else if (node.nodeType === 1 && node.nodeName === "BR") {
+                if (run) {
+                    editor.removeChild(node); // it only ended the line before
+                } else {
+                    var empty = document.createElement("div");
+                    editor.insertBefore(empty, node);
+                    empty.appendChild(node);
+                }
+                run = null;
+            } else {
+                if (!run) {
+                    run = document.createElement("div");
+                    editor.insertBefore(run, node);
+                }
+                run.appendChild(node);
+            }
+            node = next;
+        }
+    }
+
+    function textWithoutTags(node) {
+        if (node.nodeType === 3) return String(node.textContent);
+        if (isTimecodeTag(node)) return "";
+        var s = "";
+        for (var child = node.firstChild; child; child = child.nextSibling) s += textWithoutTags(child);
+        return node.nodeName === "BR" ? s + " " : s;
+    }
+
+    /** The note's spoken lines: [{ node, text }]. Checklist items and lines like "---" are left out. */
+    function scriptLines() {
+        normalizeEditorBlocks();
+        var lines = [];
+        for (var node = el.noteEditor.firstChild; node; node = node.nextSibling) {
+            if (node.nodeType !== 1 || node.classList.contains("todo-item")) continue;
+            var text = textWithoutTags(node).split(NBSP).join(" ").replace(/\s+/g, " ").trim();
+            if (LazyAlign.isSpoken(text)) lines.push({ node: node, text: text });
+        }
+        return lines;
+    }
+
+    /** The timecode tag a line starts with, or null. */
+    function leadingTag(line) {
+        for (var n = line.firstChild; n; n = n.nextSibling) {
+            if (isBlankText(n)) continue;
+            return isTimecodeTag(n) ? n : null;
+        }
+        return null;
+    }
+
+    /** Start the line with a tag for `span` (seconds from the timeline start), replacing the one it had. */
+    function setLeadingTag(line, span, timeline) {
+        var old = leadingTag(line);
+        while (old) {
+            var after = old.nextSibling;
+            line.removeChild(old);
+            if (after && after.nodeType === 3) after.textContent = String(after.textContent).replace(/^[\s\u00a0]+/, "");
+            old = leadingTag(line);
+        }
+        var tag = document.createElement("span");
+        tag.className = "timecode-tag";
+        tag.setAttribute("data-t", span.start.toFixed(3));
+        tag.setAttribute("data-e", span.end.toFixed(3));
+        tag.textContent = "[" + LazyAlign.formatTimecode(timeline.offset + span.start, timeline.fps) + "]";
+        line.insertBefore(document.createTextNode(NBSP), line.firstChild);
+        line.insertBefore(tag, line.firstChild);
+    }
+
+    /**
+     * Start and end of a tag in seconds from the timeline start. A tag
+     * LazyKick wrote and nobody changed gives its measured times; a tag typed
+     * or edited by hand (or from ⏱️ Timecode) is read from its text.
+     */
+    function tagTimes(tag, timeline) {
+        var text = String(tag.textContent || "").trim();
+        var t = parseFloat(tag.getAttribute("data-t"));
+        var e = parseFloat(tag.getAttribute("data-e"));
+        if (isFinite(t) && text === "[" + LazyAlign.formatTimecode(timeline.offset + t, timeline.fps) + "]") {
+            return { start: t, end: isFinite(e) ? e : undefined };
+        }
+        var typed = LazyAlign.parseTimecode(text, timeline.fps);
+        if (typed === null) return null;
+        var start = typed - timeline.offset;
+        return { start: start, end: isFinite(e) && e > start + 0.3 ? e : undefined };
+    }
+
+    function setScriptBusy(busy) {
+        scriptBusy = busy;
+        el.btnTimeToAudio.disabled = busy;
+        el.btnSubtitles.disabled = busy;
+    }
+
+    /** RMS loudness every 10 ms of a WAV, read in chunks so the panel stays responsive. */
+    function readWavEnvelope(filePath) {
+        return new Promise(function (resolve) {
+            var env = new LazyAlign.WavEnvelope(0.01);
+            var stream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
+            stream.on("data", function (chunk) { env.push(chunk); });
+            stream.on("end", function () { resolve(env.finish()); });
+            stream.on("error", function (e) { resolve({ values: [], error: e.message }); });
+        });
+    }
+
+    function timeToAudio() {
+        if (scriptBusy) return Promise.resolve();
+        var lines = scriptLines();
+        if (!lines.length) {
+            setStatus("Write the script first: one line per subtitle", 4000);
+            return Promise.resolve();
+        }
+        var projectBefore = appState.projectId;
+        var tabBefore = appState.notesData.activeTabId;
+        var wavPath = path.join(os.tmpdir(), "lazykick-voice-" + Date.now() + ".wav");
+        setScriptBusy(true);
+        setStatus("Listening to the timeline audio...");
+
+        return evalScriptP("getTimelineAudio(" + JSON.stringify(normPath(wavPath)) + ")").then(function (r) {
+            if (!r || !r.ok) {
+                setStatus((r && r.msg) || "Could not read the timeline audio", 5000);
+                return null;
+            }
+            var envelope = r.kind === "wav"
+                ? readWavEnvelope(r.path)
+                : Promise.resolve({ step: r.step, start: r.start, values: r.values || [] });
+            return envelope.then(function (env) {
+                if (r.kind === "wav") removeQuietly(r.path);
+                if (env.error) {
+                    setStatus("Could not read the audio: " + env.error, 5000);
+                    return null;
+                }
+                var weights = lines.map(function (l) { return LazyAlign.lineWeight(l.text); });
+                var spans = LazyAlign.alignLines(weights, env);
+                var heard = r.used === "selected" ? "the selected audio" : "the timeline audio";
+                if (!spans) {
+                    setStatus("No speech found in " + heard + " of '" + r.name + "'", 5000);
+                    return null;
+                }
+                if (appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore ||
+                    !lines.every(function (l) { return l.node.parentNode === el.noteEditor; })) {
+                    setStatus("The note changed while listening; nothing was changed", 4000);
+                    return null;
+                }
+                spans.forEach(function (span, i) { setLeadingTag(lines[i].node, span, r); });
+                saveCurrentNote();
+                setStatus("Timed " + lines.length + " line" + (lines.length === 1 ? "" : "s") + " to " + heard + " of '" + r.name + "'", 4000);
+                return spans;
+            });
+        }).catch(function (err) {
+            setStatus("Time to Audio failed: " + (err && err.message ? err.message : err), 5000);
+            return null;
+        }).then(function (result) {
+            setScriptBusy(false);
+            return result;
+        });
+    }
+
+    function subtitlesToTimeline() {
+        if (scriptBusy) return Promise.resolve();
+        var timed = scriptLines().filter(function (l) { return !!leadingTag(l.node); });
+        if (!timed.length) {
+            setStatus("No timed lines yet: click 🎙️ Time to Audio first (or start lines with a timecode)", 5000);
+            return Promise.resolve();
+        }
+        setScriptBusy(true);
+        setStatus("Making subtitles...");
+
+        return evalScriptP("getTimelineInfo()").then(function (timeline) {
+            if (!timeline || !timeline.ok) {
+                setStatus((timeline && timeline.msg) || "Open a sequence or composition first", 4000);
+                return null;
+            }
+            var cues = LazyAlign.makeCues(timed.map(function (l) {
+                var times = tagTimes(leadingTag(l.node), timeline);
+                return times ? { start: times.start, end: times.end, text: l.text } : null;
+            }).filter(function (c) { return c && c.start >= 0; }));
+            if (!cues.length) {
+                setStatus("None of the timecodes fall on '" + timeline.name + "'", 4000);
+                return null;
+            }
+            return currentProjectFolder().then(function (projectFolder) {
+                var dir = path.join(projectFolder || os.homedir(), "LazyKick Subtitles");
+                mkdirp(dir);
+                var base = sanitizeRelativePath(String(timeline.name || "").replace(/[\/\\]/g, "_"), "Subtitles");
+                var srtPath = uniqueFilePath(dir, base + ".srt");
+                // UTF-8 with a BOM, so every app reads Bengali and other scripts right.
+                fs.writeFileSync(srtPath, String.fromCharCode(0xFEFF) + LazyAlign.buildSrt(cues), "utf8");
+                var payload = {
+                    srtPath: normPath(srtPath),
+                    cues: cues.map(function (c) { return { s: Math.round(c.start * 1000) / 1000, e: Math.round(c.end * 1000) / 1000, t: c.text }; })
+                };
+                return evalScriptP("placeSubtitles(" + JSON.stringify(JSON.stringify(payload)) + ")").then(function (r) {
+                    if (r && r.ok) setStatus(r.msg + " · SRT: " + path.basename(srtPath), 6000);
+                    else setStatus(((r && r.msg) || "The host did not answer") + " · SRT saved: " + srtPath, 7000);
+                    return { reply: r, srtPath: srtPath, cues: cues };
+                });
+            });
+        }).catch(function (err) {
+            setStatus("Subtitles failed: " + (err && err.message ? err.message : err), 5000);
+            return null;
+        }).then(function (result) {
+            setScriptBusy(false);
+            return result;
+        });
+    }
+
+    el.btnTimeToAudio.addEventListener("click", function () { timeToAudio(); });
+    el.btnSubtitles.addEventListener("click", function () { subtitlesToTimeline(); });
+
+    // ============================================================
     // LAZYPASTE ENGINE (Clipboard Image to Timeline)
     // ============================================================
 
@@ -1441,7 +1683,7 @@
      */
     function syncBin(bin, opts) {
         opts = opts || {};
-        var outcome = { imported: 0, failed: 0, waiting: 0, existing: 0, relinked: 0, moved: 0 };
+        var outcome = { imported: 0, failed: 0, waiting: 0, existing: 0, relinked: 0, moved: 0, merged: 0 };
         var projectId = appState.projectId;
         var binsRef = appState.bins;
         var label = bin.binPath || "Root";
@@ -1535,12 +1777,21 @@
                     }
                 });
                 outcome.moved = r.moved || 0;
+                outcome.merged = r.merged || 0;
+                // The host used a bin the project already had for this folder:
+                // the watch bin is that bin from now on.
+                var tookOver = typeof r.rootPath === "string" && r.rootPath !== "" && r.rootPath !== bin.binPath;
+                if (tookOver) {
+                    bin.binPath = r.rootPath;
+                    label = r.rootPath;
+                    arrangedBins[arrangeKey(projectId, bin)] = true;
+                }
                 bin.importedCount = Object.keys(bin.history).length;
                 writeBins(projectId, binsRef);
                 if (projectId === appState.projectId) renderBinCards();
 
-                if (outcome.imported || outcome.failed || outcome.existing || outcome.relinked || outcome.moved) {
-                    setStatus("Synced " + label + ": " + describeOutcome(outcome), 3000);
+                if (outcome.imported || outcome.failed || outcome.existing || outcome.relinked || outcome.moved || outcome.merged || tookOver) {
+                    setStatus((tookOver ? "Using the existing bin " + label + ". " : "") + "Synced " + label + ": " + describeOutcome(outcome), tookOver ? 5000 : 3000);
                 } else if (!opts.quiet) {
                     setStatus(label + ": no new files", 2000);
                 }
@@ -1554,13 +1805,14 @@
         var msg = o.imported + " imported";
         if (o.relinked) msg += ", " + o.relinked + " relinked (moved on disk)";
         if (o.moved) msg += ", " + o.moved + " sorted into subfolder bins";
+        if (o.merged) msg += ", " + o.merged + " duplicate bin" + (o.merged === 1 ? "" : "s") + " merged";
         if (o.existing) msg += ", " + o.existing + " already in the project";
         if (o.failed) msg += ", " + o.failed + " could not be imported";
         return msg;
     }
 
     function syncBins(bins, opts) {
-        var total = { imported: 0, failed: 0, waiting: 0, existing: 0, relinked: 0, moved: 0 };
+        var total = { imported: 0, failed: 0, waiting: 0, existing: 0, relinked: 0, moved: 0, merged: 0 };
         return bins.reduce(function (chain, bin) {
             return chain.then(function () {
                 return syncBin(bin, opts).then(function (o) {

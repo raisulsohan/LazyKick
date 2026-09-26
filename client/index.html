@@ -66,6 +66,13 @@
                 </div>
             </div>
 
+            <!-- Script to Audio -->
+            <div class="script-bar">
+                <button id="btnTimeToAudio" class="btn-tool btn-accent" title="Listen to the timeline audio and put the time each line is spoken at the start of the line. One line per subtitle. Select the voiceover clip or layer to use only it.">🎙️ Time to Audio</button>
+                <button id="btnSubtitles" class="btn-tool" title="Put the timed lines on the timeline as subtitles (Premiere Pro: a caption track; After Effects: text layers). An .srt file is saved next to the project too.">💬 Subtitles</button>
+                <span class="script-hint">One line per subtitle · select the voiceover to use only it</span>
+            </div>
+
             <!-- Notes Editor Area -->
             <div class="editor-wrapper">
                 <div id="noteEditor" class="rich-editor" contenteditable="true" spellcheck="false" placeholder="Write project notes, client feedbacks, or add to-do tasks..."></div>
@@ -152,7 +159,7 @@
                 <span id="globalStatus" class="status-text">Ready</span>
             </div>
             <div class="footer-credits">
-                <span id="brandTag" class="brand-tag">LazyKick v1.3</span>
+                <span id="brandTag" class="brand-tag">LazyKick v1.4</span>
                 <span class="sep">•</span>
                 <a id="devLink" href="https://raisulsohan.com" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
             </div>
@@ -229,6 +236,7 @@
 
     <!-- SCRIPTS -->
     <script src="../lib/CSInterface.js"></script>
+    <script src="align.js"></script>
     <script src="main.js"></script>
 </body>
 </html>

@@ -2,6 +2,25 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.4.0
+
+### Script to audio and subtitles (Notes)
+- **🎙️ Time to Audio**: times every line of the note to the voiceover on the open sequence or composition and starts the line with its timecode tag (`[HH:MM:SS:FF]`, in the timeline's own timecode). The tag keeps the measured start and end (`data-t`, `data-e`); running it again replaces the tags, never doubles them.
+- **💬 Subtitles**: turns the timed lines into subtitles. Premiere Pro: the SRT is imported into a *Subtitles* bin and placed with `createCaptionTrack` as a subtitle track (older versions: left in the bin with a hint). After Effects: one box-text layer per line, lower third, white with an outline, first line on top, trimmed to its time; Bengali lines get a Bengali font (Nirmala UI and others) and the Universal Type Engine. An `.srt` (UTF-8 with BOM) is always saved in `LazyKick Subtitles` next to the project, never overwriting.
+- **How the timing works (client/align.js)**: no speech recognition and no download, so it works for any language. Premiere exports the sequence mix to a temporary WAV with its own *Waveform Audio 48kHz 16-bit* preset; After Effects measures each frame with *Convert Audio to Keyframes*. The panel finds speech and pauses from the loudness (adaptive thresholds, breaths inside long speech as fallback cut points) and lays the lines over the speech with dynamic programming: each line's share of the speech should match its spoken length (Bengali and other Indic scripts counted by syllable), line ends prefer longer pauses, and the pace may not drift from the script's.
+- Tested on real speech (Windows voices, two scripts, natural and rushed pauses, and a music bed): every line within 0.1 s, mostly within a frame, on the held-out script too. In the real After Effects, lines landed within a frame of the truth.
+- Selected audio only: with audio clips (Premiere) or layers (After Effects) selected, only those are heard; other tracks are muted or audio switches turned off for the moment and restored after, as are the user's layer selection and work area. After Effects' command measures only selected layers, so LazyKick selects exactly the layers to hear.
+- Hand-edited timecodes and those from ⏱️ Timecode (including drop-frame `;`) are read from their text.
+
+### Watch Bins: the folder's existing bin is used, never copied
+- **Fixed: linking a folder the project already had made a second bin of the same name** (1.3 looked only at one exact place; the existing bin was elsewhere or spelled differently, and its clips were left where they were). Now a bin that carries the folder's name (or the watch bin's) and holds the folder's media becomes the watch bin, wherever it is and however it is capitalised or spaced. The card switches to that bin, and it is sorted like the folder on disk.
+- **Copies are folded in**: on a full sync (⚡ Sync, Sync All, Edit, Reset, a new link, Auto-Sync's first pass), bins of the same name beside the watch bin are merged into it whatever they hold, and same-named bins elsewhere are merged when they hold nothing but this folder's media. Their sub-bins, clips, sequences and comps move across, then the emptied copy is deleted; a bin is only ever deleted once the host reports it empty. Twin sub-bins inside the watch bin become one too. A project that 1.3 left with two "03. Videos" bins becomes one on the next Sync.
+- Premiere Pro: bin identities no longer depend on `nodeId` (import detection falls back to name and media path when Premiere gives none).
+
+### Internals
+- New host calls `getTimelineInfo()`, `getTimelineAudio(wavPath)`, `placeSubtitles(payloadJson)`; new `client/align.js` (loaded before `main.js`). `syncWatchBin` also returns `rootPath`, `adopted` and `merged`.
+- Tests: `tools/test-align.mjs` (WAV formats, pause finder, line lengths, real-speech timing from `tools/fixtures/tts-voiceover.json`, built by `tools/make-tts-fixture.mjs`), host mocks for both hosts, panel tests for both buttons; `tools/ae-smoke-host.jsx` covers the audio reading, selection and subtitles in the real After Effects and saves a frame to check the Bengali text.
+
 ## 1.3.0
 
 ### Watch Bins mirror their folders

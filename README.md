@@ -22,13 +22,14 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.3** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.4** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ---
 
 ## 📑 Contents
 
-- [What's New in 1.3](#-whats-new-in-13)
+- [What's New in 1.4](#-whats-new-in-14)
+- [What's New in 1.3](#whats-new-in-13)
 - [What's New in 1.2](#whats-new-in-12)
 - [What's New in 1.1](#whats-new-in-11)
 - [Overview](#-overview)
@@ -49,7 +50,21 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.3** · F
 
 ---
 
-## 🆕 What's New in 1.3
+## 🆕 What's New in 1.4
+
+**🎙️ Time a script to the voiceover, then 💬 make subtitles**
+- Write your script in **📝 Notes**, one line per subtitle. Click **🎙️ Time to Audio**: LazyKick listens to the open sequence or composition and puts the time each line is spoken at the start of the line, like `[00:00:12:08] Welcome back.`
+- Click **💬 Subtitles**: the timed lines go onto the timeline. **Premiere Pro** gets a subtitle caption track; **After Effects** gets one text layer per line (white with an outline, lower third, first line on top). An `.srt` is saved next to the project either way, ready for YouTube.
+- **Works in any language, Bengali included.** No speech recognition and nothing to download: LazyKick finds the pauses in the voice and lays the lines over the speech by how long each takes to say. On real test voiceovers every line landed within a frame or two, also with music underneath.
+- Only want the voiceover? **Select its clip (Premiere) or layer (After Effects)** first; music on other tracks is ignored while listening and switched back on after.
+- Bengali subtitles in After Effects get a Bengali font (Nirmala UI on Windows) and the text engine that joins the letters correctly.
+- Edited a timecode by hand? 💬 uses what you typed. Timecodes from **⏱️ Timecode** work too.
+
+**📂 Watch Bins use the bin you already have**
+- Link a folder the project already has a bin for (same name, holding its files) and that bin becomes the watch bin, wherever it sits, and is sorted like the folder on disk. No second bin of the same name any more.
+- A project where 1.3 made a second "03. Videos" next to yours: click **⚡ Sync** once and the two become one; the empty copy is removed. Clips, sequences and comps in it move across first; nothing that holds anything is ever deleted.
+
+## What's New in 1.3
 
 **Watch Bins mirror your folders**
 - **Subfolders become bins.** Link `Shoot` with *Include subfolders* on, and `Shoot/Day 1/Cam A/clip.mp4` lands in the bin `Shoot › Day 1 › Cam A`, nested exactly like the folders on disk. Works the same in After Effects (folders) and Premiere Pro (bins).
@@ -115,12 +130,13 @@ LazyKick now covers everything from the older **QuickPaste** and **QuickBinSync*
 
 ## 🌟 Overview
 
-**LazyKick** merges three everyday editing chores into one dark-themed, dockable panel that looks at home next to Adobe's own:
+**LazyKick** merges four everyday editing chores into one dark-themed, dockable panel that looks at home next to Adobe's own:
 
 | | Feature | In one sentence |
 | :-: | :--- | :--- |
 | ⚡ | **LazyPaste** | Screenshot or copy an image → one click (or Ctrl+V) → it's saved next to your project and sitting on your timeline at the playhead. |
 | 📝 | **Notes & Tasks** | Per-project notes with tabs, checklists and one-click timecode stamps, plus a global scratchpad shared by every project. |
+| 🎙️ | **Script to Subtitles** | Write the script in Notes, click once to time every line to the voiceover, click again to put the lines on the timeline as subtitles. |
 | 📂 | **Watch Bins** | Link folders like *Downloads*, *SFX* or *Client uploads* to project bins; new media is imported automatically, once, and never while it's still copying. |
 
 The same panel runs in **After Effects** and **Premiere Pro**. Open one project in both apps and the notes are the same.
@@ -157,6 +173,8 @@ Always available in the panel header.
 - **⏱️ Timecode stamps:** inserts the playhead time as `[00:01:24:12]` at the caret, formatted the way the app displays time.
 - **📋 Copy / 📥 Export** as plain text (checklists as `[ ]` / `[x]`). Export writes `Note_<project>_<tab>.txt` next to the project and never overwrites.
 - **Plain-text paste:** formatting from web pages is stripped.
+- **🎙️ Time to Audio:** times every line of the note to the voiceover on the open timeline and starts each line with its timecode. Language-independent (pauses and speaking length, no speech recognition), fully offline.
+- **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project.
 
 ### 3. 📂 Watch Bins & Media Sync
 
@@ -179,7 +197,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.3.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.4.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -238,6 +256,14 @@ Don't keep a source copy and the signed install side by side: they share one ext
 3. Click **☑️ Task** for a checkbox; tick it when done.
 4. **+** adds a tab, a double-click renames it, and **🗑️** deletes it (Global can't be deleted).
 5. **📋** copies the tab as text; **📥** exports it as a `.txt` next to the project.
+
+### Time a script to the voiceover and make subtitles
+1. Put the voiceover on the timeline (Premiere Pro sequence or After Effects composition) and keep that timeline open.
+2. In **📝 Notes**, write or paste the script: **one line per subtitle**, in the order it is spoken. Lines like `---` and checklist items are skipped.
+3. Music on the timeline too? Select the voiceover clip or layer first, so only it is heard.
+4. Click **🎙️ Time to Audio**. Each line now starts with the time it is spoken.
+5. Check a few lines; to fix one, edit its timecode (click Time to Audio again to redo them all).
+6. Click **💬 Subtitles**. Premiere Pro: a new caption track with the lines. After Effects: one text layer per line. The `.srt` is in `LazyKick Subtitles` next to the project.
 
 ### Auto-import a folder
 1. Open **📂 Watch Bins** → **+ Add Watch Bin**.
@@ -345,6 +371,9 @@ LazyKick is a standard **CEP extension**: an HTML/JS panel (Chromium with Node.j
 | `getCurrentTimecode()` | `timecode` at the playhead (AE: project display format + comp start; PPro: sequence format) |
 | `importPastedImage(path, guide, fit, binName)` | Imports or reuses the item, places it; `placedOnTimeline`, `reused`, `track`, `binPath` |
 | `syncWatchBin(binPath, payloadJson, expectedProjectId)` | Payload `{ folder, arrange, files: [{ p, s, n }] }` (path, subfolder, new). Relinks moved files, imports new ones into the bin mirroring their subfolder, and with `arrange` sorts media already inside the watch bin. Returns `importedFiles`, `failedFiles`, `existingFiles` (already in the project, left alone), `relinkedFiles` (`{ from, to }`), `moved`; `projectChanged: true` if another project is open |
+| `getTimelineInfo()` | The open sequence/composition: `name`, `fps`, `offset` (seconds its timecode starts at), `duration` |
+| `getTimelineAudio(wavPath)` | Premiere: exports the sequence mix to `wavPath` with its own *Waveform Audio 48kHz 16-bit* preset (`kind: "wav"`). After Effects: runs *Convert Audio to Keyframes* on the audible layers and returns one loudness value a frame (`kind: "levels"`, `step`, `start`, `values`). With audio clips/layers selected only they are heard (`used: "selected"`); mutes, audio switches, selection and work area are put back |
+| `placeSubtitles(payloadJson)` | `{ srtPath, cues: [{ s, e, t }] }`. Premiere: imports the SRT into a *Subtitles* bin and calls `createCaptionTrack`. After Effects: one text layer per cue |
 | `importFilesToBin(binPath, filesJson, expectedProjectId)` | The 1.2 call: imports straight into one bin, no subfolders or sorting. Same result fields |
 
 **Why some choices were made:**
@@ -362,7 +391,8 @@ LazyKick/
 │   └── manifest.xml              # Extension ID, hosts (AEFT, PPRO), panel size, Node flags
 ├── client/
 │   ├── index.html                # Panel markup
-│   ├── main.js                   # Panel controller (notes, LazyPaste, watch bins)
+│   ├── align.js                  # Voiceover timing: WAV reader, pause finder, line alignment, SRT
+│   ├── main.js                   # Panel controller (notes, LazyPaste, watch bins, script to audio)
 │   └── style.css                 # Adobe-style dark theme
 ├── host/
 │   └── host.jsx                  # ExtendScript engine for After Effects & Premiere Pro
@@ -372,7 +402,10 @@ LazyKick/
 │   ├── installer/                # Install / uninstall scripts + "Read me first.txt" for the release zip
 │   ├── check-extendscript.js     # ES3 syntax + lint check of host.jsx (Windows Script Host)
 │   ├── test-host.js              # host.jsx against mocked AE & Premiere APIs (Windows Script Host)
+│   ├── test-align.mjs            # align.js against WAVs in every format and real speech (Node)
 │   ├── test-panel.mjs            # main.js against a fake DOM, fake host and real files (Node)
+│   ├── make-tts-fixture.mjs      # Builds the real-speech test voiceovers with Windows' own voices
+│   ├── fixtures/                 # tts-voiceover.json: loudness + true line times of those voiceovers
 │   ├── ae-smoke-host.jsx         # host.jsx inside the real After Effects
 │   ├── get-zxpsigncmd.mjs        # Downloads Adobe's ZXPSignCmd into tools/vendor/
 │   ├── package-zxp.mjs           # Signs the panel as .zxp and builds the release zip
@@ -398,7 +431,8 @@ Runs, in order (Windows, as two steps use Windows Script Host):
 
 1. `tools/check-extendscript.js`: `host.jsx` compiles as ES3 and avoids names and constructs real ExtendScript rejects.
 2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, media already in the project, timecode formatting, partial import failures and the project-changed guard.
-3. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting and the CEP 9 syntax guard.
+3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: two scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the other was held out; both must land every line within 0.2 s (they land within a few frames).
+4. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen) and Subtitles (edited tags, the SRT file), and the CEP 9 syntax guard.
 
 The mocks follow the documented host APIs, but they are not the real apps. `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close After Effects first; results in `%TEMP%\lazykick-ae-smoke-results.txt`):
 
@@ -418,7 +452,7 @@ npm run release        # tests, then signs and writes the zip
 - The version comes from `package.json`. The release script copies it into the manifest, `main.js`, `host.jsx`, the panel footer and this README.
 - The signing key lives in `Signing key (do not share)/` inside the repository folder and is **never committed** (`.gitignore` + `.git/info/exclude`). **Back it up privately.** Every release must be signed with the same certificate.
 - Signing is timestamped (DigiCert → Certum → Sectigo), so the panel keeps loading after the certificate expires.
-- The zip is written to the nearest `00 Install from here` folder beside the repository (override with `LAZYKICK_DOWNLOAD_DIR`). Only the newest `LazyKick-v*.zip` is kept there.
+- The zip is written to the nearest `00. Install from here` folder beside the repository (override with `LAZYKICK_DOWNLOAD_DIR`). Only the newest `LazyKick-v*.zip` is kept there.
 
 ---
 
@@ -471,9 +505,28 @@ It's a **guide layer** by default: visible while you work, excluded from renders
 </details>
 
 <details>
+<summary><strong>Time to Audio: a line got the wrong time</strong></summary>
+
+- LazyKick times lines by the pauses in the voice and how long each line takes to say, so the script must match the recording: same lines, same order, nothing left out. Remove lines the voiceover skips, or add what was ad-libbed.
+- **Music or effects under the voice** make pauses hard to hear. Select the voiceover clip (Premiere) or layer (After Effects) before clicking, so only it is heard.
+- Very long lines are fine, but one line per subtitle gives the best timing and readable subtitles.
+- Fix a single line by editing its timecode; 💬 Subtitles uses what you typed. Clicking 🎙️ again re-times every line.
+- Nothing happened? The status bar says why: no sequence/composition open, no audio, or no speech found.
+</details>
+
+<details>
+<summary><strong>Subtitles: where do they go?</strong></summary>
+
+- **Premiere Pro:** a new *Subtitle* caption track on the open sequence, from an `.srt` imported into a *Subtitles* bin. Style them in the Essential Graphics / Text panel as usual. Very old Premiere versions can't add caption tracks by script: the `.srt` is then in the *Subtitles* bin to drag onto the sequence.
+- **After Effects:** one text layer per line, named `Sub 01`, `Sub 02`, …, trimmed to its time. Change the look of all of them at once by selecting them and using the Character panel.
+- The `.srt` (UTF-8) is saved in `LazyKick Subtitles` next to the project, never overwriting an earlier one.
+</details>
+
+<details>
 <summary><strong>Watch Bins: how do the subfolder bins work?</strong></summary>
 
 - With **Include subfolders** on, the watch bin mirrors the folder: `Shoot/Day 1/a.mp4` goes into the bin `Shoot/Day 1`. Bins are only made for folders that contain media.
+- **The project already has a bin for the folder?** A bin with the folder's name that holds its files becomes the watch bin (the card shows where it is), even inside another bin or spelled with other capitals. Same-named copies beside it are merged into it on ⚡ Sync; copies elsewhere only when they hold nothing but that folder's files. The emptied copy is deleted, and only once it is truly empty.
 - **⚡ Sync** (and **Sync All**) also sorts what is already in the watch bin: a clip sitting in the wrong sub-bin is moved to the one its folder maps to. Auto-Sync does this once per bin per session and then only imports new files.
 - To organise clips your own way, drag them **out** of the watch bin (into a *Selects* bin, say). LazyKick never moves anything that is outside the watch bin, and never deletes bins or clips.
 - A file moved to another folder on disk is relinked, not imported again, when LazyKick can tell for certain which clip it was: same file name, and no other missing clip or new file fits equally well. Otherwise it is imported as a new clip and the old one stays offline.
@@ -499,6 +552,7 @@ Notes are keyed by app and project file, so an `.aep` and a `.prproj` have separ
 
 - Shrink-to-fit for Premiere Pro stills.
 - Timecode stamps you can click to jump the playhead.
+- Subtitle style presets (font, size, box) for Time to Audio.
 - Search across all project notes.
 
 Suggestions welcome in [Issues](https://github.com/raisulsohan/LazyKick/issues).

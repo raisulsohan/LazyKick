@@ -23,6 +23,7 @@ import vm from "node:vm";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAIN_SRC = readFileSync(join(root, "client", "main.js"), "utf8");
+const ALIGN_SRC = readFileSync(join(root, "client", "align.js"), "utf8");
 const nodeRequire = createRequire(import.meta.url);
 
 let passed = 0;
@@ -113,7 +114,24 @@ class FakeElement {
   set className(v) { this.classList = new FakeClassList(); String(v).split(/\s+/).filter(Boolean).forEach((c) => this.classList.add(c)); }
   get textContent() { return this.children.length ? this.children.map((c) => c.textContent).join("") : this._text; }
   set textContent(v) { this.children.forEach((c) => { c.parentNode = null; }); this.children = []; this._text = String(v); this._html = ""; }
-  get innerHTML() { return this._html; }
+  get nodeType() { return this.tagName === "#TEXT" ? 3 : 1; }
+  get nodeName() { return this.tagName; }
+  get childNodes() { return this.children; }
+  get firstChild() { return this.children[0] || null; }
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const siblings = this.parentNode.children;
+    return siblings[siblings.indexOf(this) + 1] || null;
+  }
+  insertBefore(n, ref) {
+    if (n.parentNode) n.parentNode.removeChild(n);
+    const at = ref ? this.children.indexOf(ref) : -1;
+    if (at < 0) this.children.push(n); else this.children.splice(at, 0, n);
+    n.parentNode = this;
+    return n;
+  }
+  /** Children built with DOM calls are written out as HTML; otherwise what was assigned. */
+  get innerHTML() { return this.children.length ? this.children.map(serialize).join("") : this._html; }
   set innerHTML(v) {
     this.children.forEach((c) => { c.parentNode = null; });
     this.children = [];
@@ -152,6 +170,15 @@ class FakeElement {
   blur() { this.dispatch("blur"); }
   select() {}
   cloneNode() { const c = new FakeElement(this.tagName, this.doc); c._html = this._html; c._text = this._text; c.attributes = { ...this.attributes }; return c; }
+}
+
+function serialize(node) {
+  if (node.nodeType === 3) return node._text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/ /g, "&nbsp;");
+  const tag = node.tagName.toLowerCase();
+  const attrs = (node.className ? ` class="${node.className}"` : "") +
+    Object.keys(node.attributes).filter((k) => k !== "id").map((k) => ` ${k}="${node.attributes[k]}"`).join("");
+  if (tag === "br" || tag === "input") return `<${tag}${attrs}>`;
+  return `<${tag}${attrs}>${node.children.length ? node.children.map(serialize).join("") : node._text}</${tag}>`;
 }
 
 function makeDocument() {
@@ -221,6 +248,12 @@ const host = {
   failNames: new Set(),
   movedOnDisk: {},           // lower-cased new path -> old path the host relinks from
   movesToReport: 0,          // clips the host says it sorted, when asked to
+  mergedToReport: 0,         // duplicate bins the host says it merged, when sorting
+  rootPathToReport: null,    // where the host says the watch bin really is (null: where asked)
+  timeline: { ok: false, msg: "Open a sequence first" },
+  audioCalls: [],
+  audioReply: () => ({ ok: false, msg: "Open a sequence first" }),
+  subtitleCalls: [],
   refuseProject: false,
   timecode: { ok: true, timecode: "00:00:05:00" },
 };
@@ -268,8 +301,20 @@ function answer(script) {
       return JSON.stringify({
         ok: true, imported: imported.length, failed: failed.length, existing: existing.length,
         relinked: relinked.length, moved: payload.arrange ? host.movesToReport : 0,
+        merged: payload.arrange ? host.mergedToReport : 0, rootPath: host.rootPathToReport || args[0],
         importedFiles: imported, failedFiles: failed, existingFiles: existing, relinkedFiles,
       });
+    }
+    case "getTimelineInfo": return JSON.stringify(host.timeline);
+    case "getTimelineAudio": {
+      host.audioCalls.push(args[0]);
+      const reply = host.audioReply(args[0]);
+      return JSON.stringify(reply);
+    }
+    case "placeSubtitles": {
+      const payload = JSON.parse(args[0]);
+      host.subtitleCalls.push(payload);
+      return JSON.stringify({ ok: true, msg: `Subtitles placed on a new caption track in '${host.timeline.name}'`, placed: true });
     }
     default: return "EvalScript error.";
   }
@@ -336,6 +381,7 @@ class FakeCSInterface {
     const deliver = () => setImmediate(() => cb && cb(res));
     // host.gate holds watch-bin imports, like a slow import in the real app.
     if (host.gate && script.startsWith("syncWatchBin")) host.gate.then(deliver);
+    else if (host.audioGate && script.startsWith("getTimelineAudio")) host.audioGate.then(deliver);
     else deliver();
   }
   registerKeyEventsInterest(json) { host.keys = json; }
@@ -369,6 +415,7 @@ const type = async (html) => { $("noteEditor").innerHTML = html; $("noteEditor")
 /* ------------------------------------------------------------------- tests */
 try {
   setProject("saved", fileA);
+  vm.runInContext(ALIGN_SRC, context, { filename: "align.js" }); // <script src="align.js"> comes first
   vm.runInContext(MAIN_SRC, context, { filename: "main.js" });
   await settle();
 
@@ -719,6 +766,25 @@ try {
   check("manual Sync: status reports the sorting", /4 sorted into subfolder bins/.test($("globalStatus").textContent), $("globalStatus").textContent);
   host.movesToReport = 0;
 
+  // The host found the folder's bin elsewhere in the project and merged a duplicate:
+  // the watch bin follows it there.
+  host.rootPathToReport = "Footage/Shoot";
+  host.mergedToReport = 1;
+  calls = host.binImports.length;
+  actionsOf(2)[0].click();
+  await waitFor(() => host.binImports.length === calls + 1, "take over");
+  await settle();
+  eq("take over: the watch bin now points at the existing bin", readJson(binsFile(aId)).bins[2].binPath, "Footage/Shoot");
+  eq("take over: card shows it", $("binCardsList").children[2].children[0].children[0].textContent, "📁 Footage/Shoot");
+  check("take over: status says so, and what was merged", /Using the existing bin Footage\/Shoot/.test($("globalStatus").textContent) && /1 duplicate bin merged/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  host.rootPathToReport = null;
+  host.mergedToReport = 0;
+  calls = host.binImports.length;
+  actionsOf(2)[0].click();
+  await waitFor(() => host.binImports.length === calls + 1, "sync after take over");
+  await settle();
+  eq("take over: the next sync goes to the new path", host.binImports[calls].bin, "Footage/Shoot");
+
   // Auto-Sync sorts a bin once per session, then only calls for new files.
   const cId = `ae|saved|${fileC}`;
   const oldPath = toFwd(join(shoot, "old.mp4"));
@@ -758,6 +824,182 @@ try {
   $("autoSyncToggle").dispatch("change");
   setProject("saved", fileA);
   await advance(2500);
+
+  // ---- Script to Audio: timecodes from the voiceover, then subtitles
+  const LazyAlign = context.LazyAlign;
+  check("script: align.js loaded before main.js", !!LazyAlign && typeof LazyAlign.alignLines === "function");
+  const script = [
+    "Welcome back, everyone.",
+    "Today we test the new subtitle button.",
+    "Thanks for watching.",
+  ];
+  // A voiceover that says each line for 0.1 s per letter, with pauses between.
+  const RATE = 16000;
+  const bursts = [];
+  let cursor = 0.8;
+  script.forEach((line, i) => {
+    const len = LazyAlign.lineWeight(line) / 10;
+    bursts.push({ s: cursor, e: cursor + len });
+    cursor += len + [0.5, 0.7, 0][i];
+  });
+  const total = cursor + 1;
+  function writeVoiceWav(file) {
+    const n = Math.round(total * RATE);
+    const data = Buffer.alloc(n * 2);
+    for (let i = 0; i < n; i++) {
+      const t = i / RATE;
+      const on = bursts.some((b) => t >= b.s && t < b.e);
+      const v = on ? Math.sin(2 * Math.PI * 180 * t) * (0.4 + 0.1 * Math.sin(2 * Math.PI * 3 * t)) : ((i * 7919) % 97) / 97e3;
+      data.writeInt16LE(Math.round(v * 32767), i * 2);
+    }
+    const h = Buffer.alloc(44);
+    h.write("RIFF", 0); h.writeUInt32LE(36 + data.length, 4); h.write("WAVE", 8); h.write("fmt ", 12);
+    h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(RATE, 24);
+    h.writeUInt32LE(RATE * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(data.length, 40);
+    writeFileSync(file, Buffer.concat([h, data]));
+  }
+  const editor = $("noteEditor");
+  function setEditor(nodes) {
+    editor.innerHTML = "";
+    for (const n of nodes) {
+      if (typeof n === "string") { editor.appendChild(doc.createTextNode(n)); continue; }
+      const e = doc.createElement(n.tag);
+      if (n.cls) e.className = n.cls;
+      for (const c of n.kids || []) {
+        if (typeof c === "string") e.appendChild(doc.createTextNode(c));
+        else { const k = doc.createElement(c.tag); if (c.cls) k.className = c.cls; if (c.text) k.appendChild(doc.createTextNode(c.text)); e.appendChild(k); }
+      }
+      editor.appendChild(e);
+    }
+  }
+  const lineDivs = () => editor.children.filter((c) => c.nodeType === 1 && !c.classList.contains("todo-item"));
+  const tagOf = (div) => div.children.find((c) => c.nodeType === 1 && c.classList.contains("timecode-tag"));
+  const tagsIn = (div) => div.children.filter((c) => c.nodeType === 1 && c.classList.contains("timecode-tag")).length;
+
+  // As Chromium keeps it: the first line loose, later ones in <div>s; plus a
+  // checklist item, a divider, an empty line and a line that already has a tag.
+  setEditor([
+    script[0],
+    { tag: "div", kids: ["-----"] },
+    { tag: "div", cls: "todo-item", kids: [{ tag: "input", cls: "todo-checkbox" }, { tag: "span", cls: "todo-text", text: "Check the music level" }] },
+    { tag: "div", kids: [{ tag: "br" }] },
+    { tag: "div", kids: [{ tag: "span", cls: "timecode-tag", text: "[00:00:09:00]" }, " ", { tag: "span", cls: "timecode-tag", text: "[00:00:09:10]" }, " " + script[1]] },
+    { tag: "div", kids: [script[2]] },
+  ]);
+  host.timeline = { ok: true, host: "ppro", name: "Seq 01", fps: 25, offset: 3600, duration: total };
+  let voicePath = null;
+  host.audioReply = (wavPath) => {
+    voicePath = wavPath;
+    writeVoiceWav(wavPath);
+    return { ok: true, kind: "wav", path: wavPath, used: "selected", name: "Seq 01", fps: 25, offset: 3600, duration: total };
+  };
+  $("btnTimeToAudio").click();
+  $("btnTimeToAudio").click();                         // a double click listens once
+  await waitFor(() => lineDivs().filter((d) => tagOf(d) && tagOf(d).getAttribute("data-t")).length === 3, "lines timed");
+  await settle();
+  eq("time to audio: one host call for a double click", host.audioCalls.length, 1);
+  check("time to audio: the WAV goes to the temp folder", voicePath && voicePath.startsWith(tmpdir().replace(/\\/g, "/")), voicePath);
+  check("time to audio: the WAV is deleted after reading", voicePath && !existsSync(voicePath));
+  const timedDivs = lineDivs().filter((d) => tagOf(d));
+  eq("time to audio: the loose first line became a line of its own", editor.children[0].tagName, "DIV");
+  eq("time to audio: only spoken lines timed (no divider, checklist or blank)", timedDivs.length, 3);
+  bursts.forEach((b, i) => {
+    const tag = tagOf(timedDivs[i]);
+    const t = parseFloat(tag.getAttribute("data-t"));
+    const e = parseFloat(tag.getAttribute("data-e"));
+    check(`time to audio: line ${i + 1} starts where it is spoken`, Math.abs(t - b.s) < 0.05, `${t} vs ${b.s}`);
+    check(`time to audio: line ${i + 1} ends where it stops`, Math.abs(e - b.e) < 0.05, `${e} vs ${b.e}`);
+    eq(`time to audio: line ${i + 1} tag in the sequence's timecode`, tag.textContent, `[${LazyAlign.formatTimecode(3600 + t, 25)}]`);
+  });
+  eq("time to audio: an old tag is replaced, not kept", tagsIn(timedDivs[1]), 1);
+  eq("time to audio: the line text is kept", timedDivs[1].textContent.replace(/^\[[^\]]*\] /, ""), script[1]);
+  check("time to audio: saved with the note", /class="timecode-tag" data-t="/.test(readJson(notesFile(aId)).tabs[0].content), readJson(notesFile(aId)).tabs[0].content.slice(0, 120));
+  check("time to audio: status says what was heard", /Timed 3 lines to the selected audio of 'Seq 01'/.test($("globalStatus").textContent), $("globalStatus").textContent);
+
+  // Again, from After Effects' levels: tags are replaced, never doubled.
+  const fps = 25;
+  const levels = [];
+  for (let f = 0; f < Math.round(total * fps); f++) {
+    const t = f / fps;
+    levels.push(bursts.some((b) => t >= b.s && t < b.e) ? 30 : 0.2);
+  }
+  host.timeline = { ok: true, host: "ae", name: "Explainer", fps, offset: 10, duration: total };
+  host.audioReply = () => ({ ok: true, kind: "levels", step: 1 / fps, start: 0, values: levels, used: "all", name: "Explainer", fps, offset: 10, duration: total });
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Explainer/.test($("globalStatus").textContent), "levels timing");
+  await settle();
+  const again = lineDivs().filter((d) => tagOf(d));
+  eq("levels: still one tag per line", again.map(tagsIn).join(","), "1,1,1");
+  check("levels: frame-accurate starts", again.every((d, i) => Math.abs(parseFloat(tagOf(d).getAttribute("data-t")) - bursts[i].s) <= 1 / fps + 1e-9),
+    again.map((d) => tagOf(d).getAttribute("data-t")).join(" "));
+  eq("levels: comp timecode includes its start time", tagOf(again[0]).textContent, `[${LazyAlign.formatTimecode(10 + parseFloat(tagOf(again[0]).getAttribute("data-t")), fps)}]`);
+
+  // Nothing to hear, or the host refuses: the note is untouched.
+  const before = editor.innerHTML;
+  host.audioReply = () => ({ ok: true, kind: "levels", step: 0.04, start: 0, values: new Array(200).fill(0.0001), used: "selected", name: "Explainer", fps, offset: 0 });
+  $("btnTimeToAudio").click();
+  await waitFor(() => /No speech found in the selected audio/.test($("globalStatus").textContent), "no speech");
+  eq("no speech: note untouched", editor.innerHTML, before);
+  host.audioReply = () => ({ ok: false, msg: "Open a composition first" });
+  $("btnTimeToAudio").click();
+  await waitFor(() => $("globalStatus").textContent === "Open a composition first", "host refused");
+  eq("host refused: note untouched", editor.innerHTML, before);
+
+  // The note changes while the host is still listening: nothing is written into the new one.
+  host.audioReply = () => ({ ok: true, kind: "levels", step: 1 / fps, start: 0, values: levels, used: "all", name: "Explainer", fps, offset: 10 });
+  let releaseAudio;
+  host.audioGate = new Promise((r) => { releaseAudio = r; });
+  $("btnTimeToAudio").click();
+  await settle();
+  check("busy: buttons disabled while listening", $("btnTimeToAudio").disabled && $("btnSubtitles").disabled);
+  $("notesTabBar").children[0].click();               // 🌐 Global
+  releaseAudio();
+  host.audioGate = null;
+  await waitFor(() => /note changed while listening/.test($("globalStatus").textContent), "note changed");
+  check("busy: buttons back afterwards", !$("btnTimeToAudio").disabled && !$("btnSubtitles").disabled);
+  $("notesTabBar").children[1].click();               // back to the project note
+
+  // Subtitles from the timed lines; one tag edited by hand.
+  setEditor([
+    { tag: "div", kids: [{ tag: "span", cls: "timecode-tag", text: "[00:00:10:20]" }, " " + script[0]] },
+    { tag: "div", kids: [{ tag: "span", cls: "timecode-tag", text: "[00:00:13:05]" }, " " + script[1]] },
+    { tag: "div", kids: ["No timecode on this line"] },
+    { tag: "div", kids: [{ tag: "span", cls: "timecode-tag", text: "[00:00:17:02]" }, " " + script[2]] },
+  ]);
+  const tags = lineDivs().map(tagOf);
+  tags[0].setAttribute("data-t", "0.815"); tags[0].setAttribute("data-e", "2.700");   // as LazyKick wrote it (between frames)
+  tags[1].setAttribute("data-t", "3.000"); tags[1].setAttribute("data-e", "6.400");   // text differs: edited by hand
+  host.timeline = { ok: true, host: "ppro", name: "Seq: 01/Final", fps: 25, offset: 10, duration: 60 };
+  $("btnSubtitles").click();
+  await waitFor(() => host.subtitleCalls.length === 1, "subtitles placed");
+  await settle();
+  const placed = host.subtitleCalls[0];
+  eq("subtitles: one cue per timed line", placed.cues.length, 3);
+  eq("subtitles: LazyKick's tag gives its exact measured start and end", `${placed.cues[0].s}-${placed.cues[0].e}`, "0.815-2.7");
+  eq("subtitles: an edited tag is read from its text", placed.cues[1].s, 3.2);
+  check("subtitles: its measured end kept", placed.cues[1].e === 6.4, placed.cues[1].e);
+  eq("subtitles: a typed timecode (minus the timeline start)", placed.cues[2].s, 7.08);
+  const srtDir = join(projA, "LazyKick Subtitles");
+  const srtFiles = existsSync(srtDir) ? readdirSync(srtDir) : [];
+  eq("subtitles: SRT next to the project, named after the timeline", srtFiles.join(","), "Seq_ 01_Final.srt");
+  const srt = srtFiles.length ? readFileSync(join(srtDir, srtFiles[0]), "utf8") : "";
+  eq("subtitles: SRT starts with a BOM", srt.charCodeAt(0), 0xFEFF);
+  check("subtitles: SRT cues", srt.includes("1\r\n00:00:00,815 --> 00:00:02,700\r\nWelcome back, everyone.\r\n"), JSON.stringify(srt.slice(0, 80)));
+  eq("subtitles: host told where the SRT is", toFwd(placed.srtPath), toFwd(join(srtDir, srtFiles[0] || "")));
+  check("subtitles: status", /caption track/.test($("globalStatus").textContent) && /SRT: Seq_ 01_Final\.srt/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  $("btnSubtitles").click();
+  await waitFor(() => host.subtitleCalls.length === 2, "second subtitles");
+  eq("subtitles again: never overwrites the first SRT", readdirSync(srtDir).sort().join(","), "Seq_ 01_Final.srt,Seq_ 01_Final_2.srt");
+
+  setEditor([{ tag: "div", kids: ["Just words, no timecodes."] }]);
+  $("btnSubtitles").click();
+  await settle();
+  check("subtitles: nothing timed, says what to do", /Time to Audio first/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  eq("subtitles: nothing timed, host not called", host.subtitleCalls.length, 2);
+  setEditor([]);
+  $("btnTimeToAudio").click();
+  await settle();
+  check("time to audio: empty note, says what to do", /Write the script first/.test($("globalStatus").textContent), $("globalStatus").textContent);
 
   // ---- LazyPaste
   const pasteDir = join(projA, "Pasted Images");

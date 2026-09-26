@@ -330,6 +330,31 @@ body, html {
     color: #ff8a80;
 }
 
+.script-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border-color);
+    min-height: 28px;
+}
+
+.script-bar .btn-tool:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.script-hint {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 10.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .editor-wrapper {
     flex: 1;
     overflow: hidden;

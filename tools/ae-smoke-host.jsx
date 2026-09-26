@@ -172,8 +172,136 @@
         var sortedAgain = parse(syncWatchBin("Shoot", JSON.stringify({ folder: fwd(shootDir), arrange: true, files: everything }), id));
         check("arrange again: nothing to move", sortedAgain.moved === 0, sortedAgain.moved);
 
+        // ---- the folder's existing bin (1.4)
+        function rootFoldersNamed(name) {
+            var n = 0;
+            for (var i = 1; i <= app.project.numItems; i++) {
+                var it = app.project.item(i);
+                if (it instanceof FolderItem && it.name === name && it.parentFolder.id === app.project.rootFolder.id) n++;
+            }
+            return n;
+        }
+        var twinDir = sub(dir, "Twin Shoot");
+        var twinDay = sub(twinDir, "Day 1");
+        var t1 = writeBinary(new File(twinDay.fsName + "/t1.wav"), wavBytes(500));
+        var t2 = writeBinary(new File(twinDay.fsName + "/t2.wav"), wavBytes(520));
+        var t3 = writeBinary(new File(twinDir.fsName + "/t3.wav"), wavBytes(540));
+        var usersFolder = app.project.items.addFolder("Twin Shoot");        // the user's, flat
+        app.project.importFile(new ImportOptions(t1)).parentFolder = usersFolder;
+        var twinComp = app.project.items.addComp("Twin Comp", 32, 32, 1, 2, 25);
+        twinComp.parentFolder = usersFolder;
+        var copyFolder = app.project.items.addFolder("Twin Shoot");         // a copy with its own sub-folder
+        var copyDay = app.project.items.addFolder("Day 1");
+        copyDay.parentFolder = copyFolder;
+        app.project.importFile(new ImportOptions(t2)).parentFolder = copyDay;
+        var twinSync = parse(syncWatchBin("Twin Shoot", JSON.stringify({ folder: fwd(twinDir), arrange: true, files: [
+            entry(t1, "Day 1"), entry(t2, "Day 1"), entry(t3, "", true)
+        ] }), id));
+        check("twins: one 'Twin Shoot' folder left", twinSync.ok && rootFoldersNamed("Twin Shoot") === 1, twinSync.msg + " / " + rootFoldersNamed("Twin Shoot"));
+        check("twins: reported one merge", twinSync.merged === 1 && twinSync.rootPath === "Twin Shoot", twinSync.merged + " / " + twinSync.rootPath);
+        check("twins: both clips in Twin Shoot/Day 1", footageFor(t1) && where(footageFor(t1)) === "Twin Shoot/Day 1" && where(footageFor(t2)) === "Twin Shoot/Day 1",
+              footageFor(t1) && where(footageFor(t1)) + " | " + where(footageFor(t2)));
+        check("twins: new file imported at its root", footageFor(t3) && where(footageFor(t3)) === "Twin Shoot", footageFor(t3) && where(footageFor(t3)));
+        check("twins: the comp kept in the folder", where(twinComp) === "Twin Shoot", where(twinComp));
+
+        var nestDir = sub(dir, "Nested Shoot");
+        var n1 = writeBinary(new File(nestDir.fsName + "/n1.wav"), wavBytes(560));
+        var assetsFolder = app.project.items.addFolder("Assets");
+        var nestedFolder = app.project.items.addFolder("Nested Shoot");
+        nestedFolder.parentFolder = assetsFolder;
+        app.project.importFile(new ImportOptions(n1)).parentFolder = nestedFolder;
+        var adopt = parse(syncWatchBin("Nested Shoot", JSON.stringify({ folder: fwd(nestDir), arrange: true, files: [entry(n1, "")] }), id));
+        check("adopt: the nested folder becomes the watch bin", adopt.ok && adopt.adopted === true && adopt.rootPath === "Assets/Nested Shoot" && rootFoldersNamed("Nested Shoot") === 0,
+              adopt.rootPath + " / " + rootFoldersNamed("Nested Shoot"));
+
         // still.bmp is used in a comp; it is moved on disk further down.
         app.project.items.addComp("Relink Comp", 32, 32, 1, 5, 25).layers.add(footageFor(sb));
+
+        // ---- script to audio (1.4): Convert Audio to Keyframes, selection, subtitles
+        /** 8 kHz mono: a tone during each [start, end] burst, silence (or a quiet bed) elsewhere. */
+        function burstWav(bursts, seconds, pitch, bed) {
+            var rate = 8000;
+            var n = Math.round(seconds * rate);
+            var parts = ["RIFF", u32(36 + n * 2), "WAVE", "fmt ", u32(16), u16(1), u16(1), u32(rate), u32(rate * 2), u16(2), u16(16), "data", u32(n * 2)];
+            var block = [];
+            for (var i = 0; i < n; i++) {
+                var t = i / rate;
+                var on = false;
+                for (var b = 0; b < bursts.length; b++) if (t >= bursts[b][0] && t < bursts[b][1]) on = true;
+                var v = Math.round(Math.sin(2 * Math.PI * pitch * t) * (on ? 12000 : bed));
+                block.push(u16(v < 0 ? v + 65536 : v));
+            }
+            parts.push(block.join(""));
+            return parts.join("");
+        }
+        var voiceBursts = [[1.0, 2.2], [2.7, 5.1], [5.8, 7.3]];
+        var voFile = writeBinary(new File(dir.fsName + "/voiceover.wav"), burstWav(voiceBursts, 8.5, 220, 0));
+        var bedFile = writeBinary(new File(dir.fsName + "/music bed.wav"), burstWav([], 8.5, 330, 2500));
+        var voComp = app.project.items.addComp("Script Comp", 1920, 1080, 1, 10, 25);
+        var voLayer = voComp.layers.add(app.project.importFile(new ImportOptions(voFile)));
+        var bedLayer = voComp.layers.add(app.project.importFile(new ImportOptions(bedFile)));
+        // Added layers come selected; start like a user who last clicked a text layer.
+        var titleLayer = voComp.layers.addText("Title");
+        voLayer.selected = false;
+        bedLayer.selected = false;
+        titleLayer.selected = true;
+        voComp.workAreaStart = 2;
+        voComp.workAreaDuration = 3;
+        voComp.openInViewer();
+        function levelAt(r, t) { return r.values[Math.round((t - r.start) / r.step)]; }
+
+        var heardAll = parse(getTimelineAudio(""));
+        check("audio: levels from Convert Audio to Keyframes", heardAll.ok && heardAll.kind === "levels" && heardAll.values.length >= 240, heardAll.msg || heardAll.values.length);
+        check("audio: one value a frame from the comp start", heardAll.ok && Math.abs(heardAll.step - 0.04) < 1e-6 && Math.abs(heardAll.start) < 1e-6, heardAll.step + " / " + heardAll.start);
+        check("audio: voice louder than the pause, music under both", heardAll.ok && levelAt(heardAll, 1.5) > levelAt(heardAll, 2.45) && levelAt(heardAll, 2.45) > 0,
+              heardAll.ok ? levelAt(heardAll, 1.5) + " / " + levelAt(heardAll, 2.45) : "");
+        check("audio: a text layer selected still means everything is heard", heardAll.used === "all", heardAll.used);
+        check("audio: helper layer removed", voComp.numLayers === 3, voComp.numLayers);
+        check("audio: the user's selection put back", titleLayer.selected === true && voLayer.selected === false && bedLayer.selected === false,
+              titleLayer.selected + " " + voLayer.selected + " " + bedLayer.selected);
+        check("audio: work area put back", voComp.workAreaStart === 2 && voComp.workAreaDuration === 3, voComp.workAreaStart + " + " + voComp.workAreaDuration);
+
+        titleLayer.selected = false;
+        bedLayer.selected = false;
+        voLayer.selected = true;
+        var heardVoice = parse(getTimelineAudio(""));
+        check("audio: only the selected voice heard", heardVoice.ok && heardVoice.used === "selected" && levelAt(heardVoice, 2.45) < levelAt(heardAll, 2.45) / 4,
+              heardVoice.ok ? heardVoice.used + " " + levelAt(heardVoice, 2.45) + " vs " + levelAt(heardAll, 2.45) : heardVoice.msg);
+        check("audio: the music's audio switched back on", bedLayer.audioEnabled === true);
+        check("audio: still three layers, voice still selected", voComp.numLayers === 3 && voLayer.selected === true && bedLayer.selected === false, voComp.numLayers);
+        // For the Node side: time three lines against what After Effects measured.
+        var levelsOut = new File(Folder.temp.fsName + "/lazykick-ae-levels.json");
+        levelsOut.encoding = "UTF-8";
+        levelsOut.open("w");
+        levelsOut.write(JSON.stringify({ step: heardVoice.step, start: heardVoice.start, values: heardVoice.values, bursts: voiceBursts }));
+        levelsOut.close();
+
+        var subs = parse(placeSubtitles(JSON.stringify({ cues: [
+            { s: 1.0, e: 2.2, t: "Hello from After Effects." },
+            { s: 2.7, e: 5.1, t: "বাংলা লেখা ঠিকমতো জোড়া লাগে কিনা, দেখা যাক।" },
+            { s: 5.8, e: 7.3, t: "Last line of the script" }
+        ] })));
+        check("subtitles: three text layers", subs.ok && subs.count === 3 && voComp.numLayers === 6, subs.msg);
+        var sub1 = voComp.layer(1);
+        var sub2 = voComp.layer(2);
+        var doc1 = sub1.property("ADBE Text Properties").property("ADBE Text Document").value;
+        var doc2 = sub2.property("ADBE Text Properties").property("ADBE Text Document").value;
+        check("subtitles: first cue on top, timed", doc1.text === "Hello from After Effects." && Math.abs(sub1.inPoint - 1) < 0.001 && Math.abs(sub1.outPoint - 2.2) < 0.041,
+              doc1.text + " " + sub1.inPoint + "-" + sub1.outPoint);
+        check("subtitles: Bengali cue has a Bengali font", doc2.font === subs.font && subs.font !== "", doc2.font + " / " + subs.font);
+        try { check("subtitles: Bengali cue uses the Universal Type Engine", doc2.composerEngine === ComposerEngine.UNIVERSAL_TYPE_ENGINE, doc2.composerEngine); } catch (eCE) {}
+        var rect = sub1.sourceRectAtTime(1.5, false);
+        var rectPos = sub1.property("ADBE Transform Group").property("ADBE Position").value;
+        var anchor = sub1.property("ADBE Transform Group").property("ADBE Anchor Point").value;
+        var centreX = rectPos[0] - anchor[0] + rect.left + rect.width / 2;
+        var bottom = rectPos[1] - anchor[1] + rect.top + rect.height;
+        check("subtitles: text centred", Math.abs(centreX - 960) < 40, centreX);
+        check("subtitles: text in the lower third, inside the frame", bottom > 1080 * 0.66 && bottom < 1080, bottom);
+        var framePng = new File(Folder.temp.fsName + "/lazykick-subtitle-frame.png");
+        try { if (framePng.exists) framePng.remove(); } catch (eOldPng) {}
+        try { voComp.saveFrameToPng(3.0, framePng); } catch (ePng) {}
+        for (var waitPng = 0; waitPng < 50 && !framePng.exists; waitPng++) $.sleep(100);
+        check("subtitles: a frame with the Bengali line saved for a look", framePng.exists, framePng.fsName);
 
         // ---- paste
         var comp = app.project.items.addComp("Paste Comp", 32, 32, 1, 5, 25);
