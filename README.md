@@ -22,13 +22,14 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.2** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.3** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ---
 
 ## 📑 Contents
 
-- [What's New in 1.2](#-whats-new-in-12)
+- [What's New in 1.3](#-whats-new-in-13)
+- [What's New in 1.2](#whats-new-in-12)
 - [What's New in 1.1](#whats-new-in-11)
 - [Overview](#-overview)
 - [Features](#-features)
@@ -48,7 +49,16 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.2** · F
 
 ---
 
-## 🆕 What's New in 1.2
+## 🆕 What's New in 1.3
+
+**Watch Bins mirror your folders**
+- **Subfolders become bins.** Link `Shoot` with *Include subfolders* on, and `Shoot/Day 1/Cam A/clip.mp4` lands in the bin `Shoot › Day 1 › Cam A`, nested exactly like the folders on disk. Works the same in After Effects (folders) and Premiere Pro (bins).
+- **Bins that already exist are sorted for you.** A watch bin synced flat by an older version, or clips you moved around inside it, are put back into the bins that match the folders the next time you click **⚡ Sync** (Auto-Sync does it once per session too). Clips you dragged *out* of the watch bin are left where you put them.
+- **Moved a file to another folder on disk? The clip follows it.** The existing clip is relinked to the new place and moved to the matching bin, instead of a second copy being imported, so your edits and comps keep working. LazyKick only relinks when the match is certain (same file name, and the folder names tell it apart); otherwise it imports the file as before.
+- Files are imported in Explorer's order: subfolders first, and `Day 2` before `Day 10`.
+- Adobe's own folders inside a project folder (Auto-Save, Video/Audio Previews) are never imported.
+
+## What's New in 1.2
 
 **Watch Bins**
 - **No more duplicates when you link a folder whose files are already in the project** (imported by hand, or into another bin). LazyKick checks the whole project first, leaves those files where they are and counts them as synced. The status bar says how many were already there.
@@ -151,7 +161,9 @@ Always available in the panel header.
 ### 3. 📂 Watch Bins & Media Sync
 
 - **Folder → bin mapping** with nested bin names (`Footage/Interviews`).
-- **Filters:** 🎬 Video, 🎵 Audio, 🖼️ Image; optional **recursive** scan of subfolders.
+- **Filters:** 🎬 Video, 🎵 Audio, 🖼️ Image; optional **subfolders**.
+- **Mirrors the folder:** each subfolder becomes a bin of the same name inside the watch bin, nested the same way. Clips already in the watch bin are sorted into the bin their folder maps to on every manual Sync; clips you dragged out of it are never touched.
+- **Follows files you move:** a file moved to another folder on disk keeps its clip (relinked in place) instead of being imported twice, when the match is unambiguous.
 - **⚡ Sync** one bin, **Sync All**, or **Auto-Sync** in the background (every 6 seconds).
 - **Imports each file once.** Every imported path is remembered per project.
 - **Never duplicates what the project already has:** a file already in the project, in any bin, is left where it is and counts as synced. Linking a folder you had imported by hand is safe.
@@ -167,7 +179,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.2.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.3.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -229,11 +241,12 @@ Don't keep a source copy and the signed install side by side: they share one ext
 
 ### Auto-import a folder
 1. Open **📂 Watch Bins** → **+ Add Watch Bin**.
-2. **Browse…** to a folder (or paste its path), name the bin (`SFX` or `Music/Beds`), pick filters, and choose whether to include subfolders.
+2. **Browse…** to a folder (or paste its path), name the bin (`SFX` or `Music/Beds`), pick filters, and choose whether to include subfolders. With subfolders on, each one becomes a bin inside this bin.
 3. **Save Watch Bin**: the first sync runs immediately.
 4. Turn on **Auto-Sync** to keep importing new files as they appear.
 5. Seeing **· N skipped**? Hover it to see which files the app refused; fix or replace them and click **⚡ Sync**.
-6. Need another folder or bin name? Click **✎** on the card. Deleted some imported files from the project and want them back? Click **↺** (Reset).
+6. Reorganised the folders on disk, or upgrading from 1.2 with everything in one flat bin? Click **⚡ Sync**: the bin is rearranged to match the folders.
+7. Need another folder or bin name? Click **✎** on the card. Deleted some imported files from the project and want them back? Click **↺** (Reset).
 
 ### Keyboard shortcuts
 
@@ -331,7 +344,8 @@ LazyKick is a standard **CEP extension**: an HTML/JS panel (Chromium with Node.j
 | `getProjectFolder()` | Folder of the saved project, or `NO_PROJECT` (plain string) |
 | `getCurrentTimecode()` | `timecode` at the playhead (AE: project display format + comp start; PPro: sequence format) |
 | `importPastedImage(path, guide, fit, binName)` | Imports or reuses the item, places it; `placedOnTimeline`, `reused`, `track`, `binPath` |
-| `importFilesToBin(binPath, filesJson, expectedProjectId)` | `importedFiles`, `failedFiles`, and `existingFiles` (already in the project, left alone); `projectChanged: true` if another project is open |
+| `syncWatchBin(binPath, payloadJson, expectedProjectId)` | Payload `{ folder, arrange, files: [{ p, s, n }] }` (path, subfolder, new). Relinks moved files, imports new ones into the bin mirroring their subfolder, and with `arrange` sorts media already inside the watch bin. Returns `importedFiles`, `failedFiles`, `existingFiles` (already in the project, left alone), `relinkedFiles` (`{ from, to }`), `moved`; `projectChanged: true` if another project is open |
+| `importFilesToBin(binPath, filesJson, expectedProjectId)` | The 1.2 call: imports straight into one bin, no subfolders or sorting. Same result fields |
 
 **Why some choices were made:**
 - **Premiere placement** uses `Track.overwriteClip` only into verified empty space (`choosePremiereTrack`). `insertClip` would ripple later clips, including on sync-locked tracks.
@@ -454,6 +468,17 @@ It's a **guide layer** by default: visible while you work, excluded from renders
 - A file that is **already in the project** (in any bin) is not imported again; it counts as synced. The status bar says *N already in the project*.
 - You deleted imported files from the project and want them back: click **↺** (Reset) on the card.
 - A project must be open: watch bins belong to a project.
+</details>
+
+<details>
+<summary><strong>Watch Bins: how do the subfolder bins work?</strong></summary>
+
+- With **Include subfolders** on, the watch bin mirrors the folder: `Shoot/Day 1/a.mp4` goes into the bin `Shoot/Day 1`. Bins are only made for folders that contain media.
+- **⚡ Sync** (and **Sync All**) also sorts what is already in the watch bin: a clip sitting in the wrong sub-bin is moved to the one its folder maps to. Auto-Sync does this once per bin per session and then only imports new files.
+- To organise clips your own way, drag them **out** of the watch bin (into a *Selects* bin, say). LazyKick never moves anything that is outside the watch bin, and never deletes bins or clips.
+- A file moved to another folder on disk is relinked, not imported again, when LazyKick can tell for certain which clip it was: same file name, and no other missing clip or new file fits equally well. Otherwise it is imported as a new clip and the old one stays offline.
+- On Windows, a file the app is using can't be moved while the project is open. Reorganise folders with the project closed; after opening it, click **⚡ Sync** and the clips follow their files.
+- A bin whose name differs only in capitals (`day 1` vs `Day 1`) is reused rather than duplicated.
 </details>
 
 <details>

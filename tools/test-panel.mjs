@@ -219,6 +219,8 @@ const host = {
   projectFiles: new Set(),   // lower-cased paths the "project" already holds
   imported: [],              // what the host really imported, in order
   failNames: new Set(),
+  movedOnDisk: {},           // lower-cased new path -> old path the host relinks from
+  movesToReport: 0,          // clips the host says it sorted, when asked to
   refuseProject: false,
   timecode: { ok: true, timecode: "00:00:05:00" },
 };
@@ -245,17 +247,28 @@ function answer(script) {
     case "importPastedImage":
       host.pastes.push({ path: args[0], guide: args[1], fit: args[2], bin: args[3] });
       return JSON.stringify({ ok: true, msg: "Layer added", placedOnTimeline: true });
-    case "importFilesToBin": {
+    case "syncWatchBin": {
       if (host.refuseProject || args[2] !== host.info.fullId) return JSON.stringify({ ok: false, projectChanged: true, msg: "changed" });
-      const files = JSON.parse(args[1]);
-      host.binImports.push({ bin: args[0], files });
+      const payload = JSON.parse(args[1]);
+      const subOf = {};
+      payload.files.forEach((f) => { subOf[f.p] = f.s; });
+      const files = payload.files.filter((f) => f.n).map((f) => f.p);
+      host.binImports.push({ bin: args[0], files, payload });
       const existing = files.filter((f) => host.projectFiles.has(f.toLowerCase()));
-      const failed = files.filter((f) => !existing.includes(f) && host.failNames.has(f.split("/").pop()));
-      const imported = files.filter((f) => !existing.includes(f) && !failed.includes(f));
-      imported.forEach((f) => { host.projectFiles.add(f.toLowerCase()); host.imported.push({ bin: args[0], file: f }); });
+      const relinkedFiles = files.filter((f) => !existing.includes(f) && host.movedOnDisk[f.toLowerCase()])
+        .map((f) => ({ from: host.movedOnDisk[f.toLowerCase()], to: f }));
+      const relinked = relinkedFiles.map((r) => r.to);
+      const failed = files.filter((f) => !existing.includes(f) && !relinked.includes(f) && host.failNames.has(f.split("/").pop()));
+      const imported = files.filter((f) => !existing.includes(f) && !relinked.includes(f) && !failed.includes(f));
+      relinked.forEach((f) => host.projectFiles.add(f.toLowerCase()));
+      imported.forEach((f) => {
+        host.projectFiles.add(f.toLowerCase());
+        host.imported.push({ bin: subOf[f] ? `${args[0]}/${subOf[f]}` : args[0], file: f });
+      });
       return JSON.stringify({
         ok: true, imported: imported.length, failed: failed.length, existing: existing.length,
-        importedFiles: imported, failedFiles: failed, existingFiles: existing,
+        relinked: relinked.length, moved: payload.arrange ? host.movesToReport : 0,
+        importedFiles: imported, failedFiles: failed, existingFiles: existing, relinkedFiles,
       });
     }
     default: return "EvalScript error.";
@@ -322,7 +335,7 @@ class FakeCSInterface {
     const res = answer(script);
     const deliver = () => setImmediate(() => cb && cb(res));
     // host.gate holds watch-bin imports, like a slow import in the real app.
-    if (host.gate && script.startsWith("importFilesToBin")) host.gate.then(deliver);
+    if (host.gate && script.startsWith("syncWatchBin")) host.gate.then(deliver);
     else deliver();
   }
   registerKeyEventsInterest(json) { host.keys = json; }
@@ -464,8 +477,12 @@ try {
 
   const toFwd = (p) => p.replace(/\\/g, "/");
   eq("bins: sanitized bin name", host.binImports[0].bin, "SFX/_Hits_");
-  eq("bins: only real media, sorted, recursive",
-    host.binImports[0].files.map((f) => f.split("/").pop()).join(","), "a.mp4,b.wav,c.png");
+  eq("bins: only real media, subfolders first, recursive",
+    host.binImports[0].files.map((f) => f.split("/").pop()).join(","), "c.png,a.mp4,b.wav");
+  eq("bins: each file carries its subfolder; only real new ones marked new",
+    host.binImports[0].payload.files.map((f) => `${f.s}:${f.p.split("/").pop()}${f.n ? "*" : ""}`).join(" "), "sub:c.png* :a.mp4* :b.wav* :empty.mov");
+  eq("bins: first sync also sorts the bin", host.binImports[0].payload.arrange, true);
+  eq("bins: host told the watch folder", host.binImports[0].payload.folder, media.replace(/\\/g, "/"));
   const aId = `ae|saved|${fileA}`;
   let bin = readJson(binsFile(aId)).bins[0];
   check("bins: imported remembered", bin.history[toFwd(join(media, "a.mp4"))] && bin.history[toFwd(join(media, "sub", "c.png"))]);
@@ -595,7 +612,8 @@ try {
   await settle(20);
   eq("edit unchanged: not a duplicate of itself", alerts.length, 0);
   eq("edit unchanged: still two bins", readJson(binsFile(aId)).bins.length, 2);
-  eq("edit unchanged: nothing to import", host.binImports.length, calls);
+  eq("edit unchanged: nothing new to import", host.binImports.slice(calls).map((b) => b.files.length).join(","), "0");
+  eq("edit unchanged: bin sorted to match the folder", host.binImports[calls] && host.binImports[calls].payload.arrange, true);
 
   actionsOf(1)[2].click();
   $("modalFolderInput").value = music;
@@ -666,6 +684,78 @@ try {
   eq("queued sync after a project switch: not run in the new project", host.binImports.length, calls);
   check("queued sync after a project switch: B gets no bin", !existsSync(binsFile(`ae|saved|${fileB}`)));
   check("held sync still recorded in A", !!readJson(binsFile(aId)).bins[0].history[toFwd(join(media, "held.mp4"))]);
+  setProject("saved", fileA);
+  await advance(2500);
+
+  // ---- watch bins mirror their folders
+  const shoot = join(work, "Media", "Shoot");
+  ["Day 2", "Day 10", "Adobe Premiere Pro Video Previews", "Adobe After Effects Auto-Save"].forEach((d) => mkdirSync(join(shoot, d), { recursive: true }));
+  writeFileSync(join(shoot, "Day 10", "y.mp4"), "yyyy");
+  writeFileSync(join(shoot, "Day 2", "x.mp4"), "xxxx");
+  writeFileSync(join(shoot, "a.mp4"), "aaaa");
+  writeFileSync(join(shoot, "Adobe Premiere Pro Video Previews", "preview.mpeg"), "prev");
+  writeFileSync(join(shoot, "Adobe After Effects Auto-Save", "cache.mov"), "cache");
+  calls = host.binImports.length;
+  $("btnAddBin").click();
+  $("modalFolderInput").value = shoot;
+  $("modalBinNameInput").value = "Shoot";
+  $("modalRecursiveCheck").checked = true;
+  $("btnModalSaveBin").click();
+  await waitFor(() => host.binImports.length === calls + 1, "shoot link");
+  await settle();
+  eq("mirror: Explorer order, numbers by value, Adobe caches skipped",
+    host.binImports[calls].payload.files.map((f) => `${f.s}:${f.p.split("/").pop()}`).join(" "), "Day 2:x.mp4 Day 10:y.mp4 :a.mp4");
+  eq("mirror: each file into its folder's bin", host.imported.slice(-3).map((i) => i.bin).join("|"), "Shoot/Day 2|Shoot/Day 10|Shoot");
+  eq("card: subfolder chip", $("binCardsList").children[2].children[2].children[0].children[3].textContent, "Subfolders");
+
+  // A manual Sync with nothing new still sorts the bin.
+  host.movesToReport = 4;
+  calls = host.binImports.length;
+  actionsOf(2)[0].click();
+  await waitFor(() => host.binImports.length === calls + 1, "manual sort");
+  await settle();
+  const sortCall = host.binImports[calls];
+  eq("manual Sync: every file sent for sorting, none as new", `${sortCall.payload.arrange}:${sortCall.payload.files.length}:${sortCall.files.length}`, "true:3:0");
+  check("manual Sync: status reports the sorting", /4 sorted into subfolder bins/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  host.movesToReport = 0;
+
+  // Auto-Sync sorts a bin once per session, then only calls for new files.
+  const cId = `ae|saved|${fileC}`;
+  const oldPath = toFwd(join(shoot, "old.mp4"));
+  writeFileSync(binsFile(cId), JSON.stringify({ bins: [{
+    folderPath: shoot, binPath: "Shoot", filterVideo: true, filterAudio: true, filterImage: true, recursive: true,
+    history: { [toFwd(join(shoot, "a.mp4"))]: true, [toFwd(join(shoot, "Day 2", "x.mp4"))]: true, [toFwd(join(shoot, "Day 10", "y.mp4"))]: true, [oldPath.toUpperCase()]: true },
+    skipped: {}, importedCount: 4,
+  }] }));
+  setProject("saved", fileC);
+  await advance(2500);
+  calls = host.binImports.length;
+  $("autoSyncToggle").checked = true;
+  $("autoSyncToggle").dispatch("change");
+  await advance(6000);
+  await waitFor(() => host.binImports.length === calls + 1, "auto sort once");
+  await settle();
+  eq("auto: sorts a bin once a session", `${host.binImports[calls].payload.arrange}:${host.binImports[calls].files.length}`, "true:0");
+  await advance(6000);
+  eq("auto: then leaves the host alone", host.binImports.length, calls + 1);
+
+  // old.mp4 moved into Day 3 on disk: the host relinks its clip.
+  mkdirSync(join(shoot, "Day 3"), { recursive: true });
+  writeFileSync(join(shoot, "Day 3", "old.mp4"), "oooo");
+  const newPath = toFwd(join(shoot, "Day 3", "old.mp4"));
+  host.movedOnDisk[newPath.toLowerCase()] = join(shoot, "old.mp4");
+  await advance(12000);
+  await waitFor(() => host.binImports.length === calls + 2, "moved file");
+  await settle();
+  const moveCall = host.binImports[calls + 1];
+  eq("auto relink: only the new file sent, no sorting", `${moveCall.payload.arrange}:${moveCall.payload.files.map((f) => `${f.s}/${f.p.split("/").pop()}`).join(",")}`, "false:Day 3/old.mp4");
+  const cBin = readJson(binsFile(cId)).bins[0];
+  check("auto relink: new place remembered", cBin.history[newPath] === true);
+  check("auto relink: old place forgotten (any case)", !Object.keys(cBin.history).some((k) => k.toLowerCase() === oldPath.toLowerCase()), Object.keys(cBin.history).join(" | "));
+  eq("auto relink: count unchanged", cBin.importedCount, 4);
+  check("auto relink: status says so", /0 imported, 1 relinked/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  $("autoSyncToggle").checked = false;
+  $("autoSyncToggle").dispatch("change");
   setProject("saved", fileA);
   await advance(2500);
 

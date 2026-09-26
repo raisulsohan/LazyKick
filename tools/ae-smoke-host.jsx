@@ -80,7 +80,8 @@
     try {
         app.beginSuppressDialogs();
         lines.push("After Effects " + app.version + " (with UI)");
-        $.evalFile(new File(new File($.fileName).parent.parent.fsName + "/host/host.jsx"));
+        var hostFile = new File(new File($.fileName).parent.parent.fsName + "/host/host.jsx");
+        $.evalFile(hostFile);
         check("host.jsx loaded", typeof LazyKickHost === "object", LazyKickHost && LazyKickHost.VERSION);
 
         var dir = new Folder(Folder.temp.fsName + "/lazykick smoke পরীক্ষা");
@@ -121,6 +122,59 @@
         var wrong = parse(importFilesToBin("Watch/SFX", JSON.stringify([fwd(d)]), "ae|saved|C:\\Elsewhere\\Other.aep"));
         check("sync into another project refused", wrong.ok === false && wrong.projectChanged === true, wrong.msg);
 
+        // ---- watch bins mirror subfolders (1.3)
+        function sub(parent, name) {
+            var f = new Folder(parent.fsName + "/" + name);
+            if (!f.exists) f.create();
+            return f;
+        }
+        function footageFor(file) {
+            var want = file.fsName.toLowerCase();
+            for (var i = 1; i <= app.project.numItems; i++) {
+                var it = app.project.item(i);
+                if (it instanceof FootageItem && it.file && it.file.fsName.toLowerCase() === want) return it;
+            }
+            return null;
+        }
+        function where(item) {
+            var names = [];
+            for (var f = item.parentFolder; f && f !== app.project.rootFolder && f.id !== app.project.rootFolder.id; f = f.parentFolder) names.unshift(f.name);
+            return names.join("/");
+        }
+        var shootDir = sub(dir, "শুটিং");
+        var day1 = sub(shootDir, "Day 1");
+        var camA = sub(day1, "Cam A");
+        var day2 = sub(shootDir, "Day 2");
+        var sa = writeBinary(new File(shootDir.fsName + "/a.wav"), wavBytes(300));
+        var sb = writeBinary(new File(day1.fsName + "/still.bmp"), bmpBytes(8, 8));
+        var sc = writeBinary(new File(camA.fsName + "/c.wav"), wavBytes(350));
+        var sd = writeBinary(new File(day2.fsName + "/d.wav"), wavBytes(400));
+        var entry = function (file, subPath, isNew) {
+            var e = { p: fwd(file), s: subPath };
+            if (isNew) e.n = true;
+            return e;
+        };
+        var mirror = parse(syncWatchBin("Shoot", JSON.stringify({ folder: fwd(shootDir), arrange: true, files: [
+            entry(sc, "Day 1/Cam A", true), entry(sb, "Day 1", true), entry(sa, "", true)
+        ] }), id));
+        check("mirror: three imported", mirror.ok && mirror.imported === 3 && mirror.failed === 0, mirror.msg);
+        check("mirror: c.wav in Shoot/Day 1/Cam A", footageFor(sc) && where(footageFor(sc)) === "Shoot/Day 1/Cam A", footageFor(sc) && where(footageFor(sc)));
+        check("mirror: still.bmp in Shoot/Day 1", footageFor(sb) && where(footageFor(sb)) === "Shoot/Day 1", footageFor(sb) && where(footageFor(sb)));
+        check("mirror: a.wav in Shoot", footageFor(sa) && where(footageFor(sa)) === "Shoot", footageFor(sa) && where(footageFor(sa)));
+
+        // d.wav as a 1.2 sync left it: straight in Shoot. One Sync sorts it.
+        var flatItem = app.project.importFile(new ImportOptions(sd));
+        flatItem.parentFolder = footageFor(sa).parentFolder;
+        var everything = [entry(sc, "Day 1/Cam A"), entry(sb, "Day 1"), entry(sd, "Day 2"), entry(sa, "")];
+        var sorted = parse(syncWatchBin("Shoot", JSON.stringify({ folder: fwd(shootDir), arrange: true, files: everything }), id));
+        check("arrange: one moved, nothing imported", sorted.moved === 1 && sorted.imported === 0, sorted.moved + " moved, " + sorted.imported + " imported");
+        check("arrange: d.wav now in Shoot/Day 2", where(flatItem) === "Shoot/Day 2", where(flatItem));
+        var sortedAgain = parse(syncWatchBin("Shoot", JSON.stringify({ folder: fwd(shootDir), arrange: true, files: everything }), id));
+        check("arrange again: nothing to move", sortedAgain.moved === 0, sortedAgain.moved);
+
+        // still.bmp is used in a comp; it is moved on disk further down.
+        app.project.items.addComp("Relink Comp", 32, 32, 1, 5, 25).layers.add(footageFor(sb));
+
         // ---- paste
         var comp = app.project.items.addComp("Paste Comp", 32, 32, 1, 5, 25);
         comp.openInViewer();
@@ -152,6 +206,38 @@
         check("saved: project folder", getProjectFolder() === dir.fsName, getProjectFolder());
         var infoSaved = parse(getProjectInfo());
         check("saved: name decoded", infoSaved.name === "Smoke প্রজেক্ট.aep", infoSaved.name);
+
+        // ---- a file moved on disk while the project was closed (1.3): the
+        // same item follows it. After Effects keeps footage in use open, so it
+        // cannot be moved while the project is open (Windows locks it).
+        app.project.save();
+        app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+        var day3 = sub(shootDir, "Day 3");
+        var movedStill = new File(day3.fsName + "/still.bmp");
+        var movedOnDisk = sb.copy(movedStill.fsName) && sb.remove();
+        check("relink: still.bmp moved on disk", movedOnDisk && movedStill.exists && !new File(sb.fsName).exists, sb.error);
+        app.open(aep);
+        // An installed LazyKick panel loads its own host.jsx into the same
+        // engine when a project opens; load this one again on top.
+        $.evalFile(hostFile);
+        check("reopened: this host.jsx loaded again", LazyKickHost.VERSION === infoSaved.version && typeof LazyKickHost.syncWatchBin === "function", LazyKickHost.VERSION);
+        var reopenedId = getProjectPath();
+        var stillItem = footageFor(sb);
+        check("relink: reopened, still.bmp missing", stillItem && stillItem.footageMissing === true, stillItem ? stillItem.footageMissing : "not found");
+        if (stillItem) {
+            var itemsBefore = app.project.numItems;
+            var relinked = parse(syncWatchBin("Shoot", JSON.stringify({ folder: fwd(shootDir), arrange: false, files: [entry(movedStill, "Day 3", true)] }), reopenedId));
+            check("relink: counted, not imported", relinked.relinked === 1 && relinked.imported === 0, relinked.relinked + " relinked, " + relinked.imported + " imported, " + relinked.msg);
+            check("relink: same item points at the new file", stillItem.file && stillItem.file.fsName === movedStill.fsName, stillItem.file && stillItem.file.fsName);
+            check("relink: no longer missing", stillItem.footageMissing === false, stillItem.footageMissing);
+            check("relink: item moved to Shoot/Day 3", where(stillItem) === "Shoot/Day 3", where(stillItem));
+            var relinkComp = null;
+            for (var ci = 1; ci <= app.project.numItems; ci++) {
+                if (app.project.item(ci) instanceof CompItem && app.project.item(ci).name === "Relink Comp") relinkComp = app.project.item(ci);
+            }
+            check("relink: the comp layer still uses it", relinkComp && relinkComp.layer(1).source.id === stillItem.id);
+            check("relink: only the Day 3 folder was added", app.project.numItems === itemsBefore + 1, app.project.numItems - itemsBefore);
+        }
     } catch (fatal) {
         check("test stopped", false, fatal.toString() + " (line " + fatal.line + ")");
     }

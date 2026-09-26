@@ -119,12 +119,32 @@ PItem.prototype.createBin = function (name) {
     return bin;
 };
 PItem.prototype.getMediaPath = function () { return this.mediaPath; };
+PItem.prototype.moveBin = function (dest) {
+    removeChild(this.parentBin, this);
+    addChild(dest, this);
+    ppro.moves++;
+    return 0;
+};
+PItem.prototype.canChangeMediaPath = function () { return true; };
+PItem.prototype.changeMediaPath = function (p) {
+    this.mediaPath = p;
+    ppro.relinks.push(p);
+    return 0;
+};
 PItem.prototype.getInPoint = function () { return { seconds: 0 }; };
 PItem.prototype.getOutPoint = function () { return { seconds: this.duration }; };
 
 function addChild(bin, item) {
     bin.children[bin.children.numItems] = item;
     bin.children.numItems++;
+    item.parentBin = bin;
+}
+
+function removeChild(bin, item) {
+    var kept = [];
+    for (var i = 0; i < bin.children.numItems; i++) if (bin.children[i] !== item) kept.push(bin.children[i]);
+    bin.children = { numItems: 0 };
+    for (var k = 0; k < kept.length; k++) addChild(bin, kept[k]);
 }
 
 function PTrack(locked, clips) {
@@ -152,6 +172,8 @@ function setupPremiere(tracks, playhead) {
     CompItem = undefined; FolderItem = undefined; FootageItem = undefined; ImportOptions = undefined;
     ppro.imports = [];
     ppro.unsupported = {};
+    ppro.moves = 0;
+    ppro.relinks = [];
     var root = new PItem(2, "root");
     var seq = {
         name: "Seq 01",
@@ -276,11 +298,191 @@ section("Premiere Pro", function () {
     eq("ppro all existing: no empty bin made", madeFresh, false);
 });
 
+// ============================================== Premiere Pro: mirrored folders
+function pproKids(bin) {
+    var names = [];
+    for (var i = 0; i < bin.children.numItems; i++) {
+        var c = bin.children[i];
+        names.push(c.type === 2 ? c.name + "/" : c.name);
+    }
+    return names.join(",");
+}
+function pproBin(path) {
+    var bin = app.project.rootItem;
+    var parts = path.split("/");
+    for (var p = 0; p < parts.length && bin; p++) {
+        var found = null;
+        for (var i = 0; i < bin.children.numItems; i++) {
+            if (bin.children[i].type === 2 && bin.children[i].name === parts[p]) found = bin.children[i];
+        }
+        bin = found;
+    }
+    return bin;
+}
+function clip(bin, mediaPath) {
+    var item = new PItem(1, mediaPath.replace(/^.*\\/, ""), mediaPath, 5);
+    addChild(bin, item);
+    return item;
+}
+function payload(folder, arrange, files) {
+    var list = [];
+    for (var i = 0; i < files.length; i++) {
+        list.push({ p: files[i][0], s: files[i][1], n: files[i][2] === true });
+    }
+    return JSON.stringify({ folder: folder, arrange: arrange, files: list });
+}
+var PPRO_ID = "ppro|saved|D:\\Work\\Edit.prproj";
+
+section("Premiere Pro: mirrored folders", function () {
+    existingFiles = {};
+    var shoot = ["D:/Shoot/a.mp4", "D:/Shoot/Day 1/b.mp4", "D:/Shoot/Day 1/Cam A/c.mp4", "D:/Shoot/Day 2/d.mp4", "D:/Shoot/Day 2/e.mp4"];
+    for (var f = 0; f < shoot.length; f++) existingFiles[norm(shoot[f])] = {};
+
+    // First sync: subfolders become bins inside the watch bin, in folder order.
+    setupPremiere([new PTrack(false, [])], 0);
+    var r = parse(syncWatchBin("Footage", payload("D:/Shoot", true, [
+        ["D:/Shoot/Day 1/Cam A/c.mp4", "Day 1/Cam A", true],
+        ["D:/Shoot/Day 1/b.mp4", "Day 1", true],
+        ["D:/Shoot/Day 2/d.mp4", "Day 2", true],
+        ["D:/Shoot/a.mp4", "", true]
+    ]), PPRO_ID));
+    check("mirror: ok", r.ok === true, r.msg);
+    eq("mirror: all imported", r.imported + ":" + r.failed + ":" + r.existing + ":" + r.moved, "4:0:0:0");
+    eq("mirror: one import per bin", ppro.imports.length, 4);
+    eq("mirror: Footage holds the folders first, then its own file", pproKids(pproBin("Footage")), "Day 1/,Day 2/,a.mp4");
+    eq("mirror: Day 1", pproKids(pproBin("Footage/Day 1")), "Cam A/,b.mp4");
+    eq("mirror: Day 1/Cam A", pproKids(pproBin("Footage/Day 1/Cam A")), "c.mp4");
+    eq("mirror: Day 2", pproKids(pproBin("Footage/Day 2")), "d.mp4");
+    eq("mirror: nothing else at the root", pproKids(app.project.rootItem), "Footage/");
+
+    // A 1.2 watch bin: everything flat in one bin. One sync sorts it.
+    setupPremiere([new PTrack(false, [])], 0);
+    var footage = app.project.rootItem.createBin("Footage");
+    for (var s = 0; s < 4; s++) clip(footage, shoot[s].replace(/\//g, "\\"));
+    var own = clip(footage, "D:\\Other\\logo.png");          // put there by the user
+    existingFiles[norm("D:/Other/logo.png")] = {};
+    var lower = footage.createBin("day 2");                   // same name, other case
+    var selects = app.project.rootItem.createBin("Selects");
+    var picked = clip(selects, "D:\\Shoot\\Day 2\\e.mp4");    // dragged out by the user
+    var all = [
+        ["D:/Shoot/Day 1/Cam A/c.mp4", "Day 1/Cam A"],
+        ["D:/Shoot/Day 1/b.mp4", "Day 1"],
+        ["D:/Shoot/Day 2/d.mp4", "Day 2"],
+        ["D:/Shoot/Day 2/e.mp4", "Day 2"],
+        ["D:/Shoot/a.mp4", ""]
+    ];
+    var ar = parse(syncWatchBin("Footage", payload("D:/Shoot", true, all), PPRO_ID));
+    eq("arrange: nothing imported", ppro.imports.length, 0);
+    eq("arrange: three clips moved", ar.moved, 3);
+    eq("arrange: Footage keeps its own file and the user's logo", pproKids(pproBin("Footage")), "a.mp4,logo.png,day 2/,Day 1/");
+    eq("arrange: Day 1 built from the folders", pproKids(pproBin("Footage/Day 1")), "Cam A/,b.mp4");
+    eq("arrange: Cam A", pproKids(pproBin("Footage/Day 1/Cam A")), "c.mp4");
+    eq("arrange: an existing bin that differs only in case is reused", pproKids(lower), "d.mp4");
+    eq("arrange: a clip outside the watch bin stays put", picked.parentBin === selects && own.parentBin === footage, true);
+    var again = parse(syncWatchBin("Footage", payload("D:/Shoot", true, all), PPRO_ID));
+    eq("arrange again: nothing to move", again.moved + ":" + ppro.moves, "0:3");
+
+    var noArrange = parse(syncWatchBin("Footage", payload("D:/Shoot", false, all), PPRO_ID));
+    eq("arrange off: nothing looked at", noArrange.moved, 0);
+
+    // The watch bin was deleted in Premiere: sorting makes nothing.
+    setupPremiere([new PTrack(false, [])], 0);
+    var gone = parse(syncWatchBin("Footage", payload("D:/Shoot", true, all), PPRO_ID));
+    eq("arrange without the bin: nothing made", gone.moved + ":" + pproKids(app.project.rootItem), "0:");
+    // A watch bin at the project root is never rearranged.
+    clip(app.project.rootItem, "D:\\Shoot\\Day 1\\b.mp4");
+    eq("arrange at the root: left alone", parse(syncWatchBin("", payload("D:/Shoot", true, all), PPRO_ID)).moved, 0);
+
+    // A file moved to another folder on disk: its clip is relinked and follows it.
+    setupPremiere([new PTrack(false, [])], 0);
+    footage = app.project.rootItem.createBin("Footage");
+    var moved = clip(footage, "D:\\Shoot\\old.mp4");       // no longer on disk
+    existingFiles[norm("D:/Shoot/Day 3/old.mp4")] = {};
+    var rl = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [["D:/Shoot/Day 3/old.mp4", "Day 3", true]]), PPRO_ID));
+    eq("relink: counted", rl.relinked + ":" + rl.imported + ":" + rl.failed, "1:0:0");
+    eq("relink: no second copy imported", ppro.imports.length, 0);
+    eq("relink: same clip, new path", moved.mediaPath, "D:\\Shoot\\Day 3\\old.mp4");
+    eq("relink: reported from/to", rl.relinkedFiles[0].from + " > " + rl.relinkedFiles[0].to, "D:\\Shoot\\old.mp4 > D:/Shoot/Day 3/old.mp4");
+    eq("relink: moved into its folder's bin", pproKids(pproBin("Footage/Day 3")), "old.mp4");
+
+    // Two new files with the missing clip's name, equally close: not guessed.
+    setupPremiere([new PTrack(false, [])], 0);
+    footage = app.project.rootItem.createBin("Footage");
+    var cam = clip(footage, "D:\\Shoot\\A001.mp4");
+    existingFiles[norm("D:/Shoot/Day 1/A001.mp4")] = {};
+    existingFiles[norm("D:/Shoot/Day 2/A001.mp4")] = {};
+    var amb = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [
+        ["D:/Shoot/Day 1/A001.mp4", "Day 1", true],
+        ["D:/Shoot/Day 2/A001.mp4", "Day 2", true]
+    ]), PPRO_ID));
+    eq("ambiguous: nothing relinked, both imported", amb.relinked + ":" + amb.imported, "0:2");
+    eq("ambiguous: old clip untouched", cam.mediaPath, "D:\\Shoot\\A001.mp4");
+
+    // One new file, two missing clips that fit it equally well: not guessed either.
+    setupPremiere([new PTrack(false, [])], 0);
+    footage = app.project.rootItem.createBin("Footage");
+    var card1 = clip(footage, "E:\\Card 1\\A001.mp4");
+    var card2 = clip(footage, "E:\\Card 2\\A001.mp4");
+    existingFiles[norm("D:/Shoot/A001.mp4")] = {};
+    var amb2 = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [["D:/Shoot/A001.mp4", "", true]]), PPRO_ID));
+    eq("ambiguous the other way: imported, not relinked", amb2.relinked + ":" + amb2.imported, "0:1");
+    eq("ambiguous the other way: both clips untouched", card1.mediaPath + " | " + card2.mediaPath, "E:\\Card 1\\A001.mp4 | E:\\Card 2\\A001.mp4");
+
+    // The whole shoot moved to another drive: folder names tell the clips apart.
+    setupPremiere([new PTrack(false, [])], 0);
+    footage = app.project.rootItem.createBin("Footage");
+    var day1 = footage.createBin("Day 1");
+    var day2 = footage.createBin("Day 2");
+    var c1 = clip(day1, "E:\\Card\\Day 1\\A001.mp4");
+    var c2 = clip(day2, "E:\\Card\\Day 2\\A001.mp4");
+    var drive = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [
+        ["D:/Shoot/Day 1/A001.mp4", "Day 1", true],
+        ["D:/Shoot/Day 2/A001.mp4", "Day 2", true]
+    ]), PPRO_ID));
+    eq("new drive: both relinked", drive.relinked + ":" + drive.imported, "2:0");
+    eq("new drive: each to its own day", c1.mediaPath + " | " + c2.mediaPath, "D:\\Shoot\\Day 1\\A001.mp4 | D:\\Shoot\\Day 2\\A001.mp4");
+    eq("new drive: nothing moved", drive.moved + ":" + c1.parentBin.name + ":" + c2.parentBin.name, "0:Day 1:Day 2");
+
+    // A clip that still has its file is never taken over by a new file of the same name.
+    setupPremiere([new PTrack(false, [])], 0);
+    footage = app.project.rootItem.createBin("Footage");
+    existingFiles[norm("D:/Library/logo.png")] = {};
+    existingFiles[norm("D:/Shoot/logo.png")] = {};
+    var lib = clip(footage, "D:\\Library\\logo.png");
+    var twin = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [["D:/Shoot/logo.png", "", true]]), PPRO_ID));
+    eq("not missing: imported, not relinked", twin.relinked + ":" + twin.imported + ":" + lib.mediaPath, "0:1:D:\\Library\\logo.png");
+
+    // A missing clip elsewhere in the project, from another folder, is not ours.
+    setupPremiere([new PTrack(false, [])], 0);
+    var elsewhere = clip(app.project.rootItem.createBin("Archive"), "F:\\Old\\old.mp4");
+    var foreign = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [["D:/Shoot/Day 3/old.mp4", "Day 3", true]]), PPRO_ID));
+    eq("not ours: imported, not relinked", foreign.relinked + ":" + foreign.imported + ":" + elsewhere.mediaPath, "0:1:F:\\Old\\old.mp4");
+    // ...but one dragged out of the watch bin, from the watch folder, is.
+    setupPremiere([new PTrack(false, [])], 0);
+    var dragged = clip(app.project.rootItem.createBin("Selects"), "D:\\Shoot\\old.mp4");
+    var follow = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [["D:/Shoot/Day 3/old.mp4", "Day 3", true]]), PPRO_ID));
+    eq("dragged out: relinked where it is", follow.relinked + ":" + dragged.mediaPath + ":" + dragged.parentBin.name, "1:D:\\Shoot\\Day 3\\old.mp4:Selects");
+
+    // createBin answering 0 (documented on failure) still finds the bin it made.
+    setupPremiere([new PTrack(false, [])], 0);
+    var realCreate = PItem.prototype.createBin;
+    PItem.prototype.createBin = function (name) { realCreate.call(this, name); return 0; };
+    try {
+        parse(syncWatchBin("Zero", payload("D:/Shoot", false, [["D:/Shoot/Day 1/b.mp4", "Day 1", true]]), PPRO_ID));
+        eq("createBin returns 0: bin still used", pproKids(pproBin("Zero/Day 1")), "b.mp4");
+    } finally {
+        PItem.prototype.createBin = realCreate;
+    }
+});
+
 // ========================================================== After Effects
 function AEFolder(name) {
     this.name = name;
+    this.id = AEFolder.next++;
     this.items = { length: 0 };
+    this.parentFolder = null;
 }
+AEFolder.next = 1;
 
 section("After Effects", function () {
     CompItem = function (w, h) {
@@ -302,27 +504,50 @@ section("After Effects", function () {
     };
     FolderItem = AEFolder;
     FootageItem = function (file) {
+        this.id = AEFolder.next++;
         this.file = file; this.name = file.fsName;
         this.width = file.info ? file.info.width : 0;
         this.height = file.info ? file.info.height : 0;
-        this.parentFolder = null;
+        this.parentFolder = root;
+    };
+    FootageItem.prototype.replace = function (file) {
+        this.file = file;
+        this.name = file.fsName;
+        aeReplaced.push(file.fsName);
     };
     ImportOptions = function (file) { this.file = file; };
 
     var imports = 0;
+    var aeReplaced = [];
     var root = new AEFolder("Root");
     var items = { length: 0 };
     function addItem(it) {
         items.length++;
         items[items.length] = it;
     }
+    // Only root.items is kept up to date; where an item really is comes from
+    // its parentFolder, as in After Effects (see aeKids).
     items.addFolder = function (name) {
         var f = new AEFolder(name);
+        f.parentFolder = root;
         addItem(f);
         root.items.length++;
         root.items[root.items.length] = f;
         return f;
     };
+    function aeKids(folder) {
+        var names = [];
+        for (var i = 1; i <= items.length; i++) {
+            if (items[i].parentFolder === folder) names.push(items[i] instanceof AEFolder ? items[i].name + "/" : items[i].file.fsName.replace(/^.*\\/, ""));
+        }
+        return names.join(",");
+    }
+    function aeFolder(parent, name) {
+        for (var i = 1; i <= items.length; i++) {
+            if (items[i] instanceof AEFolder && items[i].parentFolder === parent && items[i].name === name) return items[i];
+        }
+        return null;
+    }
     var comp = new CompItem(1920, 1080);
     app = {
         project: {
@@ -385,7 +610,7 @@ section("After Effects", function () {
     var groupsBefore = undoGroups;
     var s = parse(importFilesToBin("SFX", '["D:/Media/a.mp4","D:/Media/c.heic","D:/Media/gone.wav"]', "ae|unsaved|untitled"));
     eq("ae sync: imported", s.importedFiles.join("|"), "D:/Media/a.mp4");
-    eq("ae sync: failed", s.failedFiles.join("|"), "D:/Media/c.heic|D:/Media/gone.wav");
+    eq("ae sync: failed", s.failedFiles.join("|"), "D:/Media/gone.wav|D:/Media/c.heic");
     eq("ae sync: one undo step", undoGroups - groupsBefore, 1);
     eq("ae sync: undo balanced", undoDepth, 0);
 
@@ -405,6 +630,54 @@ section("After Effects", function () {
     }
     eq("ae all existing: no empty folder made", madeFolder, false);
     eq("ae existing: undo balanced", undoDepth, 0);
+
+    // ---- mirrored folders
+    var shots = ["D:/Shoot/a.mp4", "D:/Shoot/Day 1/b.mp4", "D:/Shoot/Day 1/Cam A/c.mp4", "D:/Shoot/Day 2/d.mp4"];
+    for (var sh = 0; sh < shots.length; sh++) existingFiles[norm(shots[sh])] = {};
+    groupsBefore = undoGroups;
+    var mirror = parse(syncWatchBin("Footage", payload("D:/Shoot", true, [
+        ["D:/Shoot/Day 1/Cam A/c.mp4", "Day 1/Cam A", true],
+        ["D:/Shoot/Day 1/b.mp4", "Day 1", true],
+        ["D:/Shoot/a.mp4", "", true]
+    ]), "ae|unsaved|untitled"));
+    eq("ae mirror: imported", mirror.imported + ":" + mirror.failed + ":" + mirror.moved, "3:0:0");
+    var aeFootage = aeFolder(root, "Footage");
+    var aeDay1 = aeFolder(aeFootage, "Day 1");
+    eq("ae mirror: Footage", aeKids(aeFootage), "Day 1/,a.mp4");
+    eq("ae mirror: Day 1", aeKids(aeDay1), "Cam A/,b.mp4");
+    eq("ae mirror: Cam A", aeKids(aeFolder(aeDay1, "Cam A")), "c.mp4");
+    eq("ae mirror: one undo step", undoGroups - groupsBefore, 1);
+
+    // d.mp4 imported by an older version straight into Footage; x.mp4 dragged out by the user.
+    var flat = app.project.importFile(new ImportOptions(new File("D:/Shoot/Day 2/d.mp4")));
+    flat.parentFolder = aeFootage;
+    existingFiles[norm("D:/Shoot/Day 2/x.mp4")] = {};
+    var dragged = app.project.importFile(new ImportOptions(new File("D:/Shoot/Day 2/x.mp4")));
+    var sorted = parse(syncWatchBin("Footage", payload("D:/Shoot", true, [
+        ["D:/Shoot/Day 1/Cam A/c.mp4", "Day 1/Cam A"],
+        ["D:/Shoot/Day 1/b.mp4", "Day 1"],
+        ["D:/Shoot/Day 2/d.mp4", "Day 2"],
+        ["D:/Shoot/Day 2/x.mp4", "Day 2"],
+        ["D:/Shoot/a.mp4", ""]
+    ]), "ae|unsaved|untitled"));
+    eq("ae arrange: one moved", sorted.moved + ":" + sorted.imported, "1:0");
+    eq("ae arrange: into Footage/Day 2", flat.parentFolder.name + "<" + flat.parentFolder.parentFolder.name, "Day 2<Footage");
+    eq("ae arrange: dragged-out item stays at the root", dragged.parentFolder === root, true);
+
+    // Moved on disk: Replace Footage instead of a second import.
+    existingFiles[norm("D:/Shoot/Day 3/b.mp4")] = {};
+    delete existingFiles[norm("D:/Shoot/Day 1/b.mp4")];
+    var bItem = null;
+    for (var bi = 1; bi <= items.length; bi++) {
+        if (items[bi].file && /Day 1\\b\.mp4$/.test(items[bi].file.fsName)) bItem = items[bi];
+    }
+    var importsNow = imports;
+    var aeRelink = parse(syncWatchBin("Footage", payload("D:/Shoot", false, [["D:/Shoot/Day 3/b.mp4", "Day 3", true]]), "ae|unsaved|untitled"));
+    eq("ae relink: counted", aeRelink.relinked + ":" + aeRelink.imported, "1:0");
+    eq("ae relink: no import", imports, importsNow);
+    eq("ae relink: same item replaced", bItem && bItem.file.fsName, "D:\\Shoot\\Day 3\\b.mp4");
+    eq("ae relink: moved into Footage/Day 3", bItem && bItem.parentFolder.name + "<" + bItem.parentFolder.parentFolder.name, "Day 3<Footage");
+    eq("ae mirror: undo balanced", undoDepth, 0);
 
     app.project.file = new File("D:/Work/Promo.aep");
     eq("ae: saved id", getProjectPath(), "ae|saved|D:\\Work\\Promo.aep");

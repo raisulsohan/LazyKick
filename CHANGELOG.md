@@ -2,6 +2,22 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.3.0
+
+### Watch Bins mirror their folders
+- **Subfolders become bins.** With *Include subfolders* on, each subfolder is imported into a bin of the same name inside the watch bin, nested the same way (After Effects folders and Premiere Pro bins alike). Until now every file went flat into the one bin. Bins are made only for folders that contain media.
+- **Existing bins are sorted to match the folders.** A manual **Sync**, **Sync All**, **Edit**, **Reset** or a new link moves media that is already inside the watch bin into the bin its folder maps to, so a bin synced flat by 1.2 is rearranged with one click. Auto-Sync does this once per bin per session and afterwards only calls the host for new files. Media outside the watch bin is never moved; nothing is ever deleted.
+- **Files moved on disk keep their clip.** When a file shows up in a new folder and its old clip has gone missing, the clip is relinked (Premiere: *Change Media Path*; After Effects: *Replace Footage*) and moved to the matching bin instead of a second copy being imported, so sequences and comps keep working. Only unambiguous matches relink: the same file name, and the longest shared run of folder names unique for both the new file and the missing clip. A whole shoot moved to another drive relinks too.
+- Existing bins are matched ignoring capitals, so `day 1` is reused rather than joined by `Day 1`.
+- Files are sent in Explorer's order: subfolders before files, numbers by value (`Day 2` before `Day 10`).
+- Adobe's own folders inside a project folder (*Adobe Premiere Pro Auto-Save*, *Video Previews*, *Audio Previews*, *Adobe After Effects Auto-Save*) are skipped, so a watched project folder never imports render previews.
+- The status bar reports relinked and sorted clips; the card shows a *Subfolders* chip.
+
+### Internals
+- New host call `syncWatchBin(binPath, payloadJson, expectedProjectId)`; one engine for both hosts works on a model of the project built once per sync. `importFilesToBin` stays as the flat 1.2 call.
+- Tests: mirrored import, sorting, case-insensitive bin reuse, relinking (including ambiguous cases and a drive move), `createBin` returning 0, Explorer ordering, Auto-Sync sorting once. `tools/ae-smoke-host.jsx` covers mirroring, sorting and relinking in the real After Effects.
+- `tools/package-zxp.mjs` finds the renamed `00. Install from here` folder.
+
 ## 1.2.0
 
 ### Watch Bins

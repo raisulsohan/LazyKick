@@ -8,7 +8,7 @@
  * Adobe's own ZXPSignCmd does the signing; tools/get-zxpsigncmd.mjs fetches it.
  * The key that signs it sits in the repository folder but never in git — this
  * repository is public (see `certDir`). The finished zip goes to the shared
- * "00 Install from here" folder; the half-built pieces go to the system temp
+ * "00. Install from here" folder; the half-built pieces go to the system temp
  * folder and are swept up at the end.
  *
  * It works the same way as LazyLord's and Lazy-Image's release scripts, so all
@@ -30,22 +30,25 @@ const VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).ver
 const SHORT = VERSION.replace(/\.0$/, "");
 
 const BUNDLE_ID = "com.sohan.LazyKick";
-const DOWNLOAD_FOLDER_NAME = "00 Install from here";
+/* The folder is called "00. Install from here" now; older setups had no dot. */
+const DOWNLOAD_FOLDER_NAMES = ["00. Install from here", "00 Install from here"];
 
 /*
- * The finished zip goes to "00 Install from here" — the nearest one found
- * beside the repository or beside any folder above it (D:\GitHub\00 Install
- * from here for D:\GitHub\LazySuite\LazyKick), which keeps only the newest
- * LazyKick zip. LAZYKICK_DOWNLOAD_DIR overrides it.
+ * The finished zip goes to "00. Install from here" — the nearest one found
+ * beside the repository or beside any folder above it (D:\GitHub\00. Install
+ * from here for D:\GitHub\01. After Effects Tools\LazyKick), which keeps only
+ * the newest LazyKick zip. LAZYKICK_DOWNLOAD_DIR overrides it.
  */
 function downloadsFolder() {
   if (process.env.LAZYKICK_DOWNLOAD_DIR) return process.env.LAZYKICK_DOWNLOAD_DIR;
   for (let dir = dirname(root); ; dir = dirname(dir)) {
-    const candidate = join(dir, DOWNLOAD_FOLDER_NAME);
-    if (existsSync(candidate)) return candidate;
+    for (const name of DOWNLOAD_FOLDER_NAMES) {
+      const candidate = join(dir, name);
+      if (existsSync(candidate)) return candidate;
+    }
     if (dirname(dir) === dir) break;
   }
-  return join(dirname(root), DOWNLOAD_FOLDER_NAME);
+  return join(dirname(root), DOWNLOAD_FOLDER_NAMES[0]);
 }
 
 /*

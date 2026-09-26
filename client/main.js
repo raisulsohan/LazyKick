@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.2.0";
+    var PANEL_VERSION = "1.3.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -91,6 +91,13 @@
         "$recycle.bin": true, "system volume information": true, "$winreagent": true,
         "$getcurrent": true, "$sysreset": true, "config.msi": true, "recovery": true,
         "msocache": true, "perflogs": true, "windows.old": true, "boot": true
+    };
+
+    // Adobe's own caches and backups inside a project folder: previews are
+    // .mpeg/.mov files, and none of them belong in a bin.
+    var ADOBE_CACHE_FOLDERS = {
+        "adobe premiere pro auto-save": true, "adobe premiere pro video previews": true,
+        "adobe premiere pro audio previews": true, "adobe after effects auto-save": true
     };
 
     // ============================================================
@@ -1186,7 +1193,7 @@
 
             var actions = makeEl("div", "bin-card-actions");
             var syncBtn = makeEl("button", "btn-tool btn-sync-single", "⚡ Sync");
-            syncBtn.title = "Sync this folder now (also retries skipped files)";
+            syncBtn.title = "Sync this folder now: imports new files, sorts the bin to match the folder's subfolders and retries skipped files";
             var openBtn = makeEl("button", "btn-tool btn-open-os", "📂");
             openBtn.title = "Open in Explorer/Finder";
             var editBtn = makeEl("button", "btn-tool btn-edit-bin", "✎");
@@ -1212,7 +1219,7 @@
             if (b.filterVideo) badges.appendChild(makeEl("span", "chip-tag", "Video"));
             if (b.filterAudio) badges.appendChild(makeEl("span", "chip-tag", "Audio"));
             if (b.filterImage) badges.appendChild(makeEl("span", "chip-tag", "Image"));
-            if (b.recursive) badges.appendChild(makeEl("span", "chip-tag", "Recursive"));
+            if (b.recursive) badges.appendChild(makeEl("span", "chip-tag", "Subfolders"));
             bottom.appendChild(badges);
 
             var status = makeEl("div", "bin-sync-status", (b.importedCount || 0) + " items synced");
@@ -1300,16 +1307,58 @@
         return allowed;
     }
 
+    function isSkippedFolder(name) {
+        var lower = name.toLowerCase();
+        return WIN_HIDDEN_FOLDERS.hasOwnProperty(lower) || ADOBE_CACHE_FOLDERS.hasOwnProperty(lower);
+    }
+
+    /** "Day 2" before "Day 10", ignoring case, as Explorer and Finder sort names. */
+    function naturalCompare(a, b) {
+        var x = String(a).toLowerCase().match(/\d+|\D+/g) || [];
+        var y = String(b).toLowerCase().match(/\d+|\D+/g) || [];
+        for (var i = 0; i < x.length && i < y.length; i++) {
+            if (x[i] === y[i]) continue;
+            if (/^\d/.test(x[i]) && /^\d/.test(y[i])) {
+                // Compared as digit strings, so long numbers keep their order.
+                var nx = x[i].replace(/^0+(?=\d)/, "");
+                var ny = y[i].replace(/^0+(?=\d)/, "");
+                if (nx.length !== ny.length) return nx.length < ny.length ? -1 : 1;
+                if (nx !== ny) return nx < ny ? -1 : 1;
+                return x[i].length < y[i].length ? -1 : 1;
+            }
+            return x[i] < y[i] ? -1 : 1;
+        }
+        if (x.length !== y.length) return x.length < y.length ? -1 : 1;
+        return a < b ? -1 : (a > b ? 1 : 0);
+    }
+
+    /** Explorer's order: folder by folder, subfolders before the files next to them. */
+    function compareScanned(a, b) {
+        var x = a.parts;
+        var y = b.parts;
+        for (var i = 0; i < x.length && i < y.length; i++) {
+            if (x[i] === y[i]) continue;
+            var xFolder = i < x.length - 1;
+            var yFolder = i < y.length - 1;
+            if (xFolder !== yFolder) return xFolder ? -1 : 1;
+            return naturalCompare(x[i], y[i]);
+        }
+        return x.length - y.length;
+    }
+
     /**
-     * Every matching media file under the bin's folder, as
-     * { path, size, mtimeMs }. Asynchronous, so a big library does not freeze
-     * the panel; linked folders are not followed, so a loop cannot trap it.
+     * Every matching media file under the bin's folder, in Explorer's order,
+     * as { path, size, mtimeMs, sub, parts }. `sub` is the subfolder the file
+     * sits in ("Day 1/Cam A", "" for the folder itself): the bin it belongs
+     * in, inside the watch bin. Asynchronous, so a big library does not
+     * freeze the panel; linked folders are not followed, so a loop cannot
+     * trap it.
      */
     function scanFolder(bin) {
         var allowed = allowedExtensions(bin);
         var results = [];
 
-        function walk(dir) {
+        function walk(dir, folders) {
             return readdirP(dir).then(function (names) {
                 return Promise.all(names.map(function (name) {
                     if (isJunkName(name)) return null;
@@ -1320,11 +1369,15 @@
                         return statPromise.then(function (st) {
                             if (!st) return null;
                             if (st.isDirectory()) {
-                                if (bin.recursive && !lst.isSymbolicLink() && !WIN_HIDDEN_FOLDERS[name.toLowerCase()]) return walk(full);
+                                if (bin.recursive && !lst.isSymbolicLink() && !isSkippedFolder(name)) return walk(full, folders.concat([name]));
                                 return null;
                             }
                             if (st.isFile() && allowed[path.extname(name).toLowerCase()]) {
-                                results.push({ path: full, size: st.size, mtimeMs: st.mtime.getTime() });
+                                results.push({
+                                    path: full, size: st.size, mtimeMs: st.mtime.getTime(),
+                                    sub: sanitizeRelativePath(folders.join("/"), ""),
+                                    parts: folders.concat([name])
+                                });
                             }
                             return null;
                         });
@@ -1333,8 +1386,8 @@
             });
         }
 
-        return walk(bin.folderPath).then(function () {
-            results.sort(function (a, b) { return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0); });
+        return walk(bin.folderPath, []).then(function () {
+            results.sort(compareScanned);
             return results;
         });
     }
@@ -1354,15 +1407,41 @@
         });
     }
 
+    function pathKey(p) {
+        var s = normPath(p);
+        return process.platform === "win32" ? s.toLowerCase() : s;
+    }
+
+    /** Drop a file from a bin's history, whatever case or slashes the host wrote it with. */
+    function forgetHistory(bin, filePath) {
+        var key = pathKey(filePath);
+        Object.keys(bin.history).forEach(function (k) {
+            if (pathKey(k) === key) delete bin.history[k];
+        });
+    }
+
+    // Watch bins sorted to match their folders this session, so Auto-Sync
+    // does it once per bin and then only calls the host for new files.
+    var arrangedBins = {};
+
+    function arrangeKey(projectId, bin) {
+        return projectId + "|" + pathKey(bin.folderPath) + "|" + bin.binPath;
+    }
+
     /**
-     * Import what is new in one watch folder.
-     * opts.quiet         only report when something was imported or failed
+     * Bring one watch folder into its bin. Subfolders become bins of the
+     * same name inside it, and media already in the watch bin is moved to
+     * match the folders on disk; a file moved to another folder keeps its
+     * clip (relinked) instead of being imported twice.
+     * opts.quiet         only report when something changed or failed
+     * opts.auto          an Auto-Sync pass: sorts the bin once a session,
+     *                    then calls the host only for new files
      * opts.requireStable only import files whose size held since the last scan
      * opts.retrySkipped  try files that failed before, even if unchanged
      */
     function syncBin(bin, opts) {
         opts = opts || {};
-        var outcome = { imported: 0, failed: 0, waiting: 0, existing: 0 };
+        var outcome = { imported: 0, failed: 0, waiting: 0, existing: 0, relinked: 0, moved: 0 };
         var projectId = appState.projectId;
         var binsRef = appState.bins;
         var label = bin.binPath || "Root";
@@ -1381,6 +1460,7 @@
             if (projectId !== appState.projectId) return outcome;
 
             var batch = [];
+            var isNew = {};
             files.forEach(function (file) {
                 var norm = normPath(file.path);
                 if (bin.history[norm] || file.size === 0) return;
@@ -1392,17 +1472,31 @@
                     return;
                 }
                 batch.push({ norm: norm, signature: signature });
+                isNew[norm] = true;
             });
 
-            if (batch.length === 0) {
+            var key = arrangeKey(projectId, bin);
+            var arrange = !opts.auto || !arrangedBins[key];
+            if (batch.length === 0 && (!arrange || files.length === 0)) {
                 if (!opts.quiet) setStatus(label + ": no new files", 2000);
                 return outcome;
             }
-            if (!opts.quiet) setStatus("Importing " + batch.length + " new item(s) into " + label + "...");
+            if (!opts.quiet) {
+                setStatus(batch.length ? "Importing " + batch.length + " new item(s) into " + label + "..." : "Sorting " + label + "...");
+            }
 
-            var paths = batch.map(function (item) { return item.norm; });
-            var script = "importFilesToBin(" + JSON.stringify(bin.binPath) + ", " +
-                JSON.stringify(JSON.stringify(paths)) + ", " + JSON.stringify(projectId) + ")";
+            // Sorting needs every file; an Auto-Sync import only the new ones.
+            var entries = [];
+            files.forEach(function (file) {
+                var norm = normPath(file.path);
+                if (!arrange && !isNew[norm]) return;
+                var entry = { p: norm, s: file.sub };
+                if (isNew[norm]) entry.n = true;
+                entries.push(entry);
+            });
+            var payload = { folder: normPath(bin.folderPath), arrange: arrange, files: entries };
+            var script = "syncWatchBin(" + JSON.stringify(bin.binPath) + ", " +
+                JSON.stringify(JSON.stringify(payload)) + ", " + JSON.stringify(projectId) + ")";
 
             return evalScriptP(script).then(function (r) {
                 if (!r || !r.ok) {
@@ -1411,11 +1505,18 @@
                     }
                     return outcome;
                 }
+                if (arrange) arrangedBins[key] = true;
 
                 var failedSet = {};
                 var existingSet = {};
+                var relinkedSet = {};
                 (r.failedFiles || []).forEach(function (p) { failedSet[normPath(p)] = true; });
                 (r.existingFiles || []).forEach(function (p) { existingSet[normPath(p)] = true; });
+                (r.relinkedFiles || []).forEach(function (pair) {
+                    // The clip now points at the new place; the old one is gone.
+                    forgetHistory(bin, pair.from);
+                    relinkedSet[normPath(pair.to)] = true;
+                });
                 batch.forEach(function (item) {
                     delete stableSizes[item.norm];
                     if (failedSet[item.norm]) {
@@ -1429,38 +1530,41 @@
                         bin.history[item.norm] = true;
                         delete bin.skipped[item.norm];
                         if (existingSet[item.norm]) outcome.existing++;
+                        else if (relinkedSet[item.norm]) outcome.relinked++;
                         else outcome.imported++;
                     }
                 });
+                outcome.moved = r.moved || 0;
                 bin.importedCount = Object.keys(bin.history).length;
                 writeBins(projectId, binsRef);
                 if (projectId === appState.projectId) renderBinCards();
 
-                if (outcome.imported || outcome.failed || outcome.existing || !opts.quiet) {
+                if (outcome.imported || outcome.failed || outcome.existing || outcome.relinked || outcome.moved) {
                     setStatus("Synced " + label + ": " + describeOutcome(outcome), 3000);
+                } else if (!opts.quiet) {
+                    setStatus(label + ": no new files", 2000);
                 }
                 return outcome;
             });
         });
     }
 
-    /** "3 imported, 2 already in the project, 1 could not be imported" */
+    /** "3 imported, 1 relinked (moved on disk), 12 sorted into subfolder bins, 2 already in the project, 1 could not be imported" */
     function describeOutcome(o) {
         var msg = o.imported + " imported";
+        if (o.relinked) msg += ", " + o.relinked + " relinked (moved on disk)";
+        if (o.moved) msg += ", " + o.moved + " sorted into subfolder bins";
         if (o.existing) msg += ", " + o.existing + " already in the project";
         if (o.failed) msg += ", " + o.failed + " could not be imported";
         return msg;
     }
 
     function syncBins(bins, opts) {
-        var total = { imported: 0, failed: 0, waiting: 0, existing: 0 };
+        var total = { imported: 0, failed: 0, waiting: 0, existing: 0, relinked: 0, moved: 0 };
         return bins.reduce(function (chain, bin) {
             return chain.then(function () {
                 return syncBin(bin, opts).then(function (o) {
-                    total.imported += o.imported;
-                    total.failed += o.failed;
-                    total.waiting += o.waiting;
-                    total.existing += o.existing;
+                    Object.keys(total).forEach(function (k) { total[k] += o[k]; });
                 });
             });
         }, Promise.resolve()).then(function () { return total; });
@@ -1489,7 +1593,7 @@
         el.autoSyncDot.className = "status-dot syncing";
         var bins = appState.bins.slice();
         runExclusive(function () {
-            return syncBins(bins, { quiet: true, requireStable: true });
+            return syncBins(bins, { quiet: true, requireStable: true, auto: true });
         }).then(function () {
             el.autoSyncDot.className = appState.autoSync ? "status-dot active" : "status-dot";
         });
