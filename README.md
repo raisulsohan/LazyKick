@@ -172,6 +172,8 @@ The same panel runs in **After Effects** and **Premiere Pro**. Notes and watch b
 
 ### 1. ⚡ LazyPaste: clipboard to timeline
 
+<img src="docs/images/paste-tools.png" width="460" alt="The Paste and Tools tab after a paste: the green Placed on Timeline button, the paste options and six recent pastes">
+
 Always available in the panel header.
 
 - **Sources:** screenshots (`Win+Shift+S`, `Cmd+Ctrl+Shift+4`), *Copy Image* from any browser or app, or an **image file copied in Explorer/Finder**.
@@ -190,6 +192,8 @@ Always available in the panel header.
 
 ### 2. 📝 Notes & Tasks
 
+<img src="docs/images/notes-tasks.png" width="460" alt="A note tab with timecode stamps and a checklist, one task ticked">
+
 - **Per-project, automatic saving.** Notes follow the project file, whether it is open in After Effects or Premiere Pro.
 - **Unsaved projects too:** notes taken before the first save move to the project when you save it.
 - **Multiple tabs** per project. Double-click a tab to rename it in place.
@@ -204,6 +208,8 @@ Always available in the panel header.
 - **👁 Follow:** while the timeline plays, the spoken line and word light up and the note scrolls along.
 
 ### 3. 📂 Watch Bins & Media Sync
+
+<img src="docs/images/watch-bins.png" width="460" alt="The Watch Bins tab with three linked folders, Auto-Sync on, and two skipped files on one card">
 
 - **Folder → bin mapping** with nested bin names (`Footage/Interviews`).
 - **Filters:** 🎬 Video, 🎵 Audio, 🖼️ Image; optional **subfolders**.
