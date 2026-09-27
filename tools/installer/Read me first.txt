@@ -51,6 +51,25 @@ THE THREE TABS
       Task       inserts a checkbox
       Copy       copies the note as text
       Export     saves a .txt next to the project
+      A- / A+    smaller or bigger note text
+    Paste a script from Google Docs or Word and its headings,
+    bold, italic and lists come along. Ctrl+Shift+V pastes
+    plain text.
+
+  SCRIPT TO SUBTITLES (in Notes & Tasks)
+    1. Put the voiceover on the timeline and keep that sequence
+       or composition open.
+    2. Write or paste the script into a note, in the order it
+       is spoken. Headings and grey notes are skipped.
+    3. Music on the timeline too? Select the voiceover clip or
+       layer first, so only it is heard.
+    4. Click "Time to Audio": every line starts with the time
+       it is spoken, e.g. [00:00:13:15]. Any language works.
+    5. Click "Subtitles": Premiere Pro gets a caption track,
+       After Effects one text layer per subtitle, and an .srt
+       is saved in "LazyKick Subtitles" next to the project.
+    With "Follow" on, press play: the line and the word being
+    said light up and the note scrolls along.
 
   WATCH BINS
     Link a folder on your computer (Downloads, SFX, client
@@ -92,6 +111,13 @@ IF SOMETHING GOES WRONG
   A watch folder shows "skipped" files
       Hover the word "skipped" to see which files. They are a
       format the app cannot import, or damaged.
+
+  Time to Audio put a line at the wrong time
+      The script must match the recording: same sentences, same
+      order. Select only the voiceover if there is music, then
+      click Time to Audio again. You can also edit a timecode.
+
+  More help: https://github.com/raisulsohan/LazyKick/tree/main/docs
 
 
 ------------------------------------------------------------

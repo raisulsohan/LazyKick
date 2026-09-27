@@ -15,6 +15,7 @@
 
 <p align="center">
   <a href="https://raisulsohan.com"><strong>🌐 raisulsohan.com</strong></a> •
+  <a href="docs/README.md"><strong>📖 Documentation</strong></a> •
   <a href="#-installation">Install</a> •
   <a href="#-how-to-use">How to Use</a> •
   <a href="#%EF%B8%8F-architecture">Architecture</a> •
@@ -24,10 +25,15 @@
 
 Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.5.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
+![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
+
+> 📖 **[Read the full documentation](docs/README.md)**: [the manual](docs/manual.md), [how script timing works](docs/script-timing.md), [troubleshooting](docs/troubleshooting.md) and [building from source](docs/development.md).
+
 ---
 
 ## 📑 Contents
 
+- [📖 Documentation](docs/README.md)
 - [What's New in 1.5](#-whats-new-in-15)
 - [What's New in 1.4](#whats-new-in-14)
 - [What's New in 1.3](#whats-new-in-13)
@@ -158,7 +164,7 @@ LazyKick now covers everything from the older **QuickPaste** and **QuickBinSync*
 | 🎙️ | **Script to Subtitles** | Write the script in Notes, click once to time every line to the voiceover, click again to put the lines on the timeline as subtitles. |
 | 📂 | **Watch Bins** | Link folders like *Downloads*, *SFX* or *Client uploads* to project bins; new media is imported automatically, once, and never while it's still copying. |
 
-The same panel runs in **After Effects** and **Premiere Pro**. Open one project in both apps and the notes are the same.
+The same panel runs in **After Effects** and **Premiere Pro**. Notes and watch bins belong to the project file; the 🌐 Global tab is shared by both apps.
 
 ---
 
@@ -397,6 +403,7 @@ LazyKick is a standard **CEP extension**: an HTML/JS panel (Chromium with Node.j
 | `importPastedImage(path, guide, fit, binName)` | Imports or reuses the item, places it; `placedOnTimeline`, `reused`, `track`, `binPath` |
 | `syncWatchBin(binPath, payloadJson, expectedProjectId)` | Payload `{ folder, arrange, files: [{ p, s, n }] }` (path, subfolder, new). Relinks moved files, imports new ones into the bin mirroring their subfolder, and with `arrange` sorts media already inside the watch bin. Returns `importedFiles`, `failedFiles`, `existingFiles` (already in the project, left alone), `relinkedFiles` (`{ from, to }`), `moved`; `projectChanged: true` if another project is open |
 | `getTimelineInfo()` | The open sequence/composition: `name`, `fps`, `offset` (seconds its timecode starts at), `duration` |
+| `getPlayhead()` | For 👁 Follow, polled several times a second: `t` (seconds from the timeline start), `fps`, `offset`, `name` |
 | `getTimelineAudio(wavPath)` | Premiere: exports the sequence mix to `wavPath` with its own *Waveform Audio 48kHz 16-bit* preset (`kind: "wav"`). After Effects: runs *Convert Audio to Keyframes* on the audible layers and returns one loudness value a frame (`kind: "levels"`, `step`, `start`, `values`). With audio clips/layers selected only they are heard (`used: "selected"`); mutes, audio switches, selection and work area are put back |
 | `placeSubtitles(payloadJson)` | `{ srtPath, cues: [{ s, e, t }] }`. Premiere: imports the SRT into a *Subtitles* bin and calls `createCaptionTrack`. After Effects: one text layer per cue |
 | `importFilesToBin(binPath, filesJson, expectedProjectId)` | The 1.2 call: imports straight into one bin, no subfolders or sorting. Same result fields |
@@ -424,6 +431,7 @@ LazyKick/
 │   └── host.jsx                  # ExtendScript engine for After Effects & Premiere Pro
 ├── lib/
 │   └── CSInterface.js            # Adobe's CEP bridge library (v11)
+├── docs/                         # Documentation: manual, script timing, troubleshooting, development, screenshots
 ├── tools/
 │   ├── installer/                # Install / uninstall scripts + "Read me first.txt" for the release zip
 │   ├── check-extendscript.js     # ES3 syntax + lint check of host.jsx (Windows Script Host)
@@ -547,7 +555,7 @@ It's a **guide layer** by default: visible while you work, excluded from renders
 <summary><strong>Subtitles: where do they go?</strong></summary>
 
 - **Premiere Pro:** a new *Subtitle* caption track on the open sequence, from an `.srt` imported into a *Subtitles* bin. Style them in the Essential Graphics / Text panel as usual. Very old Premiere versions can't add caption tracks by script: the `.srt` is then in the *Subtitles* bin to drag onto the sequence.
-- **After Effects:** one text layer per line, named `Sub 01`, `Sub 02`, …, trimmed to its time. Change the look of all of them at once by selecting them and using the Character panel.
+- **After Effects:** one text layer per subtitle, named `Sub 01`, `Sub 02`, … followed by the start of its text, trimmed to its time. Change the look of all of them at once by selecting them and using the Character panel.
 - The `.srt` (UTF-8) is saved in `LazyKick Subtitles` next to the project, never overwriting an earlier one.
 </details>
 
