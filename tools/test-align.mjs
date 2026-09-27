@@ -163,8 +163,9 @@ section("timing real speech", () => {
       const b = v.lines[i + 1];
       sets[1][1].push(b ? { text: `${v.lines[i].text} ${b.text}`, start: v.lines[i].start, end: b.end } : v.lines[i]);
     }
+    const speech = A.findSpeech(env);
     for (const [label, lines] of sets) {
-      const spans = A.alignLines(lines.map((l) => A.lineWeight(l.text)), env);
+      const spans = A.alignScript(lines.map((l) => l.text), speech); // what Time to Audio runs
       eq(`${name}, ${label}: a time for every line`, spans && spans.length, lines.length);
       if (!spans) continue;
       let worst = 0;
@@ -193,6 +194,96 @@ section("timing real speech", () => {
   const one = A.alignLines([30], env);
   near("one line: from the first word", one[0].start, v.lines[0].start, 0.05);
   near("one line: to the last word", one[0].end, v.lines[v.lines.length - 1].end, 0.05);
+});
+
+/* ------------------------------------- a pasted document: whole paragraphs */
+section("paragraphs of sentences", () => {
+  // Each line is a paragraph of several sentences, and the reader pauses
+  // longer inside the paragraphs than between them. Timed by paragraph alone
+  // a paragraph ends a sentence early; every sentence must land instead.
+  for (const name of ["paragraphs-natural", "paragraphs-music"]) {
+    const v = fixture.variants[name];
+    const speech = A.findSpeech({ step: fixture.step, values: v.values });
+    const paras = [];
+    v.lines.forEach((l) => { (paras[l.paragraph] = paras[l.paragraph] || []).push(l); });
+    const texts = paras.map((p) => p.map((l) => l.text).join(" "));
+    const byLength = A.alignLines(texts.map(A.lineWeight), speech);
+    check(`${name}: the trap is real (paragraph lengths alone miss by over a second)`,
+      paras.some((p, i) => Math.abs(byLength[i].start - p[0].start) > 1));
+    const timed = A.alignScript(texts, speech);
+    eq(`${name}: a time for every paragraph`, timed && timed.length, paras.length);
+    let worstStart = 0;
+    let worstSentence = 0;
+    let worstEnd = 0;
+    let orderly = true;
+    paras.forEach((p, i) => {
+      const t = timed[i];
+      worstStart = Math.max(worstStart, Math.abs(t.start - p[0].start));
+      worstEnd = Math.max(worstEnd, Math.abs(t.end - p[p.length - 1].end));
+      const count = A.splitWords(texts[i]).length;
+      if (t.words.length !== count || t.words[0] !== 0 || t.words.some((w, j) => j && w < t.words[j - 1])) orderly = false;
+      if (i && t.start < timed[i - 1].end) orderly = false;
+      let w = 0;
+      for (const l of p) {
+        worstSentence = Math.max(worstSentence, Math.abs(t.start + t.words[w] - l.start));
+        w += A.splitWords(l.text).length;
+      }
+    });
+    check(`${name}: every paragraph starts within 0.1 s`, worstStart <= 0.1, worstStart.toFixed(3));
+    check(`${name}: every paragraph ends within 0.15 s`, worstEnd <= 0.15, worstEnd.toFixed(3));
+    check(`${name}: every sentence inside starts within 0.15 s`, worstSentence <= 0.15, worstSentence.toFixed(3));
+    check(`${name}: one time per word, in order, paragraphs never overlap`, orderly);
+  }
+
+  // More sentences than places to cut: whole lines are timed instead.
+  const rushed = { segments: [{ s: 0, e: 4 }, { s: 4.5, e: 8 }], dips: [] };
+  const two = A.alignScript(["One. Two. Three. Four.", "Five. Six."], rushed);
+  near("rushed read: the first line starts with the speech", two[0].start, 0, 1e-9);
+  near("rushed read: the second line starts after the pause", two[1].start, 4.5, 1e-9);
+  eq("rushed read: a time for every word", `${two[0].words.length},${two[1].words.length}`, "4,2");
+  eq("script: no lines", A.alignScript([], rushed).length, 0);
+  const blank = A.alignScript(["", "Five. Six."], rushed);
+  check("script: a line without words still gets a time", blank.length === 2 && blank[0].start === 0 && blank[1].start > 0, JSON.stringify(blank));
+  eq("script: no speech", A.alignScript(["Hello."], { segments: [], dips: [] }), null);
+  eq("script: nothing heard at all", A.alignScript(["Hello."], null), null);
+});
+
+/* --------------------------------------------------- words inside a line */
+section("words inside a line", () => {
+  // Two sentences read as one line: the first word of the second sentence
+  // must start when that sentence was really spoken.
+  for (const [name, v] of Object.entries(fixture.variants)) {
+    const speech = A.findSpeech({ step: fixture.step, values: v.values });
+    const pairs = [];
+    // An odd last line stays on its own: it is in the audio too.
+    for (let i = 0; i < v.lines.length; i += 2) pairs.push([v.lines[i], v.lines[i + 1]]);
+    const texts = pairs.map(([a, b]) => (b ? `${a.text} ${b.text}` : a.text));
+    const spans = A.alignScript(texts, speech);
+    let worst = 0;
+    let orderly = true;
+    pairs.forEach(([a, b], i) => {
+      const words = A.splitWords(texts[i]);
+      const times = spans[i].words;
+      if (times.length !== words.length || times[0] !== 0 || times.some((t, j) => j && t < times[j - 1])) orderly = false;
+      if (b) worst = Math.max(worst, Math.abs(spans[i].start + times[A.splitWords(a.text).length] - b.start));
+    });
+    check(`${name}: word times one per word, from 0, only forward`, orderly);
+    check(`${name}: second sentence inside a line starts within 0.15 s`, worst <= 0.15, worst.toFixed(3));
+  }
+  const flat = A.wordTimes(["one", "two", "three"], { start: 5, end: 8 }, { segments: [] });
+  check("no speech inside the span: spread over it by length", flat[0] === 0 && flat[1] > 0 && flat[2] < 3, flat.join(","));
+  const paused = A.wordTimes(["aaaa", "bbbb"], { start: 0, end: 3 }, { segments: [{ s: 0, e: 1 }, { s: 2, e: 3 }], dips: [] });
+  near("the clock stops in a pause inside a line", paused[1], 1, 0.001);
+  const later = A.wordTimes(["aa", "aa", "aa"], { start: 0, end: 3 }, { segments: [{ s: 0, e: 1 }, { s: 2, e: 3 }], dips: [] });
+  near("a word after the pause starts after it", later[2], 2 + 1 / 3, 0.001);
+  eq("words split on any white space", A.splitWords(" One two  three\n").join("|"), "One|two|three");
+  near("proportional word times", A.proportionalWordTimes(["ab", "abcdef"], 10, 18)[1], 12, 1e-9);
+
+  const lines = [{ start: 1, end: 3, words: [1, 1.6, 2.2] }, { start: 4, end: 6, words: [4, 4.5, 5, 5.5] }];
+  eq("follow: before everything", JSON.stringify(A.followAt(lines, 0.5)), "{\"line\":-1,\"word\":-1}");
+  eq("follow: on a word", JSON.stringify(A.followAt(lines, 1.7)), "{\"line\":0,\"word\":1}");
+  eq("follow: in the pause after a line", JSON.stringify(A.followAt(lines, 3.5)), "{\"line\":0,\"word\":-1}");
+  eq("follow: next line, last word", JSON.stringify(A.followAt(lines, 5.9)), "{\"line\":1,\"word\":3}");
 });
 
 /* ---------------------------------------------------- timecodes & subtitles */
@@ -225,6 +316,32 @@ section("timecodes and subtitles", () => {
   near("cues: end pulled back before the next start", cues[0].end, 4.96, 1e-9);
   near("cues: measured end kept when it fits", cues[1].end, 7.46, 1e-9);
   near("cues: no end, reading time", cues[2].end, 7.5 + A.readingTime("Third, no measured end"), 1e-9);
+  // A pasted paragraph: cut at sentence ends, each piece starting on its first word.
+  const para = "In 1920, a country decided to delete a problem. Not reduce it. Not manage it. Delete it. " +
+    "The United States looked at alcohol, at the drunkenness and the broken homes and the crime that came with it, " +
+    "and it did something no major nation had ever tried.";
+  const paraWords = A.splitWords(para);
+  const paraTimes = paraWords.map((w, i) => 10 + i * 0.3);
+  const long = A.makeCues([{ start: 10, end: 10 + paraWords.length * 0.3, text: para, words: paraTimes }]);
+  check("paragraph: several cues", long.length >= 3, long.length);
+  check("paragraph: each fits two subtitle lines", long.every((c) => c.text.split("\n").length <= 2 && c.text.replace("\n", " ").length <= 84), long.map((c) => c.text.length).join(","));
+  eq("paragraph: nothing lost", long.map((c) => c.text.replace("\n", " ")).join(" "), para);
+  check("paragraph: cues in order, never overlapping", long.every((c, i) => c.end > c.start && (i === 0 || c.start >= long[i - 1].end)));
+  eq("paragraph: the first cue ends at a sentence end", /[.]$/.test(long[0].text), true);
+  let firstWord = 0;
+  let starts = true;
+  for (const c of long) {
+    if (Math.abs(c.start - paraTimes[firstWord]) > 1e-9) starts = false;
+    firstWord += A.splitWords(c.text).length;
+  }
+  eq("paragraph: each cue starts with its first word", starts, true);
+  const noWords = A.makeCues([{ start: 0, end: 20, text: para }]);
+  check("paragraph without word times: still cut, spread by length", noWords.length >= 3 && noWords[0].start === 0, noWords.length);
+  const slow = A.makeCues([{ start: 0, end: 12, text: "A short line said very slowly over twelve seconds" }]);
+  check("a slow short line is cut by time too", slow.length >= 2, slow.length);
+  const chunks = A.chunkWords("aaaa bbbb, cccc dddd eeee".split(" "), null, 14, 99);
+  eq("chunks prefer a comma when one is a third full", JSON.stringify(chunks), "[{\"from\":0,\"to\":1},{\"from\":2,\"to\":4}]");
+
   eq("srt time", A.srtTime(3725.0456), "01:02:05,046");
   eq("srt", A.buildSrt([{ start: 1, end: 2.5, text: "One" }, { start: 3, end: 4, text: "Two\nlines" }]),
     "1\r\n00:00:01,000 --> 00:00:02,500\r\nOne\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\nTwo\r\nlines\r\n");

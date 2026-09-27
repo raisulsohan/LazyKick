@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.4.1";
+    var PANEL_VERSION = "1.5.1";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -75,6 +75,9 @@
     var MAX_RECENT_PASTES = 12;
     var MAX_PASTE_INDEX = 500;
     var SAVED_JUST_NOW_MS = 120000;
+    var DEFAULT_NOTES_FONT_SIZE = 14;
+    var MIN_NOTES_FONT_SIZE = 10;
+    var MAX_NOTES_FONT_SIZE = 24;
 
     var EXT_GROUPS = {
         video: [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg", ".mxf", ".mts", ".m2ts", ".wmv"],
@@ -127,7 +130,9 @@
         settings: {
             guideLayer: true,
             autoFit: false,
-            targetFolder: DEFAULT_PASTE_FOLDER
+            targetFolder: DEFAULT_PASTE_FOLDER,
+            notesFontSize: DEFAULT_NOTES_FONT_SIZE,
+            follow: true
         },
         recentPastes: [],
         pasteBusy: false
@@ -178,6 +183,13 @@
         dialogCancel:          document.getElementById("dialogCancel"),
         dialogOk:              document.getElementById("dialogOk"),
         btnTimeToAudio:        document.getElementById("btnTimeToAudio"),
+        btnFollow:             document.getElementById("btnFollow"),
+        btnTextSmaller:        document.getElementById("btnTextSmaller"),
+        btnTextBigger:         document.getElementById("btnTextBigger"),
+        tabNotes:              document.getElementById("tabNotes"),
+        followLayer:           document.getElementById("followLayer"),
+        followLine:            document.getElementById("followLine"),
+        followWord:            document.getElementById("followWord"),
         btnSubtitles:          document.getElementById("btnSubtitles"),
 
         // Bins Elements
@@ -477,11 +489,17 @@
         if (s.targetFolder) appState.settings.targetFolder = sanitizeRelativePath(s.targetFolder, DEFAULT_PASTE_FOLDER);
         if (s.autoSync !== undefined) appState.autoSync = !!s.autoSync;
         if (typeof s.lastPickerPath === "string") appState.lastPickerPath = s.lastPickerPath;
+        if (typeof s.notesFontSize === "number" && s.notesFontSize >= MIN_NOTES_FONT_SIZE && s.notesFontSize <= MAX_NOTES_FONT_SIZE) {
+            appState.settings.notesFontSize = s.notesFontSize;
+        }
+        if (s.follow !== undefined) appState.settings.follow = !!s.follow;
 
         el.optGuideLayer.checked = appState.settings.guideLayer;
         el.optAutoFit.checked = appState.settings.autoFit;
         el.optTargetFolder.value = appState.settings.targetFolder;
         el.autoSyncToggle.checked = appState.autoSync;
+        applyNotesFontSize();
+        showFollowState();
     }
 
     function saveGeneralSettings() {
@@ -490,7 +508,9 @@
             autoFit: appState.settings.autoFit,
             targetFolder: appState.settings.targetFolder,
             autoSync: appState.autoSync,
-            lastPickerPath: appState.lastPickerPath
+            lastPickerPath: appState.lastPickerPath,
+            notesFontSize: appState.settings.notesFontSize,
+            follow: appState.settings.follow
         });
     }
 
@@ -517,6 +537,7 @@
             tabBtn.classList.add("active");
             var content = document.getElementById(targetId);
             if (content) content.classList.add("active");
+            if (targetId === "tabNotes") scheduleFollow(0);
         });
     });
 
@@ -727,6 +748,7 @@
             el.noteEditor.innerHTML = (tab && tab.content) ? tab.content : "";
         }
         savedRange = null;
+        noteChanged();
     }
 
     function rememberSelection() {
@@ -795,19 +817,6 @@
     });
     el.noteEditor.addEventListener("keyup", rememberSelection);
     el.noteEditor.addEventListener("mouseup", rememberSelection);
-
-    // Paste text only: rich web pages bring fonts, colours and huge inline images.
-    el.noteEditor.addEventListener("paste", function (e) {
-        var data = e.clipboardData;
-        if (!data) return;
-        e.preventDefault();
-        var text = data.getData("text/plain");
-        if (text) {
-            document.execCommand("insertText", false, text);
-        } else if (data.types && Array.prototype.indexOf.call(data.types, "Files") !== -1) {
-            setStatus("Images go to the timeline: click Paste Image, or press Ctrl/Cmd+V outside the notes", 4000);
-        }
-    });
 
     el.btnAddNoteTab.addEventListener("click", function () {
         saveCurrentNote();
@@ -962,12 +971,20 @@
         return node.nodeName === "BR" ? s + " " : s;
     }
 
-    /** The note's spoken lines: [{ node, text }]. Checklist items and lines like "---" are left out. */
+    /** A line that is part of the script's layout, not something said: a heading or a grey side note. */
+    function isUnspoken(node) {
+        return /^H[1-6]$/.test(node.nodeName) || node.classList.contains("note-muted") || node.classList.contains("todo-item");
+    }
+
+    /**
+     * The note's spoken lines: [{ node, text }]. Headings, grey side notes,
+     * checklist items and lines like "---" are left out.
+     */
     function scriptLines() {
         normalizeEditorBlocks();
         var lines = [];
         for (var node = el.noteEditor.firstChild; node; node = node.nextSibling) {
-            if (node.nodeType !== 1 || node.classList.contains("todo-item")) continue;
+            if (node.nodeType !== 1 || isUnspoken(node)) continue;
             var text = textWithoutTags(node).split(NBSP).join(" ").replace(/\s+/g, " ").trim();
             if (LazyAlign.isSpoken(text)) lines.push({ node: node, text: text });
         }
@@ -983,8 +1000,12 @@
         return null;
     }
 
-    /** Start the line with a tag for `span` (seconds from the timeline start), replacing the one it had. */
-    function setLeadingTag(line, span, timeline) {
+    /**
+     * Start the line with a tag for `span` (seconds from the timeline start),
+     * replacing the one it had. `words`: each word's start, in seconds after
+     * the line's (kept in data-w for following the playhead and subtitles).
+     */
+    function setLeadingTag(line, span, timeline, words) {
         var old = leadingTag(line);
         while (old) {
             var after = old.nextSibling;
@@ -996,6 +1017,7 @@
         tag.className = "timecode-tag";
         tag.setAttribute("data-t", span.start.toFixed(3));
         tag.setAttribute("data-e", span.end.toFixed(3));
+        if (words && words.length) tag.setAttribute("data-w", words.map(function (w) { return String(Math.round(w * 100) / 100); }).join(","));
         tag.textContent = "[" + LazyAlign.formatTimecode(timeline.offset + span.start, timeline.fps) + "]";
         line.insertBefore(document.createTextNode(NBSP), line.firstChild);
         line.insertBefore(tag, line.firstChild);
@@ -1017,6 +1039,20 @@
         if (typed === null) return null;
         var start = typed - timeline.offset;
         return { start: start, end: isFinite(e) && e > start + 0.3 ? e : undefined };
+    }
+
+    function lineWords(node) {
+        return LazyAlign.splitWords(textWithoutTags(node).split(NBSP).join(" "));
+    }
+
+    /** Absolute start time of each word of a timed line: from data-w when it still fits the text, else spread by spoken length. */
+    function wordTimesOf(tag, words, start, end) {
+        var raw = String(tag.getAttribute("data-w") || "");
+        var offsets = raw ? raw.split(",").map(Number) : [];
+        if (offsets.length === words.length && offsets.every(function (o) { return isFinite(o); })) {
+            return offsets.map(function (o) { return start + o; });
+        }
+        return LazyAlign.proportionalWordTimes(words, start, end);
     }
 
     function setScriptBusy(busy) {
@@ -1063,8 +1099,8 @@
                     setStatus("Could not read the audio: " + env.error, 5000);
                     return null;
                 }
-                var weights = lines.map(function (l) { return LazyAlign.lineWeight(l.text); });
-                var spans = LazyAlign.alignLines(weights, env);
+                var speech = LazyAlign.findSpeech(env);
+                var spans = LazyAlign.alignScript(lines.map(function (l) { return l.text; }), speech);
                 var heard = r.used === "selected" ? "the selected audio" : "the timeline audio";
                 if (!spans) {
                     setStatus("No speech found in " + heard + " of '" + r.name + "'", 5000);
@@ -1075,7 +1111,10 @@
                     setStatus("The note changed while listening; nothing was changed", 4000);
                     return null;
                 }
-                spans.forEach(function (span, i) { setLeadingTag(lines[i].node, span, r); });
+                spans.forEach(function (span, i) {
+                    setLeadingTag(lines[i].node, span, r, span.words);
+                });
+                noteChanged();
                 saveCurrentNote();
                 setStatus("Timed " + lines.length + " line" + (lines.length === 1 ? "" : "s") + " to " + heard + " of '" + r.name + "'", 4000);
                 return spans;
@@ -1105,8 +1144,12 @@
                 return null;
             }
             var cues = LazyAlign.makeCues(timed.map(function (l) {
-                var times = tagTimes(leadingTag(l.node), timeline);
-                return times ? { start: times.start, end: times.end, text: l.text } : null;
+                var tag = leadingTag(l.node);
+                var times = tagTimes(tag, timeline);
+                if (!times) return null;
+                var words = LazyAlign.splitWords(l.text);
+                var end = times.end !== undefined ? times.end : times.start + LazyAlign.readingTime(l.text);
+                return { start: times.start, end: times.end, text: l.text, words: wordTimesOf(tag, words, times.start, end) };
             }).filter(function (c) { return c && c.start >= 0; }));
             if (!cues.length) {
                 setStatus("None of the timecodes fall on '" + timeline.name + "'", 4000);
@@ -1140,6 +1183,363 @@
 
     el.btnTimeToAudio.addEventListener("click", function () { timeToAudio(); });
     el.btnSubtitles.addEventListener("click", function () { subtitlesToTimeline(); });
+
+    // ============================================================
+    // NOTE TEXT: size, and pasting from Docs and Word
+    // ============================================================
+
+    var noteVersion = 0;
+    /** The note's lines changed: the playhead highlight works out its lines again. */
+    function noteChanged() { noteVersion++; }
+
+    function applyNotesFontSize() {
+        el.noteEditor.style.fontSize = appState.settings.notesFontSize + "px";
+    }
+
+    function changeNotesFontSize(delta) {
+        var size = Math.max(MIN_NOTES_FONT_SIZE, Math.min(MAX_NOTES_FONT_SIZE, appState.settings.notesFontSize + delta));
+        if (size === appState.settings.notesFontSize) return;
+        appState.settings.notesFontSize = size;
+        applyNotesFontSize();
+        saveGeneralSettings();
+        noteChanged();
+        setStatus("Notes text size: " + size + " px", 1500);
+    }
+
+    el.btnTextSmaller.addEventListener("click", function () { changeNotesFontSize(-1); });
+    el.btnTextBigger.addEventListener("click", function () { changeNotesFontSize(1); });
+
+    var LIFT_TAGS = { DIV: true, P: true, H1: true, H2: true, H3: true, H4: true, H5: true, H6: true,
+                      BLOCKQUOTE: true, UL: true, OL: true, LI: true, PRE: true };
+
+    function hasBlockChild(node) {
+        for (var c = node.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 1 && LIFT_TAGS[c.nodeName]) return true;
+        }
+        return false;
+    }
+
+    function unwrap(node) {
+        var parent = node.parentNode;
+        if (!parent) return;
+        while (node.firstChild) parent.insertBefore(node.firstChild, node);
+        parent.removeChild(node);
+    }
+
+    /** A line that holds whole paragraphs (several were pasted into it) becomes one line per paragraph. */
+    function liftBlocks(node) {
+        var editor = el.noteEditor;
+        var run = null;
+        while (node.firstChild) {
+            var c = node.firstChild;
+            if (c.nodeType === 1 && LIFT_TAGS[c.nodeName]) {
+                run = null;
+                editor.insertBefore(c, node);
+                if (hasBlockChild(c)) liftBlocks(c);
+            } else {
+                if (!run) {
+                    run = document.createElement(node.nodeName === "P" ? "p" : "div");
+                    if (node.className) run.className = node.className;
+                    editor.insertBefore(run, node);
+                }
+                run.appendChild(c);
+            }
+        }
+        editor.removeChild(node);
+    }
+
+    /**
+     * After a paste: no inline styles and no <span>/<font> wrappers the
+     * browser adds while pasting (LazyKick's own spans have a class), and
+     * one block per line at the top, as the timing expects.
+     */
+    function tidyEditor() {
+        var editor = el.noteEditor;
+        var styled = editor.querySelectorAll("[style]");
+        for (var s = 0; s < styled.length; s++) styled[s].removeAttribute("style");
+        var wrappers = editor.querySelectorAll("span, font");
+        for (var w = 0; w < wrappers.length; w++) {
+            if (wrappers[w].nodeName === "SPAN" && wrappers[w].className) continue;
+            unwrap(wrappers[w]);
+        }
+        for (var node = editor.firstChild; node; ) {
+            var next = node.nextSibling;
+            if (node.nodeType === 1 && !node.classList.contains("todo-item") && hasBlockChild(node)) liftBlocks(node);
+            node = next;
+        }
+        normalizeEditorBlocks();
+    }
+
+    // Ctrl/Cmd+Shift+V pastes plain text, as in most apps.
+    var plainPasteUntil = 0;
+    el.noteEditor.addEventListener("keydown", function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.keyCode === 86 || e.key === "v" || e.key === "V")) plainPasteUntil = Date.now() + 1500;
+    });
+
+    /**
+     * Pasting keeps the look of a Google Doc or Word file (headings, bold,
+     * italic, underline, paragraphs, lists) in the panel's own colours; the
+     * clipboard's HTML is rebuilt by client/paste.js, never inserted as is.
+     */
+    el.noteEditor.addEventListener("paste", function (e) {
+        var data = e.clipboardData;
+        if (!data) return;
+        e.preventDefault();
+        var html = data.getData("text/html");
+        var text = data.getData("text/plain");
+        var plain = Date.now() < plainPasteUntil;
+        plainPasteUntil = 0;
+        if (html && !plain && typeof DOMParser === "function") {
+            // The paste was already stopped above, so a failure here must
+            // not lose it: fall through to the plain text.
+            var clean = null;
+            try {
+                clean = LazyPaste.toNoteHtml(new DOMParser().parseFromString(html, "text/html"));
+            } catch (err) {
+                clean = null;
+            }
+            if (clean && clean.html) {
+                document.execCommand("insertHTML", false, clean.html);
+                tidyEditor();
+                rememberSelection();
+                noteChanged();
+                debouncedSaveNote();
+                return;
+            }
+        }
+        if (text) {
+            document.execCommand("insertText", false, text);
+        } else if (data.types && Array.prototype.indexOf.call(data.types, "Files") !== -1) {
+            setStatus("Images go to the timeline: click Paste Image, or press Ctrl/Cmd+V outside the notes", 4000);
+        }
+    });
+
+    // ============================================================
+    // FOLLOW THE PLAYHEAD (the line and word being said light up)
+    // ============================================================
+    //
+    // While the Notes tab shows a note with timed lines, the panel asks the
+    // host where the playhead is (five times a second while it moves, about
+    // once a second while it rests) and lays a soft highlight over the line
+    // and the word being said, scrolling the note along. Between two answers
+    // the highlight glides on at the measured speed. The highlight is a layer
+    // over the editor, never part of the note, so none of it is ever saved.
+
+    var FOLLOW_FAST_MS = 200;
+    var FOLLOW_SLOW_MS = 900;
+    var follow = {
+        timer: null, raf: 0, model: null, builtFor: -1, timelineKey: "",
+        lastT: null, lastAt: 0, rate: 0, movingUntil: 0, shownT: null,
+        pos: { line: -1, word: -1 }, userAt: 0
+    };
+
+    function notesShowing() {
+        return el.tabNotes.classList.contains("active");
+    }
+
+    function hasTimedLine() {
+        return el.noteEditor.querySelectorAll(".timecode-tag").length > 0;
+    }
+
+    /** The note's timed lines in time order, worked out again only when the note or the timeline changed. */
+    function followModel(timeline) {
+        var key = timeline.name + "|" + timeline.fps + "|" + timeline.offset;
+        if (follow.model && follow.builtFor === noteVersion && follow.timelineKey === key) return follow.model;
+        var lines = [];
+        for (var node = el.noteEditor.firstChild; node; node = node.nextSibling) {
+            if (node.nodeType !== 1 || isUnspoken(node)) continue;
+            var tag = leadingTag(node);
+            var times = tag ? tagTimes(tag, timeline) : null;
+            if (times) lines.push({ node: node, tag: tag, start: times.start, end: times.end });
+        }
+        lines.sort(function (a, b) { return a.start - b.start; });
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i];
+            var next = lines[i + 1];
+            if (l.end === undefined || (next && l.end > next.start)) {
+                l.end = next ? next.start - 0.04 : l.start + LazyAlign.readingTime(textWithoutTags(l.node));
+            }
+            l.words = wordTimesOf(l.tag, lineWords(l.node), l.start, l.end);
+            l.ranges = null;
+        }
+        follow.model = { lines: lines };
+        follow.builtFor = noteVersion;
+        follow.timelineKey = key;
+        return follow.model;
+    }
+
+    /** A DOM range over each word of a line, in the order lineWords() counts them. */
+    function wordRanges(node) {
+        var texts = [];
+        (function collect(n) {
+            for (var c = n.firstChild; c; c = c.nextSibling) {
+                if (c.nodeType === 3) texts.push(c);
+                else if (c.nodeType === 1 && !isTimecodeTag(c)) {
+                    if (c.nodeName === "BR") texts.push(null);
+                    else collect(c);
+                }
+            }
+        })(node);
+        var ranges = [];
+        var open = null;
+        function close(endNode, endOffset) {
+            var r = document.createRange();
+            r.setStart(open.node, open.offset);
+            r.setEnd(endNode, endOffset);
+            ranges.push(r);
+            open = null;
+        }
+        var last = null;
+        for (var t = 0; t < texts.length; t++) {
+            if (texts[t] === null) {
+                if (open) close(last, String(last.nodeValue).length);
+                continue;
+            }
+            var s = String(texts[t].nodeValue);
+            for (var i = 0; i < s.length; i++) {
+                var space = /[\s\u00a0]/.test(s.charAt(i));
+                if (!space && !open) open = { node: texts[t], offset: i };
+                else if (space && open) close(texts[t], i);
+            }
+            last = texts[t];
+        }
+        if (open && last) close(last, String(last.nodeValue).length);
+        return ranges;
+    }
+
+    function hideFollow() {
+        el.followLayer.classList.add("hidden");
+        follow.pos = { line: -1, word: -1 };
+    }
+
+    /** Scrolls the note so the line being said stays in view, unless the user has been reading or typing elsewhere. */
+    function keepInView(node) {
+        if (Date.now() - follow.userAt < 2500) return;
+        var editor = el.noteEditor;
+        var box = editor.getBoundingClientRect();
+        var r = node.getBoundingClientRect();
+        if (r.top >= box.top + 8 && r.bottom <= box.bottom - 8) return;
+        var top = Math.max(0, editor.scrollTop + (r.top - box.top) - editor.clientHeight * 0.3);
+        try { editor.scrollTo({ top: top, behavior: "smooth" }); } catch (e) { editor.scrollTop = top; }
+    }
+
+    function showFollowAt(t) {
+        var model = follow.model;
+        var pos = model && model.lines.length ? LazyAlign.followAt(model.lines, t) : { line: -1, word: -1 };
+        if (pos.line < 0) return hideFollow();
+        var line = model.lines[pos.line];
+        if (line.node.parentNode !== el.noteEditor) {
+            follow.builtFor = -1; // the note was redrawn: work the lines out again next time
+            return hideFollow();
+        }
+        var editor = el.noteEditor;
+        var layer = el.followLayer;
+        layer.style.left = (editor.offsetLeft + editor.clientLeft) + "px";
+        layer.style.top = (editor.offsetTop + editor.clientTop) + "px";
+        layer.style.width = editor.clientWidth + "px";
+        layer.style.height = editor.clientHeight + "px";
+        layer.classList.remove("hidden");
+        var base = layer.getBoundingClientRect();
+        var lr = line.node.getBoundingClientRect();
+        el.followLine.style.top = (lr.top - base.top - 2) + "px";
+        el.followLine.style.height = (lr.height + 4) + "px";
+        var shown = false;
+        if (pos.word >= 0) {
+            if (!line.ranges) line.ranges = wordRanges(line.node);
+            var range = line.ranges[pos.word];
+            if (range) {
+                var rects = range.getClientRects();
+                var wr = rects && rects.length ? rects[0] : range.getBoundingClientRect();
+                el.followWord.style.left = (wr.left - base.left - 2) + "px";
+                el.followWord.style.top = (wr.top - base.top - 1) + "px";
+                el.followWord.style.width = (wr.width + 4) + "px";
+                el.followWord.style.height = (wr.height + 2) + "px";
+                shown = true;
+            }
+        }
+        el.followWord.classList.toggle("hidden", !shown);
+        if (pos.line !== follow.pos.line) keepInView(line.node);
+        follow.pos = pos;
+        follow.shownT = t;
+    }
+
+    /** Between two answers from the host, the highlight moves on at the measured playback speed. */
+    function glide() {
+        if (follow.raf || typeof requestAnimationFrame !== "function") return;
+        var step = function () {
+            follow.raf = 0;
+            if (!follow.rate || Date.now() > follow.movingUntil || !appState.settings.follow || el.followLayer.classList.contains("hidden")) return;
+            showFollowAt(follow.lastT + follow.rate * Math.min(Date.now() - follow.lastAt, 500) / 1000);
+            follow.raf = requestAnimationFrame(step);
+        };
+        follow.raf = requestAnimationFrame(step);
+    }
+
+    function scheduleFollow(ms) {
+        clearTimeout(follow.timer);
+        follow.timer = setTimeout(followTick, ms);
+    }
+
+    function followTick() {
+        follow.timer = null;
+        if (!appState.settings.follow || !notesShowing() || !hasOpenProject() || isModalOpen() || !hasTimedLine()) {
+            hideFollow();
+            scheduleFollow(FOLLOW_SLOW_MS);
+            return Promise.resolve();
+        }
+        return evalScriptP("getPlayhead()").then(function (p) {
+            if (!p || !p.ok || typeof p.t !== "number") {
+                hideFollow();
+                scheduleFollow(FOLLOW_SLOW_MS);
+                return;
+            }
+            var now = Date.now();
+            if (follow.lastT !== null) {
+                var moved = p.t - follow.lastT;
+                var dt = (now - follow.lastAt) / 1000;
+                if (Math.abs(moved) > 0.001) {
+                    follow.movingUntil = now + 1200;
+                    follow.rate = dt > 0 ? Math.max(-4, Math.min(4, moved / dt)) : 0;
+                } else if (now > follow.movingUntil) {
+                    follow.rate = 0;
+                }
+            }
+            follow.lastT = p.t;
+            follow.lastAt = now;
+            followModel(p);
+            showFollowAt(p.t);
+            if (follow.rate) glide();
+            scheduleFollow(now < follow.movingUntil ? FOLLOW_FAST_MS : FOLLOW_SLOW_MS);
+        });
+    }
+
+    function showFollowState() {
+        el.btnFollow.classList.toggle("is-on", !!appState.settings.follow);
+        el.btnFollow.title = appState.settings.follow
+            ? "Following the playhead: the line and word being said light up and the note scrolls along. Click to stop."
+            : "Follow the playhead: light up the line and word being said while the timeline plays (needs timed lines).";
+    }
+
+    el.btnFollow.addEventListener("click", function () {
+        appState.settings.follow = !appState.settings.follow;
+        saveGeneralSettings();
+        showFollowState();
+        if (!appState.settings.follow) hideFollow();
+        scheduleFollow(0);
+        setStatus(appState.settings.follow ? "Following the playhead" : "Not following the playhead", 1500);
+    });
+
+    // Reading or typing in the note pauses the scrolling for a moment.
+    ["wheel", "mousedown", "keydown", "touchstart"].forEach(function (type) {
+        el.noteEditor.addEventListener(type, function () { follow.userAt = Date.now(); });
+    });
+    el.noteEditor.addEventListener("input", noteChanged);
+    el.noteEditor.addEventListener("scroll", function () {
+        if (follow.shownT !== null && !el.followLayer.classList.contains("hidden")) showFollowAt(follow.shownT);
+    });
+    window.addEventListener("resize", function () {
+        if (follow.shownT !== null && !el.followLayer.classList.contains("hidden")) showFollowAt(follow.shownT);
+    });
 
     // ============================================================
     // LAZYPASTE ENGINE (Clipboard Image to Timeline)
@@ -2229,5 +2629,6 @@
     registerPasteShortcut();
     pollProject();
     setInterval(pollProject, PROJECT_POLL_MS);
+    scheduleFollow(1000);
 
 })();

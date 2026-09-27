@@ -20,10 +20,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import vm from "node:vm";
+import { MiniDOMParser } from "./mini-html.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAIN_SRC = readFileSync(join(root, "client", "main.js"), "utf8");
 const ALIGN_SRC = readFileSync(join(root, "client", "align.js"), "utf8");
+const PASTE_SRC = readFileSync(join(root, "client", "paste.js"), "utf8");
 const nodeRequire = createRequire(import.meta.url);
 
 let passed = 0;
@@ -110,12 +112,22 @@ class FakeElement {
     this.disabled = false;
     this.title = "";
     this._qs = {};
+    this.offsetLeft = 0; this.offsetTop = 0; this.clientLeft = 0; this.clientTop = 0;
+    this.clientWidth = 300; this.clientHeight = 400; this.scrollTop = 0;
+  }
+  scrollTo(opts) { this.scrollTop = opts.top; (this.doc.scrolls ||= []).push(opts.top); }
+  getBoundingClientRect() {
+    const editor = this.doc.byId.get("noteEditor");
+    if (this === editor || this.attributes.id === "followLayer") return fakeRect(0, 0, 300, 400);
+    if (editor && this.parentNode === editor) return fakeRect(0, editor.children.indexOf(this) * 20 - editor.scrollTop, 300, 20);
+    return fakeRect(0, 0, 0, 0);
   }
   get className() { return [...this.classList.set].join(" "); }
   set className(v) { this.classList = new FakeClassList(); String(v).split(/\s+/).filter(Boolean).forEach((c) => this.classList.add(c)); }
   get textContent() { return this.children.length ? this.children.map((c) => c.textContent).join("") : this._text; }
   set textContent(v) { this.children.forEach((c) => { c.parentNode = null; }); this.children = []; this._text = String(v); this._html = ""; }
   get nodeType() { return this.tagName === "#TEXT" ? 3 : 1; }
+  get nodeValue() { return this.tagName === "#TEXT" ? this._text : null; }
   get nodeName() { return this.tagName; }
   get childNodes() { return this.children; }
   get firstChild() { return this.children[0] || null; }
@@ -158,6 +170,7 @@ class FakeElement {
   hasAttribute(k) { return k in this.attributes; }
   removeAttribute(k) { delete this.attributes[k]; }
   matches(sel) {
+    if (sel.includes(",")) return sel.split(",").some((one) => this.matches(one.trim()));
     if (sel.startsWith(".")) return this.classList.contains(sel.slice(1));
     if (sel.startsWith("[")) return sel.slice(1, -1) in this.attributes;
     return this.tagName === sel.toUpperCase();
@@ -171,6 +184,27 @@ class FakeElement {
   blur() { this.dispatch("blur"); }
   select() {}
   cloneNode() { const c = new FakeElement(this.tagName, this.doc); c._html = this._html; c._text = this._text; c.attributes = { ...this.attributes }; return c; }
+}
+
+function fakeRect(left, top, width, height) { return { left, top, width, height, right: left + width, bottom: top + height }; }
+
+/** Ranges measure words on the fake layout: the line's top, and 7 px per character before the start. */
+class FakeRange {
+  selectNodeContents() {} collapse() {}
+  setStart(node, offset) { this.sn = node; this.so = offset; }
+  setEnd(node, offset) { this.en = node; this.eo = offset; }
+  getBoundingClientRect() {
+    const editor = this.sn.doc.byId.get("noteEditor");
+    let line = this.sn;
+    while (line.parentNode && line.parentNode !== editor) line = line.parentNode;
+    const texts = [];
+    (function walk(n) { for (const c of n.children) { if (c.nodeType === 3) texts.push(c); else if (!c.classList.contains("timecode-tag")) walk(c); } })(line);
+    const before = (node, off) => { let n = 0; for (const t of texts) { if (t === node) return n + off; n += t._text.length; } return n; };
+    const a = before(this.sn, this.so);
+    const b = before(this.en, this.eo);
+    return fakeRect(a * 7, editor.children.indexOf(line) * 20 - editor.scrollTop, (b - a) * 7, 18);
+  }
+  getClientRects() { return [this.getBoundingClientRect()]; }
 }
 
 function serialize(node) {
@@ -203,7 +237,7 @@ function makeDocument() {
   doc.querySelectorAll = () => [];
   doc.createElement = (tag) => new FakeElement(tag, doc);
   doc.createTextNode = (text) => { const t = new FakeElement("#text", doc); t._text = String(text); return t; };
-  doc.createRange = () => ({ selectNodeContents() {}, collapse() {} });
+  doc.createRange = () => new FakeRange();
   doc.execCommand = (cmd, ui, value) => {
     doc.execCommands.push({ cmd, value });
     if ((cmd === "insertHTML" || cmd === "insertText") && doc.activeElement) doc.activeElement._html += value;
@@ -255,6 +289,8 @@ const host = {
   audioCalls: [],
   audioReply: () => ({ ok: false, msg: "Open a sequence first" }),
   subtitleCalls: [],
+  playhead: null,            // seconds from the timeline start, or null for no timeline
+  playheadCalls: 0,
   refuseProject: false,
   timecode: { ok: true, timecode: "00:00:05:00" },
 };
@@ -307,6 +343,9 @@ function answer(script) {
       });
     }
     case "getTimelineInfo": return JSON.stringify(host.timeline);
+    case "getPlayhead":
+      host.playheadCalls++;
+      return JSON.stringify(host.playhead === null ? { ok: false, msg: "No sequence" } : { ok: true, t: host.playhead, fps: 25, offset: 0, name: "Seq 01" });
     case "getTimelineAudio": {
       host.audioCalls.push(args[0]);
       const reply = host.audioReply(args[0]);
@@ -389,12 +428,18 @@ class FakeCSInterface {
   openURLInDefaultBrowser(url) { host.openedUrl = url; }
 }
 
+const cepModule = { id: ".", exports: {}, loaded: false, children: [], paths: [] };
 const context = vm.createContext({
   document: doc,
   window: { getSelection: () => ({ rangeCount: 0, removeAllRanges() {}, addRange() {} }), addEventListener() {}, open() {} },
   navigator: {},
   CSInterface: FakeCSInterface,
+  DOMParser: MiniDOMParser,
   require: (name) => (name === "child_process" ? fakeChildProcess : nodeRequire(name)),
+  // CEP's --enable-nodejs --mixed-context puts Node's module and exports on
+  // the page too, so scripts that look for them must still set their globals.
+  module: cepModule,
+  exports: cepModule.exports,
   process: { platform: "win32", env: { APPDATA: appData } },
   Buffer,
   console: { log() {}, error: console.error },
@@ -434,8 +479,11 @@ const type = async (html) => { $("noteEditor").innerHTML = html; $("noteEditor")
 try {
   setProject("saved", fileA);
   vm.runInContext(ALIGN_SRC, context, { filename: "align.js" }); // <script src="align.js"> comes first
+  vm.runInContext(PASTE_SRC, context, { filename: "paste.js" });
   vm.runInContext(MAIN_SRC, context, { filename: "main.js" });
   await settle();
+  check("startup: align.js is a page global despite CEP's module", typeof context.LazyAlign?.alignLines === "function");
+  check("startup: paste.js is a page global despite CEP's module", typeof context.LazyPaste?.toNoteHtml === "function");
 
   // ---- startup
   eq("startup: project name shown", $("projectName").textContent, "Promo.aep");
@@ -1091,6 +1139,194 @@ try {
   $("btnTimeToAudio").click();
   await settle();
   check("time to audio: empty note, says what to do", /Write the script first/.test($("globalStatus").textContent), $("globalStatus").textContent);
+
+  // ---- Pasting a Google Doc keeps its look; Ctrl+Shift+V pastes plain text
+  const DOC_HTML = '<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1">' +
+    '<p dir="ltr"><span style="font-size:20pt;color:#000000;font-weight:700;">#1 | Prohibition</span></p>' +
+    '<p dir="ltr"><span style="font-size:10pt;color:#666666;">Series: Nomolos | Target: 8-12 min</span></p>' +
+    '<h2 dir="ltr"><span style="font-size:16pt;color:#000000;font-weight:700;">HOOK</span></h2>' +
+    '<p dir="ltr"><span style="font-size:11pt;color:#000000;">In 1920, a country decided to delete a problem. </span><span style="font-size:11pt;font-weight:700;">Delete it.</span></p></b>';
+  const pasteInto = (html, text) => {
+    const ev = $("noteEditor").dispatch("paste", { clipboardData: { getData: (t) => (t === "text/html" ? html : text), types: ["text/html", "text/plain"] } });
+    return ev;
+  };
+  let pasteExecBefore = doc.execCommands.length;
+  const richPaste = pasteInto(DOC_HTML, "#1 | Prohibition\nSeries...");
+  await settle();
+  const richCmd = doc.execCommands[pasteExecBefore];
+  check("doc paste: handled by the panel", richPaste.defaultPrevented === true);
+  eq("doc paste: the Doc's structure, rebuilt", `${richCmd && richCmd.cmd}|${richCmd && richCmd.value}`,
+    "insertHTML|<h1>#1 | Prohibition</h1><p class=\"note-muted\">Series: Nomolos | Target: 8-12 min</p><h2>HOOK</h2><p>In 1920, a country decided to delete a problem. <b>Delete it.</b></p>");
+  pasteExecBefore = doc.execCommands.length;
+  $("noteEditor").dispatch("keydown", { key: "V", keyCode: 86, ctrlKey: true, shiftKey: true });
+  pasteInto(DOC_HTML, "just the words");
+  await settle();
+  eq("Ctrl+Shift+V: plain text", `${doc.execCommands[pasteExecBefore].cmd}|${doc.execCommands[pasteExecBefore].value}`, "insertText|just the words");
+  pasteExecBefore = doc.execCommands.length;
+  pasteInto('<img src=x onerror="alert(1)"><script>alert(2)</script>', "");
+  await settle();
+  eq("a paste with nothing readable inserts nothing", doc.execCommands.length, pasteExecBefore);
+  const realToNoteHtml = context.LazyPaste.toNoteHtml;
+  context.LazyPaste.toNoteHtml = () => { throw new Error("clean-up failed"); };
+  pasteExecBefore = doc.execCommands.length;
+  pasteInto(DOC_HTML, "the words anyway");
+  await settle();
+  context.LazyPaste.toNoteHtml = realToNoteHtml;
+  eq("a failed clean-up still pastes the plain text", `${doc.execCommands[pasteExecBefore]?.cmd}|${doc.execCommands[pasteExecBefore]?.value}`,
+    "insertText|the words anyway");
+
+  // What the browser leaves after pasting is tidied: no styles, no stray wrappers, one block per line.
+  setEditor([]);
+  const box = doc.createElement("div");
+  box.setAttribute("style", "font-size:20px");
+  box.appendChild(doc.createTextNode("Intro "));
+  const h2 = doc.createElement("h2");
+  h2.appendChild(doc.createTextNode("Section"));
+  box.appendChild(h2);
+  const para = doc.createElement("p");
+  const styledSpan = doc.createElement("span");
+  styledSpan.setAttribute("style", "color:black");
+  styledSpan.appendChild(doc.createTextNode("Body"));
+  para.appendChild(styledSpan);
+  box.appendChild(para);
+  $("noteEditor").appendChild(box);
+  const styledP = doc.createElement("p");
+  styledP.setAttribute("style", "color:red");
+  styledP.appendChild(doc.createTextNode("Plain"));
+  $("noteEditor").appendChild(styledP);
+  pasteInto("<p>x</p><p>y</p>", "x");
+  await settle();
+  eq("tidy: nested blocks lifted to lines, wrappers and styles gone",
+    $("noteEditor").children.map((c) => `${c.tagName}:${c.textContent}:${c.children.some((k) => k.tagName === "SPAN") || !!c.attributes.style}`).join(" "),
+    "DIV:Intro :false H2:Section:false P:Body:false P:Plain:false");
+
+  // ---- Note text size
+  const sizeBefore = readJson(join(storage, "lazykick_settings.json")).notesFontSize || 14;
+  $("btnTextBigger").click();
+  $("btnTextBigger").click();
+  eq("text size: A+ twice", $("noteEditor").style.fontSize, `${sizeBefore + 2}px`);
+  eq("text size: remembered", readJson(join(storage, "lazykick_settings.json")).notesFontSize, sizeBefore + 2);
+  for (let i = 0; i < 30; i++) $("btnTextSmaller").click();
+  eq("text size: never below 10 px", $("noteEditor").style.fontSize, "10px");
+  for (let i = 0; i < 30; i++) $("btnTextBigger").click();
+  eq("text size: never above 24 px", $("noteEditor").style.fontSize, "24px");
+  while (readJson(join(storage, "lazykick_settings.json")).notesFontSize > 14) $("btnTextSmaller").click();
+
+  // ---- Time to Audio skips headings and side notes, and keeps each word's time
+  setEditor([
+    { tag: "h1", kids: ["#1 | Prohibition"] },
+    { tag: "p", cls: "note-muted", kids: ["Series: Nomolos | Target: 8-12 min"] },
+    { tag: "h3", kids: ["HOOK"] },
+    { tag: "p", kids: [script[0]] },
+    { tag: "p", kids: [script[1]] },
+    { tag: "h3", kids: ["THE PROBLEM"] },
+    { tag: "p", kids: [script[2]] },
+  ]);
+  host.timeline = { ok: true, host: "ppro", name: "Seq 01", fps: 25, offset: 0, duration: total };
+  host.audioReply = (wavPath) => {
+    writeVoiceWav(wavPath);
+    return { ok: true, kind: "wav", path: wavPath, used: "all", name: "Seq 01", fps: 25, offset: 0, duration: total };
+  };
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 3 lines/.test($("globalStatus").textContent), "headings skipped");
+  const docKids = $("noteEditor").children;
+  eq("headings and side notes get no timecode", docKids.map((k) => (tagOf(k) ? "T" : "-")).join(""), "---TT-T");
+  const timedP = docKids.filter((k) => tagOf(k));
+  timedP.forEach((k, i) => {
+    const t = parseFloat(tagOf(k).getAttribute("data-t"));
+    check(`headings skipped: line ${i + 1} still lands on its words`, Math.abs(t - bursts[i].s) < 0.05, `${t} vs ${bursts[i].s}`);
+    const w = tagOf(k).getAttribute("data-w").split(",").map(Number);
+    eq(`word times: one per word in line ${i + 1}`, w.length, script[i].split(/\s+/).length);
+    check(`word times: line ${i + 1} starts at 0 and only goes forward`, w[0] === 0 && w.every((x, j) => j === 0 || x >= w[j - 1]), w.join(","));
+    check(`word times: line ${i + 1} ends inside the line`, w[w.length - 1] < bursts[i].e - bursts[i].s, `${w[w.length - 1]} vs ${bursts[i].e - bursts[i].s}`);
+  });
+
+  // ---- A long paragraph becomes several subtitles, each when its first word is said
+  const longText = "In 1920, a country decided to delete a problem. Not reduce it. Not manage it. Delete it. " +
+    "The United States looked at alcohol, at the drunkenness and the broken homes, and did something no nation had tried.";
+  const longWords = longText.split(" ");
+  const offsets = longWords.map((w, i) => (i * 0.35).toFixed(2));
+  setEditor([{ tag: "p", kids: [{ tag: "span", cls: "timecode-tag", text: "[00:00:02:00]" }, " " + longText] }]);
+  const longTag = tagOf($("noteEditor").children[0]);
+  longTag.setAttribute("data-t", "2.000");
+  longTag.setAttribute("data-e", (2 + longWords.length * 0.35).toFixed(3));
+  longTag.setAttribute("data-w", offsets.join(","));
+  const subsBefore = host.subtitleCalls.length;
+  $("btnSubtitles").click();
+  await waitFor(() => host.subtitleCalls.length === subsBefore + 1, "long subtitles");
+  const longCues = host.subtitleCalls[subsBefore].cues;
+  check("long line: cut into several subtitles", longCues.length >= 3, longCues.length);
+  check("long line: every subtitle fits two lines of 42", longCues.every((c) => c.t.split("\n").length <= 2 && c.t.replace("\n", " ").length <= 84), longCues.map((c) => c.t.length).join(","));
+  check("long line: pieces end at sentence ends", longCues.slice(0, -1).every((c) => /[.,]$/.test(c.t)), longCues.map((c) => c.t.slice(-8)).join(" | "));
+  let wordAt = 0;
+  longCues.forEach((c, i) => {
+    const expected = 2 + wordAt * 0.35;
+    check(`long line: subtitle ${i + 1} starts with its first word`, Math.abs(c.s - expected) < 0.01, `${c.s} vs ${expected}`);
+    wordAt += c.t.split(/\s+/).length;
+  });
+  eq("long line: all words kept, in order", longCues.map((c) => c.t.replace("\n", " ")).join(" "), longText);
+
+  // ---- Following the playhead
+  const lineEl = (text, t, e, w) => ({ tag: "p", kids: [{ tag: "span", cls: "timecode-tag", text: `[${LazyAlign.formatTimecode(t, 25)}]` }, " " + text], t, e, w });
+  const followLines = [
+    { tag: "h1", kids: ["Title"] },
+    { tag: "p", cls: "note-muted", kids: ["Series: x"] },
+    lineEl("One two three", 1, 3, "0,0.6,1.2"),
+    lineEl("Four five six seven", 4, 6, "0,0.5,1,1.5"),
+  ];
+  for (let i = 0; i < 24; i++) followLines.push(lineEl(`Filler line ${i}`, 10 + i * 2, 11.5 + i * 2, "0,0.5,1"));
+  setEditor(followLines);
+  $("noteEditor").children.forEach((k, i) => {
+    const spec = followLines[i];
+    const tg = tagOf(k);
+    if (tg && spec.t !== undefined) { tg.setAttribute("data-t", String(spec.t)); tg.setAttribute("data-e", String(spec.e)); tg.setAttribute("data-w", spec.w); }
+  });
+  $("noteEditor").dispatch("input");
+  $("tabNotes").classList.add("active");
+  await realTimeout(2600);                             // earlier typing in the note pauses the scrolling for 2.5 s
+  host.playhead = 1.7;
+  doc.scrolls = [];
+  await advance(1000);
+  await settle();
+  check("follow: the highlight shows", !$("followLayer").classList.contains("hidden"));
+  eq("follow: on the line being said (the third block: headings are skipped)", $("followLine").style.top, `${2 * 20 - 2}px`);
+  eq("follow: on the word being said (\"two\" starts 5 characters in)", `${$("followWord").style.left}|${$("followWord").style.width}`, `${5 * 7 - 2}px|${3 * 7 + 4}px`);
+  check("follow: the word shows", !$("followWord").classList.contains("hidden"));
+  host.playhead = 4.6;
+  await advance(900);
+  eq("follow: next line", $("followLine").style.top, `${3 * 20 - 2}px`);
+  eq("follow: its second word (\"five\" starts 6 characters in)", $("followWord").style.left, `${6 * 7 - 2}px`);
+  host.playhead = 3.5;
+  await advance(250);
+  eq("follow: in a pause the line stays, no word", `${$("followLine").style.top}|${$("followWord").classList.contains("hidden")}`, `${2 * 20 - 2}px|true`);
+  host.playhead = 0.2;
+  await advance(250);
+  check("follow: before the first line, nothing shows", $("followLayer").classList.contains("hidden"));
+  eq("follow: no scrolling while everything is in view", doc.scrolls.length, 0);
+  host.playhead = 10 + 23 * 2 + 0.2;                   // the last filler line, far below the fold
+  await advance(250);
+  eq("follow: a line out of view is scrolled up to a third of the way down", doc.scrolls[0], (4 + 23) * 20 - 400 * 0.3);
+  $("noteEditor").scrollTop = 0;
+  $("noteEditor").dispatch("wheel");
+  host.playhead = 10 + 22 * 2 + 0.2;
+  await advance(250);
+  eq("follow: no scrolling right after the user scrolled", doc.scrolls.length, 1);
+  const callsWhileOn = host.playheadCalls;
+  $("btnFollow").click();
+  eq("follow off: button shows it", $("btnFollow").classList.contains("is-on"), false);
+  check("follow off: highlight hidden", $("followLayer").classList.contains("hidden"));
+  await advance(3000);
+  eq("follow off: the host is not asked any more", host.playheadCalls, callsWhileOn);
+  eq("follow off: remembered", readJson(join(storage, "lazykick_settings.json")).follow, false);
+  $("btnFollow").click();
+  host.playhead = null;
+  await advance(1000);
+  check("follow: no timeline, nothing shows", $("followLayer").classList.contains("hidden"));
+  $("tabNotes").classList.remove("active");
+  const callsHidden = host.playheadCalls;
+  host.playhead = 1.7;
+  await advance(3000);
+  eq("follow: the host is not asked while another tab shows", host.playheadCalls, callsHidden);
 
   // ---- LazyPaste
   const pasteDir = join(projA, "Pasted Images");

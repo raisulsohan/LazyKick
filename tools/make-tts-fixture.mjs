@@ -11,12 +11,15 @@
  * LazyAlign.WavEnvelope (so the WAV reader is exercised on a real file), and
  * the loudness envelope plus the true times are saved for tools/test-align.mjs.
  *
- * Two scripts:
+ * Three scripts:
  *   explainer  one sentence per line, two voices, speed varied line by line;
  *              the alignment weights in client/align.js were tuned on it
  *   story      held out (never tuned on): one voice, sentences broken into
  *              subtitle-length lines at commas, so many line ends fall on a
  *              short breath rather than a sentence pause
+ *   paragraphs held out: a script pasted from a document, several sentences
+ *              per paragraph, with longer pauses inside the paragraphs
+ *              than between them
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, createReadStream, rmSync, mkdtempSync } from "node:fs";
@@ -71,6 +74,35 @@ const SCRIPTS = {
     pauses: [160, 520, 190, 610, 450, 150, 700, 200, 170, 560, 480],
     rates: [0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0],
     voices: [ZIRA],
+    variants: { natural: {}, music: { music: true } },
+  },
+  paragraphs: {
+    // One sentence per entry; `paragraph` groups them the way a script is
+    // pasted from a document. The reader stops longer between the short,
+    // punchy sentences inside a paragraph (700–950 ms) than between two
+    // paragraphs (360–420 ms), so the longest pauses do not mark the ends of
+    // the paragraphs.
+    lines: [
+      "In nineteen oh eight, a small town decided to fix its roads.",
+      "Not patch them.",
+      "Not repair them.",
+      "Rebuild them.",
+      "The council looked at the mud, at the broken carts and the angry farmers, and it did something no town nearby had ever tried.",
+      "It raised a tax.",
+      "A big one.",
+      "Street by street.",
+      "Written into the town charter itself.",
+      "The people who pushed for it believed, honestly, that trade would double within a year.",
+      "One shop owner promised that the market would soon be full, and that every family would finally have a place to sell their harvest.",
+      "Ten years later, the roads were finished.",
+      "But the tax never went away.",
+      "And the money it raised built a very different town from the one anyone had planned.",
+      "This is the story of how a road built a city.",
+    ],
+    paragraph: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 3],
+    pauses: [700, 750, 700, 950, 800, 700, 650, 720, 380, 730, 360, 600, 700, 400],
+    rates: [0, 1, 0, 0, -1, 1, 0, 1, 0, 0, 1, 0, -1, 0, 0],
+    voices: [DAVID],
     variants: { natural: {}, music: { music: true } },
   },
 };
@@ -140,7 +172,9 @@ function joinLines(script, pcms, { tight = false, music = false } = {}) {
       b -= a;
       a = 0;
     }
-    truth.push({ text: script.lines[i], start: +((at + a) / RATE_HZ).toFixed(3), end: +((at + b) / RATE_HZ).toFixed(3) });
+    const line = { text: script.lines[i], start: +((at + a) / RATE_HZ).toFixed(3), end: +((at + b) / RATE_HZ).toFixed(3) };
+    if (script.paragraph) line.paragraph = script.paragraph[i];
+    truth.push(line);
     parts.push(samples);
     at += samples.length;
     if (i < pcms.length - 1) {

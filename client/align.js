@@ -20,8 +20,10 @@
 
 (function (root, factory) {
     var api = factory();
-    if (typeof module === "object" && module.exports) module.exports = api;
-    else root.LazyAlign = api;
+    // Always the page global: CEP's mixed Node context defines module and
+    // exports on the page as well, so they cannot tell a panel from Node.
+    if (root) root.LazyAlign = api;
+    if (typeof module === "object" && module && module.exports) module.exports = api;
 })(this, function () {
     "use strict";
 
@@ -524,10 +526,228 @@
         return bestAt < 0 ? s : s.substr(0, bestAt) + "\n" + s.substr(bestAt + 1);
     }
 
+    // ============================================================
+    // Words inside a line
+    // ============================================================
+
+    /** The words of a line, split the same way everywhere (timing, highlighting, subtitles). */
+    function splitWords(text) {
+        return String(text || "").split(/\s+/).filter(function (w) { return w.length > 0; });
+    }
+
+    function wordWeights(words) {
+        return words.map(function (w) { return lineWeight(w); });
+    }
+
+    /** Word start times spread over [start, end] by how long each word takes to say. */
+    function proportionalWordTimes(words, start, end) {
+        var weights = wordWeights(words);
+        var total = 0;
+        for (var i = 0; i < weights.length; i++) total += weights[i];
+        var out = [];
+        var acc = 0;
+        for (var k = 0; k < weights.length; k++) {
+            out.push(start + (end - start) * acc / (total || 1));
+            acc += weights[k];
+        }
+        return out;
+    }
+
     /**
-     * Subtitle cues from timed lines [{ start, end?, text }] (seconds): each
-     * ends where it was measured to end, but never runs into the next one,
-     * and a line without a measured end stays up for its reading time.
+     * When each word of a line starts, as offsets in seconds from the line's
+     * start. The words share the line's speech by how long each takes to
+     * say, and the clock stops during the pauses inside the line, so a word
+     * after a breath starts after the breath.
+     */
+    function wordTimes(words, span, speech) {
+        // Sentences and clauses inside the line are timed like lines are (the
+        // pauses between them are what the timing is good at), then the words
+        // are spread inside each of them.
+        var phrases = [];
+        var from = 0;
+        for (var w0 = 0; w0 < words.length; w0++) {
+            if (w0 === words.length - 1 || SENTENCE_END.test(words[w0]) || PHRASE_END.test(words[w0])) {
+                phrases.push({ from: from, to: w0 });
+                from = w0 + 1;
+            }
+        }
+        if (phrases.length > 1 && speech && speech.segments) {
+            var inside = { segments: [], dips: [] };
+            for (var si = 0; si < speech.segments.length; si++) {
+                var sa = Math.max(span.start, speech.segments[si].s);
+                var sb = Math.min(span.end, speech.segments[si].e);
+                if (sb - sa > 0.005) inside.segments.push({ s: sa, e: sb });
+            }
+            for (var di = 0; di < (speech.dips || []).length; di++) {
+                if (speech.dips[di] > span.start && speech.dips[di] < span.end) inside.dips.push(speech.dips[di]);
+            }
+            var phraseSpans = inside.segments.length ? alignLines(phrases.map(function (ph) {
+                return lineWeight(words.slice(ph.from, ph.to + 1).join(" "));
+            }), inside) : null;
+            if (phraseSpans && phraseSpans.length === phrases.length) {
+                var all = [];
+                for (var pi = 0; pi < phrases.length; pi++) {
+                    var ps = phraseSpans[pi];
+                    var sub = spreadWords(words.slice(phrases[pi].from, phrases[pi].to + 1), ps, inside);
+                    for (var sw = 0; sw < sub.length; sw++) all.push(Math.round((ps.start + sub[sw] - span.start) * 1000) / 1000);
+                }
+                return all;
+            }
+        }
+        return spreadWords(words, span, speech);
+    }
+
+    /**
+     * Times a whole script: for each line { start, end, words } (words: when
+     * each word starts, in seconds from the line's start), or null when there
+     * is no speech. texts: the spoken lines in reading order.
+     *
+     * Every sentence is laid over the speech as a unit of its own, not only
+     * every line. A paragraph's sentences and the pauses between them pin it
+     * down far better than its total length, and a reader's pause between
+     * paragraphs is often no longer than the one between two sentences: timed
+     * by line alone, a paragraph could end a sentence early and hand its last
+     * sentence to the next one. With more sentences than places to cut (a
+     * rushed read), whole lines are the units, as before.
+     */
+    function alignScript(texts, speech, opts) {
+        if (!texts.length) return [];
+        if (!speech || !speech.segments || !speech.segments.length) return null;
+        var sentences = [];
+        var lines = [];
+        for (var i = 0; i < texts.length; i++) {
+            var words = splitWords(texts[i]);
+            lines.push({ line: i, words: words, text: texts[i] });
+            var from = 0;
+            for (var w = 0; w < words.length; w++) {
+                if (w === words.length - 1 || SENTENCE_END.test(words[w])) {
+                    sentences.push({ line: i, words: words.slice(from, w + 1), text: words.slice(from, w + 1).join(" ") });
+                    from = w + 1;
+                }
+            }
+            if (!words.length) sentences.push(lines[i]);
+        }
+        var units = sentences.length > speechPieces(speech).length ? lines : sentences;
+        var spans = alignLines(units.map(function (u) { return lineWeight(u.text); }), speech, opts);
+        if (!spans) return null;
+        var out = [];
+        for (var u = 0; u < units.length; u++) {
+            var span = spans[u];
+            var line = out[units[u].line];
+            if (!line) line = out[units[u].line] = { start: span.start, end: span.end, words: [] };
+            line.end = span.end;
+            var offsets = wordTimes(units[u].words, span, speech);
+            for (var k = 0; k < offsets.length; k++) line.words.push(Math.round((span.start + offsets[k] - line.start) * 1000) / 1000);
+        }
+        return out;
+    }
+
+    /** Offsets of each word from span.start, sharing the span's speech by spoken length; pauses stop the clock. */
+    function spreadWords(words, span, speech) {
+        var pieces = [];
+        var segs = (speech && speech.segments) || [];
+        for (var s = 0; s < segs.length; s++) {
+            var a = Math.max(span.start, segs[s].s);
+            var b = Math.min(span.end, segs[s].e);
+            if (b - a > 0.005) pieces.push([a, b]);
+        }
+        if (!pieces.length) pieces.push([span.start, span.end]);
+        var speechTime = 0;
+        for (var p = 0; p < pieces.length; p++) speechTime += pieces[p][1] - pieces[p][0];
+        function clockAt(x) {
+            for (var q = 0; q < pieces.length; q++) {
+                var len = pieces[q][1] - pieces[q][0];
+                if (x <= len || q === pieces.length - 1) return pieces[q][0] + Math.min(x, len);
+                x -= len;
+            }
+            return span.end;
+        }
+        var weights = wordWeights(words);
+        var total = 0;
+        for (var w = 0; w < weights.length; w++) total += weights[w];
+        var out = [];
+        var acc = 0;
+        for (var k = 0; k < weights.length; k++) {
+            out.push(Math.round((clockAt(speechTime * acc / (total || 1)) - span.start) * 1000) / 1000);
+            acc += weights[k];
+        }
+        return out;
+    }
+
+    /**
+     * Where the playhead is in the script: { line, word } indexes into
+     * `lines` ([{ start, end, words: [absolute start times] }], by start),
+     * or -1. Between two lines the earlier one stays current but no word is.
+     */
+    function followAt(lines, t) {
+        var line = -1;
+        for (var i = 0; i < lines.length; i++) {
+            if (lines[i].start <= t + 0.02) line = i;
+            else break;
+        }
+        if (line < 0) return { line: -1, word: -1 };
+        var l = lines[line];
+        if (t > l.end + 0.05) return { line: line, word: -1 };
+        var word = -1;
+        var words = l.words || [];
+        for (var k = 0; k < words.length; k++) {
+            if (words[k] <= t + 0.02) word = k;
+            else break;
+        }
+        return { line: line, word: word };
+    }
+
+    // ============================================================
+    // Subtitle cues
+    // ============================================================
+
+    var CUE_CHARS = 84;      // two subtitle lines of 42
+    var CUE_SECONDS = 6.5;   // longer than this is hard to read along
+
+    var SENTENCE_END = /[.!?\u0964\u2026]["'\u201D\u2019)\]]*$/;
+    var PHRASE_END = /[,;:\u2013\u2014]["'\u201D\u2019)\]]*$/;
+
+    /**
+     * Cuts a line's words into subtitle-sized pieces [{ from, to }]. A piece
+     * that must end early ends at a sentence end when one leaves it at least
+     * a third full, else at a comma, else at the last word that fits.
+     */
+    function chunkWords(words, times, maxChars, maxSeconds) {
+        var chunks = [];
+        var from = 0;
+        while (from < words.length) {
+            var len = 0;
+            var to = from;
+            var sentence = -1;
+            var phrase = -1;
+            var lenAt = {};
+            for (var i = from; i < words.length; i++) {
+                var add = (i > from ? 1 : 0) + words[i].length;
+                if (i > from && (len + add > maxChars || (times && times[i] - times[from] > maxSeconds))) break;
+                len += add;
+                lenAt[i] = len;
+                to = i;
+                if (SENTENCE_END.test(words[i])) sentence = i;
+                else if (PHRASE_END.test(words[i])) phrase = i;
+            }
+            var end = to;
+            if (to < words.length - 1) {
+                if (sentence >= from && sentence < to && lenAt[sentence] >= maxChars / 3) end = sentence;
+                else if (phrase >= from && phrase < to && lenAt[phrase] >= maxChars / 3) end = phrase;
+            }
+            chunks.push({ from: from, to: end });
+            from = end + 1;
+        }
+        return chunks;
+    }
+
+    /**
+     * Subtitle cues from timed lines [{ start, end?, text, words? }]
+     * (seconds; `words`: absolute start time of each word of the text). Each
+     * line ends where it was measured to end but never runs into the next,
+     * and one without a measured end stays up for its reading time. A line
+     * too long for one subtitle (a pasted paragraph) is cut into pieces that
+     * start when their first word is spoken.
      */
     function makeCues(lines) {
         var sorted = lines.filter(function (l) { return l && typeof l.start === "number" && isFinite(l.start) && isSpoken(l.text); })
@@ -540,7 +760,19 @@
             if (next) end = Math.min(end, next.start - 0.04);
             if (next && end - l.start < 0.5) end = Math.max(end, Math.min(l.start + 0.5, next.start));
             if (end <= l.start) continue;
-            cues.push({ start: Math.max(0, l.start), end: end, text: wrapSubtitle(l.text) });
+            var start = Math.max(0, l.start);
+            var words = splitWords(l.text);
+            if (l.text.replace(/\s+/g, " ").length <= CUE_CHARS && end - start <= CUE_SECONDS) {
+                cues.push({ start: start, end: end, text: wrapSubtitle(l.text) });
+                continue;
+            }
+            var times = (l.words && l.words.length === words.length) ? l.words : proportionalWordTimes(words, start, end);
+            var chunks = chunkWords(words, times, CUE_CHARS, CUE_SECONDS);
+            for (var c = 0; c < chunks.length; c++) {
+                var cs = Math.max(start, Math.min(times[chunks[c].from], end - 0.2));
+                var ce = c < chunks.length - 1 ? Math.max(cs + 0.3, times[chunks[c + 1].from] - 0.04) : end;
+                cues.push({ start: cs, end: Math.min(ce, end), text: wrapSubtitle(words.slice(chunks[c].from, chunks[c].to + 1).join(" ")) });
+            }
         }
         return cues;
     }
@@ -565,10 +797,16 @@
         lineWeight: lineWeight,
         isSpoken: isSpoken,
         alignLines: alignLines,
+        alignScript: alignScript,
         formatTimecode: formatTimecode,
         parseTimecode: parseTimecode,
         readingTime: readingTime,
         wrapSubtitle: wrapSubtitle,
+        splitWords: splitWords,
+        wordTimes: wordTimes,
+        proportionalWordTimes: proportionalWordTimes,
+        followAt: followAt,
+        chunkWords: chunkWords,
         makeCues: makeCues,
         srtTime: srtTime,
         buildSrt: buildSrt

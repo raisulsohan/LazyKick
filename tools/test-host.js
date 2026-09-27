@@ -984,6 +984,8 @@ section("Premiere Pro: script to audio", function () {
     var a3 = new PAudioTrack("A3", true, [false]);          // muted by the user
     setupPremiereAudio([a1, a2, a3]);
 
+    var ph = parse(getPlayhead());
+    eq("ppro playhead: seconds from the sequence start, with fps and offset", ph.ok + ":" + ph.t + ":" + ph.fps + ":" + ph.offset + ":" + ph.name, "true:0:25:3600:Seq 01");
     var info = parse(getTimelineInfo());
     eq("ppro info: sequence", info.ok + ":" + info.name + ":" + info.fps, "true:Seq 01:25");
     eq("ppro info: timecode offset and length", info.offset + ":" + info.duration, "3600:3690");
@@ -1022,6 +1024,7 @@ section("Premiere Pro: script to audio", function () {
     app.project.activeSequence = null;
     eq("ppro audio: no sequence", parse(getTimelineAudio("C:/Temp/x.wav")).msg, "Open a sequence first");
     eq("ppro info: no sequence", parse(getTimelineInfo()).ok, false);
+    eq("ppro playhead: no sequence", parse(getPlayhead()).ok, false);
 
     // Subtitles: the SRT goes into a Subtitles bin and onto a caption track.
     setupPremiereAudio([new PAudioTrack("A1", false, [])]);
@@ -1145,6 +1148,9 @@ section("After Effects: script to audio", function () {
     };
 
     eq("ae script: host detected", LazyKickHost.getHostName(), "ae");
+    comp.time = 2.48;
+    var aePh = parse(getPlayhead());
+    eq("ae playhead: comp time, fps and start offset", aePh.ok + ":" + aePh.t + ":" + aePh.fps + ":" + aePh.offset + ":" + aePh.name, "true:2.48:25:0:Explainer");
     var info = parse(getTimelineInfo());
     eq("ae info: composition", info.ok + ":" + info.name + ":" + info.fps + ":" + info.duration, "true:Explainer:25:10");
 
@@ -1207,6 +1213,7 @@ section("After Effects: script to audio", function () {
     app.project.activeItem = null;
     eq("ae subtitles: no comp", parse(placeSubtitles(JSON.stringify({ cues: cues }))).msg, "Open a composition first");
     eq("ae audio: no comp", parse(getTimelineAudio("")).msg, "Open a composition first");
+    eq("ae playhead: no comp", parse(getPlayhead()).ok, false);
 });
 
 // ------------------------------------------------------------------ report

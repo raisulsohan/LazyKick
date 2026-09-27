@@ -2,6 +2,36 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.5.1
+
+### Fixed
+- **🎙️ Time to Audio and 💬 Subtitles did nothing in the real panel since 1.4.** CEP's `--mixed-context` puts Node's `module` and `exports` on the page, so `client/align.js` took the panel for Node, exported itself there and never set `LazyAlign`; every click stopped on a missing name. The tests ran it without CEP's `module`, so they passed. Now the page global is always set, and the panel tests run with `module` and `exports` on the page like CEP does. The same fix covers the new `client/paste.js`.
+- A paste can no longer be lost: if the clean-up of a rich paste fails for any reason, the plain text is pasted instead.
+
+### Notes look like the document you copied from
+- **Pasting from Google Docs, Word or a web page keeps the layout**: titles and headings, paragraphs, **bold**, *italic*, underline, list items (as `• ` / `1. ` lines) and small grey side notes. Everything else is dropped: fonts, colours, sizes, links, images, tables (cells are joined with ` | `), hidden text, scripts and every attribute. The HTML is read by the browser's `DOMParser` (which runs nothing) and rebuilt from a short whitelist in the new `client/paste.js`, so nothing from the clipboard reaches the note as it came.
+- Headings are recognised the way Docs and Word write them: by tag, or by size against the body text (1.6× = title, 1.25× = heading), or a short all-bold line without an end stop. Grey or small text becomes a side note. Docs' `<b style="font-weight:normal">` wrapper no longer turns a whole paste bold.
+- A phrase pastes into the current line; the space at its end is kept.
+- **Ctrl+Shift+V** (Cmd+Shift+V) still pastes plain text.
+- Nested blocks left in older notes (a heading inside a line) are lifted out when the note is edited, and inline `style` attributes are removed.
+- **Bigger note text, with A− / A+.** The default is 14 px (was 12.5 px); the buttons change it from 10 to 24 px and it is remembered. Headings scale with it.
+
+### 👁 Follow the playhead
+- While the timeline plays (or you scrub), the line being spoken gets a faint blue band with a bar on its left and the word being said a soft blue glow, and the note scrolls to keep them in view. It pauses scrolling for a few seconds when you scroll, click or type yourself.
+- Needs timed lines (🎙️ Time to Audio, or ⏱️ Timecode tags). The highlight is drawn over the note and never saved into it. Click **👁 Follow** to switch it off (remembered).
+- The panel asks the host for the playhead five times a second while it moves and about once a second when it stands still, and glides the highlight between readings. Nothing is polled while the Notes tab is hidden, a dialog is open, the project is closed or the note has no timecodes.
+
+### Time to Audio and Subtitles
+- **Paragraphs are timed sentence by sentence.** A script pasted from a document has whole paragraphs as lines, and a reader often pauses longer between two short sentences ("Not reduce it. Not manage it.") than between two paragraphs. Timed by paragraph length alone, a paragraph could end one sentence early and hand its last sentence to the next one, so the timecodes and the 👁 Follow highlight ran seconds ahead. Now every sentence of the script is laid over the speech as its own unit (`alignScript`), and a paragraph starts with its first sentence and ends with its last. On a real 9.5-minute voiceover read from a Google Doc, the 93 sentence starts that Windows' speech recognizer could pin down all landed within 0.21 s (median 0.02 s); timing by paragraph had missed 15 of them by more than half a second, up to 5 s. With more sentences than pauses to cut at (a rushed read), whole lines are timed as before.
+- **Headings and grey side notes are not spoken lines**: 🎙️ Time to Audio and 💬 Subtitles skip them, so a pasted script with a title, "HOOK" and a meta line times correctly.
+- **Word timing**: every timed line now also keeps when each of its words is said (`data-w`, seconds from the line start). Inside each sentence the clauses are laid over its own pauses, then the words are spread over the speech with the clock stopped in the pauses. On the real-speech fixtures every sentence inside a line starts within 0.15 s of the truth.
+- **Long paragraphs become several subtitles**: a line longer than 84 characters or 6.5 seconds is split at a sentence end (else a comma, else between words), each piece timed from its first word.
+
+### Internals
+- New host call `getPlayhead()` (After Effects: `comp.time`; Premiere Pro: `getPlayerPosition()`), with fps and the timeline's start offset.
+- `client/align.js` gains `alignScript` (what 🎙️ Time to Audio now runs), `wordTimes`, `followAt`, `chunkWords` and `makeCues`; new `client/paste.js` (loaded before `main.js`).
+- Tests: new `tools/test-paste.mjs` (Docs, Word and web clipboard HTML, including injection attempts, parsed by the small `tools/mini-html.mjs`); a third real-speech fixture, *paragraphs* (a document read with longer pauses inside the paragraphs than between them, built by `tools/make-tts-fixture.mjs`), where every sentence must land within 0.15 s, plus word timing, follow and cue splitting in `test-align.mjs`; the speech tests now run `alignScript`, as the panel does; paste, text size, skipped headings, the follow highlight (position, pause, scroll, off, hidden tab) in `test-panel.mjs`; `getPlayhead` for both hosts in `test-host.js`.
+
 ## 1.4.1
 
 - **Messages and confirmations now look like the panel.** CEP showed `alert()` / `confirm()` as white Windows boxes titled "JavaScript Confirm - file:///…", often with the text cut off. They are now an in-panel dialog in the panel's dark theme: blue for the normal choice, red for things that cannot be undone (Unlink, Delete tab), where Cancel has the focus so Enter is safe. Enter confirms, Esc or ✕ cancels, and messages wait their turn instead of stacking.

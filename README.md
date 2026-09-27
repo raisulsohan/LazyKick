@@ -22,13 +22,14 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.4.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.5.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ---
 
 ## 📑 Contents
 
-- [What's New in 1.4](#-whats-new-in-14)
+- [What's New in 1.5](#-whats-new-in-15)
+- [What's New in 1.4](#whats-new-in-14)
 - [What's New in 1.3](#whats-new-in-13)
 - [What's New in 1.2](#whats-new-in-12)
 - [What's New in 1.1](#whats-new-in-11)
@@ -50,7 +51,23 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.4.1** ·
 
 ---
 
-## 🆕 What's New in 1.4
+## 🆕 What's New in 1.5
+
+**📄 Paste from Google Docs and it looks like the Doc**
+- Copy a script from Google Docs, Word or a web page and paste it into **📝 Notes**: titles, headings, paragraphs, **bold**, *italic*, underline, lists and small grey notes come across. Fonts, colours, links, images and anything hidden are left behind, in the panel's own dark style.
+- Want plain text? **Ctrl+Shift+V** (Cmd+Shift+V).
+- **Bigger text**: notes start at 14 px, and **A− / A+** make them smaller or bigger (remembered).
+
+**👁 Follow the voiceover while it plays**
+- After **🎙️ Time to Audio**, press play: the line being spoken lights up softly, the word being said glows, and the note scrolls along with it. No more searching for where you are.
+- Scroll or click yourself and it waits a moment before following again. **👁 Follow** switches it off and on.
+
+**🎙️ Smarter script timing and 💬 subtitles**
+- Titles, headings and grey notes in the script are skipped: they are not spoken, so they get no time and no subtitle.
+- Paste whole paragraphs: every sentence is matched to the voice on its own, so a paragraph no longer ends a sentence early when the reader pauses longer inside it than between paragraphs. Every word gets its own time too.
+- A long paragraph becomes several subtitles, split at sentence ends, each one on time.
+
+## What's New in 1.4
 
 **1.4.1:** confirmations and messages (Reset, Unlink, Delete tab, …) now open as a dark in-panel dialog that matches Adobe's look, instead of a white Windows box with the text cut off.
 
@@ -174,9 +191,11 @@ Always available in the panel header.
 - **☑️ Checklists:** insert a task, tick it to strike it through.
 - **⏱️ Timecode stamps:** inserts the playhead time as `[00:01:24:12]` at the caret, formatted the way the app displays time.
 - **📋 Copy / 📥 Export** as plain text (checklists as `[ ]` / `[x]`). Export writes `Note_<project>_<tab>.txt` next to the project and never overwrites.
-- **Plain-text paste:** formatting from web pages is stripped.
+- **Paste keeps the document's look:** headings, paragraphs, bold, italic, underline, lists and grey side notes from Google Docs, Word or the web; fonts, colours, links, images and hidden text are dropped. `Ctrl+Shift+V` pastes plain text.
+- **A− / A+ text size** (10–24 px, remembered).
 - **🎙️ Time to Audio:** times every line of the note to the voiceover on the open timeline and starts each line with its timecode. Language-independent (pauses and speaking length, no speech recognition), fully offline.
-- **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project.
+- **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project. Headings and grey notes are skipped; long paragraphs are split into several subtitles.
+- **👁 Follow:** while the timeline plays, the spoken line and word light up and the note scrolls along.
 
 ### 3. 📂 Watch Bins & Media Sync
 
@@ -199,7 +218,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.4.1.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.5.1.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -261,11 +280,12 @@ Don't keep a source copy and the signed install side by side: they share one ext
 
 ### Time a script to the voiceover and make subtitles
 1. Put the voiceover on the timeline (Premiere Pro sequence or After Effects composition) and keep that timeline open.
-2. In **📝 Notes**, write or paste the script: **one line per subtitle**, in the order it is spoken. Lines like `---` and checklist items are skipped.
+2. In **📝 Notes**, write or paste the script (straight from Google Docs is fine), in the order it is spoken. Each line or paragraph is timed; long ones become several subtitles. Titles, headings, grey notes, lines like `---` and checklist items are skipped.
 3. Music on the timeline too? Select the voiceover clip or layer first, so only it is heard.
 4. Click **🎙️ Time to Audio**. Each line now starts with the time it is spoken.
 5. Check a few lines; to fix one, edit its timecode (click Time to Audio again to redo them all).
-6. Click **💬 Subtitles**. Premiere Pro: a new caption track with the lines. After Effects: one text layer per line. The `.srt` is in `LazyKick Subtitles` next to the project.
+6. Click **💬 Subtitles**. Premiere Pro: a new caption track with the lines. After Effects: one text layer per subtitle. The `.srt` is in `LazyKick Subtitles` next to the project.
+7. Press play: with **👁 Follow** on, the spoken line and word light up in the note as the voiceover plays.
 
 ### Auto-import a folder
 1. Open **📂 Watch Bins** → **+ Add Watch Bin**.
@@ -281,7 +301,8 @@ Don't keep a source copy and the signed install side by side: they share one ext
 | Shortcut | Where | Action |
 | :--- | :--- | :--- |
 | `Ctrl+V` / `Cmd+V` | Panel focused, outside text fields | LazyPaste |
-| `Ctrl+V` / `Cmd+V` | Notes editor | Paste text (plain) |
+| `Ctrl+V` / `Cmd+V` | Notes editor | Paste, keeping headings, bold, italic and lists |
+| `Ctrl+Shift+V` / `Cmd+Shift+V` | Notes editor | Paste plain text |
 | Double-click | Note tab | Rename (Enter saves, Esc cancels) |
 | `Enter` | Folder browser path box | Go to that path |
 
@@ -296,6 +317,8 @@ Don't keep a source copy and the signed install side by side: they share one ext
 | Paste as Guide Layer | On | After Effects: pasted layers are guide layers (shown, never rendered). |
 | Shrink large images to fit the comp | Off | After Effects: scales images larger than the comp down to fit. Never enlarges. |
 | Save Folder / Bin Name | `Pasted Images` | Folder next to the project file **and** the project bin/folder name. `/` makes nested folders; `..` and illegal characters are removed. |
+
+**📝 Notes** tab: **A− / A+** note text size (14 px by default) and **👁 Follow** on/off (remembered).
 
 **📂 Watch Bins** tab: **Auto-Sync** on/off (remembered).
 
@@ -393,7 +416,8 @@ LazyKick/
 │   └── manifest.xml              # Extension ID, hosts (AEFT, PPRO), panel size, Node flags
 ├── client/
 │   ├── index.html                # Panel markup
-│   ├── align.js                  # Voiceover timing: WAV reader, pause finder, line alignment, SRT
+│   ├── align.js                  # Voiceover timing: WAV reader, pause finder, line and word alignment, SRT
+│   ├── paste.js                  # Clean rich paste: clipboard HTML to headings, paragraphs, bold, lists
 │   ├── main.js                   # Panel controller (notes, LazyPaste, watch bins, script to audio)
 │   └── style.css                 # Adobe-style dark theme
 ├── host/
@@ -405,6 +429,8 @@ LazyKick/
 │   ├── check-extendscript.js     # ES3 syntax + lint check of host.jsx (Windows Script Host)
 │   ├── test-host.js              # host.jsx against mocked AE & Premiere APIs (Windows Script Host)
 │   ├── test-align.mjs            # align.js against WAVs in every format and real speech (Node)
+│   ├── test-paste.mjs            # paste.js against Google Docs, Word and web clipboard HTML (Node)
+│   ├── mini-html.mjs             # Small HTML parser standing in for DOMParser in the Node tests
 │   ├── test-panel.mjs            # main.js against a fake DOM, fake host and real files (Node)
 │   ├── make-tts-fixture.mjs      # Builds the real-speech test voiceovers with Windows' own voices
 │   ├── fixtures/                 # tts-voiceover.json: loudness + true line times of those voiceovers
@@ -433,8 +459,9 @@ Runs, in order (Windows, as two steps use Windows Script Host):
 
 1. `tools/check-extendscript.js`: `host.jsx` compiles as ES3 and avoids names and constructs real ExtendScript rejects.
 2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, media already in the project, timecode formatting, partial import failures and the project-changed guard.
-3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: two scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the other was held out; both must land every line within 0.2 s (they land within a few frames).
-4. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen) and Subtitles (edited tags, the SRT file), and the CEP 9 syntax guard.
+3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: three scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the others were held out; all must land every line within 0.2 s (they land within a few frames). The third reads whole paragraphs with longer pauses inside them than between them, and every sentence must land within 0.15 s. Also word timing inside a line, the playhead follower and the splitting of long paragraphs into subtitles.
+4. `tools/test-paste.mjs`: `paste.js` on the HTML that Google Docs, Word and web pages put on the clipboard: headings, side notes, bold/italic/underline and lists survive; styles, links, images, scripts, hidden text and attributes (including injection attempts) do not.
+5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, skipped headings, word times) and Subtitles (edited tags, the SRT file, long paragraphs), document paste and plain paste, text size, the follow highlight (position, pause while you scroll, off, hidden tab), the in-panel dialog, and the CEP 9 syntax guard.
 
 The mocks follow the documented host APIs, but they are not the real apps. `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close After Effects first; results in `%TEMP%\lazykick-ae-smoke-results.txt`):
 
@@ -511,7 +538,7 @@ It's a **guide layer** by default: visible while you work, excluded from renders
 
 - LazyKick times lines by the pauses in the voice and how long each line takes to say, so the script must match the recording: same lines, same order, nothing left out. Remove lines the voiceover skips, or add what was ad-libbed.
 - **Music or effects under the voice** make pauses hard to hear. Select the voiceover clip (Premiere) or layer (After Effects) before clicking, so only it is heard.
-- Very long lines are fine, but one line per subtitle gives the best timing and readable subtitles.
+- Whole paragraphs are fine: every sentence is matched to the voice on its own, and long paragraphs become several subtitles. Timecodes from before 1.5 were timed by paragraph; click 🎙️ once more to re-time them.
 - Fix a single line by editing its timecode; 💬 Subtitles uses what you typed. Clicking 🎙️ again re-times every line.
 - Nothing happened? The status bar says why: no sequence/composition open, no audio, or no speech found.
 </details>

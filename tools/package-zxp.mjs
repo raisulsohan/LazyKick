@@ -219,7 +219,7 @@ function stage() {
   }
 
   for (const needed of [
-    "CSXS/manifest.xml", "client/index.html", "client/align.js", "client/main.js", "client/style.css",
+    "CSXS/manifest.xml", "client/index.html", "client/align.js", "client/paste.js", "client/main.js", "client/style.css",
     "host/host.jsx", "lib/CSInterface.js",
   ]) {
     if (!existsSync(join(staging, needed))) fail(`${needed} is missing from the panel.`);

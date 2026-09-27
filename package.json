@@ -1,6 +1,6 @@
 {
   "name": "lazykick",
-  "version": "1.4.1",
+  "version": "1.5.1",
   "private": true,
   "description": "LazyKick — clipboard image paste, project notes with timecodes, voiceover-timed subtitles, and auto-importing watch folders for After Effects and Premiere Pro.",
   "author": "Raisul Sohan",
@@ -8,7 +8,7 @@
   "homepage": "https://github.com/raisulsohan/LazyKick",
   "scripts": {
     "check": "cscript //Nologo tools\\check-extendscript.js",
-    "test": "npm run check && cscript //Nologo tools\\test-host.js && node tools/test-align.mjs && node tools/test-panel.mjs",
+    "test": "npm run check && cscript //Nologo tools\\test-host.js && node tools/test-align.mjs && node tools/test-paste.mjs && node tools/test-panel.mjs",
     "release:cert": "node tools/get-zxpsigncmd.mjs && node tools/package-zxp.mjs --cert",
     "release": "npm test && node tools/get-zxpsigncmd.mjs && node tools/package-zxp.mjs"
   }

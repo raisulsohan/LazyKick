@@ -39,7 +39,7 @@ if (typeof JSON === "undefined" || !JSON.stringify) {
 var LazyKickHost = (function () {
     "use strict";
 
-    var VERSION = "1.4.1";
+    var VERSION = "1.5.1";
     var PASTE_BIN_DEFAULT = "Pasted Images";
     var TIME_EPSILON = 0.0005; // seconds; clip edges and the playhead are floats
 
@@ -1346,6 +1346,35 @@ var LazyKickHost = (function () {
         }
     }
 
+    /**
+     * Where the playhead is: `t` in seconds from the timeline's start (the
+     * time the note's tags are measured in), with fps, the timecode offset
+     * and the timeline's name. Kept tiny: the panel asks several times a
+     * second while the notes follow the playhead.
+     */
+    function getPlayhead() {
+        try {
+            var host = getHostName();
+            if (host === "ae") {
+                var comp = app.project.activeItem;
+                if (!comp || !(comp instanceof CompItem)) return reply(false, "No composition");
+                var offset = 0;
+                try { offset = comp.displayStartTime || 0; } catch (eOffset) {}
+                return reply(true, "OK", { t: comp.time, fps: comp.frameRate || 30, offset: offset, name: String(comp.name) });
+            }
+            if (host === "ppro") {
+                var seq = app.project.activeSequence;
+                if (!seq) return reply(false, "No sequence");
+                var zero = 0;
+                try { zero = Number(seq.zeroPoint) / TICKS_PER_SECOND || 0; } catch (eZero) {}
+                return reply(true, "OK", { t: Number(seq.getPlayerPosition().seconds) || 0, fps: sequenceFps(seq), offset: zero, name: String(seq.name) });
+            }
+            return reply(false, "Unsupported host application");
+        } catch (e) {
+            return reply(false, "Error: " + e.toString());
+        }
+    }
+
     /** Premiere's own "Waveform Audio 48kHz 16-bit" export preset, wherever Premiere is installed. */
     function wavPresetPPRO() {
         var starts = [];
@@ -1670,6 +1699,7 @@ var LazyKickHost = (function () {
         importFilesToBin: importFilesToBin,
         syncWatchBin: syncWatchBin,
         getTimelineInfo: getTimelineInfo,
+        getPlayhead: getPlayhead,
         getTimelineAudio: getTimelineAudio,
         placeSubtitles: placeSubtitles,
         // Pure helpers, exported for tools/test-host.js
@@ -1695,5 +1725,6 @@ function syncWatchBin(binPath, payloadJson, expectedProjectId) {
     return LazyKickHost.syncWatchBin(binPath, payloadJson, expectedProjectId);
 }
 function getTimelineInfo() { return LazyKickHost.getTimelineInfo(); }
+function getPlayhead() { return LazyKickHost.getPlayhead(); }
 function getTimelineAudio(wavPath) { return LazyKickHost.getTimelineAudio(wavPath); }
 function placeSubtitles(payloadJson) { return LazyKickHost.placeSubtitles(payloadJson); }
