@@ -2,6 +2,12 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.5.2
+
+- 🎙️ Time to Audio on a note with nothing to time now says *Write or paste the script first: lines or whole paragraphs, in the order they are spoken*. It used to ask for one line per subtitle, which has not been needed since whole paragraphs are timed sentence by sentence.
+- **Documentation:** new `docs/` folder with the manual, how script timing works, troubleshooting (including every status bar message) and building from source, with screenshots of the panel. The README links to it.
+- `Read me first.txt` in the download now covers script to subtitles, 👁 Follow and pasting from documents.
+
 ## 1.5.1
 
 ### Fixed

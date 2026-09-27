@@ -1,7 +1,7 @@
 # If something goes wrong
 
 Find the symptom, or the message the status bar shows. *Written for
-LazyKick 1.5.1.* The status bar at the bottom of the panel always says what
+LazyKick 1.5.2.* The status bar at the bottom of the panel always says what
 just happened or why something did not; hover it to read a long message in
 full.
 
@@ -154,12 +154,11 @@ You pasted an image file into the notes. Images are placed with
 
 [How script timing works](script-timing.md#getting-the-best-result) has more.
 
-### "Write the script first"
+### "Write or paste the script first"
 
 The note has no spoken lines. Headings, grey side notes, checklist items and
 lines without words are skipped, so a note made only of those has nothing
-to time. The message still says *one line per subtitle*, but paragraphs are
-fine.
+to time. Write or paste the script as sentences or whole paragraphs.
 
 ### "No speech found in the timeline audio of '…'"
 

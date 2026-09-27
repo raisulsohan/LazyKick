@@ -39,7 +39,7 @@ if (typeof JSON === "undefined" || !JSON.stringify) {
 var LazyKickHost = (function () {
     "use strict";
 
-    var VERSION = "1.5.1";
+    var VERSION = "1.5.2";
     var PASTE_BIN_DEFAULT = "Pasted Images";
     var TIME_EPSILON = 0.0005; // seconds; clip edges and the playhead are floats
 

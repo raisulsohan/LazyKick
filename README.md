@@ -23,7 +23,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.5.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.5.2** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
 
@@ -224,7 +224,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.5.1.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.5.2.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**

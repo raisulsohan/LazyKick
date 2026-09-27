@@ -1138,7 +1138,7 @@ try {
   setEditor([]);
   $("btnTimeToAudio").click();
   await settle();
-  check("time to audio: empty note, says what to do", /Write the script first/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  check("time to audio: empty note, says what to do", /Write or paste the script first: lines or whole paragraphs/.test($("globalStatus").textContent), $("globalStatus").textContent);
 
   // ---- Pasting a Google Doc keeps its look; Ctrl+Shift+V pastes plain text
   const DOC_HTML = '<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1">' +

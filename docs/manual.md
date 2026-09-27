@@ -1,7 +1,7 @@
 # The LazyKick manual
 
 Everything the panel does, in the order you meet it. *Written for LazyKick
-1.5.1.* For how the script timing decides where each line goes, see
+1.5.2.* For how the script timing decides where each line goes, see
 [How script timing works](script-timing.md); when something does not behave,
 see [If something goes wrong](troubleshooting.md).
 
@@ -28,7 +28,7 @@ or newer and/or Premiere Pro 2020 (14.0) or newer.
 
 ### Install or update
 
-1. Download **`LazyKick-v1.5.1.zip`** from the
+1. Download the newest **`LazyKick-v….zip`** from the
    [latest release](https://github.com/raisulsohan/LazyKick/releases/latest)
    and unzip it anywhere (the Desktop is fine).
 2. Close After Effects and Premiere Pro.

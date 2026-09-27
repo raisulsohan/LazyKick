@@ -10,7 +10,7 @@ themselves. It is free, open source and runs entirely on your own computer.
 
 The [README](../README.md) is the tour. These pages are the detail.
 
-*Written for LazyKick 1.5.1.*
+*Written for LazyKick 1.5.2.*
 
 ## Using it
 

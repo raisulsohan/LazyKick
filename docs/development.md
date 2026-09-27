@@ -1,7 +1,7 @@
 # Building from source
 
 How LazyKick is put together, the rules its code keeps, how it is tested
-and how a release is built. *Written for LazyKick 1.5.1.*
+and how a release is built. *Written for LazyKick 1.5.2.*
 
 **Contents**
 

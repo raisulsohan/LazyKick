@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.5.1";
+    var PANEL_VERSION = "1.5.2";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -914,12 +914,14 @@
     // SCRIPT TO AUDIO (timecodes from the voiceover, then subtitles)
     // ============================================================
     //
-    // Each line of the note is one subtitle. 🎙️ reads the open timeline's
-    // audio from the host, finds where each line is spoken (client/align.js)
-    // and starts the line with a timecode tag. The tag keeps the measured
-    // start and end in data-t / data-e (seconds from the timeline start);
-    // a tag edited by hand is read from its text instead. 💬 turns the tagged
-    // lines into an .srt next to the project and has the host place it.
+    // Every spoken line of the note (a sentence or a whole paragraph) is
+    // timed. 🎙️ reads the open timeline's audio from the host, finds where
+    // each sentence is spoken (client/align.js) and starts the line with a
+    // timecode tag. The tag keeps the measured start and end in data-t /
+    // data-e (seconds from the timeline start) and each word's time in
+    // data-w; a tag edited by hand is read from its text instead. 💬 turns
+    // the tagged lines into subtitles (long ones split in several), writes
+    // an .srt next to the project and has the host place them.
 
     var BLOCK_TAGS = { DIV: true, P: true, LI: true, UL: true, OL: true, BLOCKQUOTE: true, PRE: true,
                        H1: true, H2: true, H3: true, H4: true, H5: true, H6: true };
@@ -1076,7 +1078,7 @@
         if (scriptBusy) return Promise.resolve();
         var lines = scriptLines();
         if (!lines.length) {
-            setStatus("Write the script first: one line per subtitle", 4000);
+            setStatus("Write or paste the script first: lines or whole paragraphs, in the order they are spoken", 5000);
             return Promise.resolve();
         }
         var projectBefore = appState.projectId;
