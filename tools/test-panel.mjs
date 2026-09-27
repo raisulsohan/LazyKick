@@ -67,6 +67,7 @@ async function waitFor(fn, label, ms = 3000) {
     [/Object\.fromEntries/, "Object.fromEntries"],
     [/navigator\.clipboard\.writeText\(text\)\.then/, "navigator.clipboard without fallback"],
     [/\bconst\b|\blet\b|=>/, "ES2015 syntax (kept ES5 style)"],
+    [/\b(alert|confirm|prompt)\(/, "a native alert/confirm/prompt (a white system window in CEP)"],
   ];
   // Block comments are blanked (line numbers kept), so prose about these
   // features does not count; line comments and strings are blanked per line.
@@ -371,10 +372,10 @@ const doc = makeDocument();
 doc.getElementById("noteEditor").setAttribute("contenteditable", "true");
 doc.getElementById("binModalOverlay").classList.add("hidden");
 doc.getElementById("fbOverlay").classList.add("hidden");
+doc.getElementById("dialogOverlay").classList.add("hidden");
 doc.getElementById("optTargetFolder").value = "Pasted Images";
 
-const alerts = [];
-let confirmAnswer = true;
+const nativePopups = [];
 class FakeCSInterface {
   evalScript(script, cb) {
     const res = answer(script);
@@ -397,12 +398,29 @@ const context = vm.createContext({
   process: { platform: "win32", env: { APPDATA: appData } },
   Buffer,
   console: { log() {}, error: console.error },
-  alert: (m) => alerts.push(m),
-  confirm: () => confirmAnswer,
+  alert: (m) => { nativePopups.push(`alert: ${m}`); },
+  confirm: (m) => { nativePopups.push(`confirm: ${m}`); return true; },
   ...fakeTimers,
 });
 
 const $ = (id) => doc.getElementById(id);
+/** The in-panel dialog as it stands: { open, title, message, ok, okClass, cancelShown }. */
+const dialog = () => ({
+  open: !$("dialogOverlay").classList.contains("hidden"),
+  title: $("dialogTitle").textContent,
+  message: $("dialogMessage").textContent,
+  ok: $("dialogOk").textContent,
+  okClass: $("dialogOk").className,
+  cancelShown: $("dialogCancel").style.display !== "none",
+});
+/** Waits for the dialog, then clicks OK (true) or Cancel (false). Returns what it showed. */
+async function answerDialog(ok, label) {
+  await waitFor(() => dialog().open, `dialog: ${label}`);
+  const shown = dialog();
+  $(ok ? "dialogOk" : "dialogCancel").click();
+  await settle();
+  return shown;
+}
 const notesFile = (id) => {
   let h = 0;
   for (let i = 0; i < id.length; i++) { h = ((h << 5) - h) + id.charCodeAt(i); h = h & h; }
@@ -435,8 +453,11 @@ try {
   await settle();
   eq("notes: second tab active", readJson(notesFile(host.info.fullId)).activeTabId, "1");
   await type("<p>second</p>");           // save still pending when deleting
-  confirmAnswer = true;
   $("btnDeleteNoteTab").click();
+  const askDelete = await answerDialog(true, "delete tab");
+  eq("delete tab: asked in the panel, red Delete", `${askDelete.title}|${askDelete.ok}|${askDelete.okClass}`, "Delete note tab|Delete|btn-danger-sm");
+  check("delete tab: names the tab", /"Note 2"/.test(askDelete.message), askDelete.message);
+  eq("delete tab: dialog closed", dialog().open, false);
   await advance(1000);
   let saved = readJson(notesFile(host.info.fullId));
   eq("notes delete: one tab left", saved.tabs.length, 1);
@@ -587,12 +608,13 @@ try {
   check("project changed: nothing marked imported", !bin.history[toFwd(join(media, "f.mp4"))]);
   host.refuseProject = false;
 
-  alerts.length = 0;
   $("btnAddBin").click();
   $("modalFolderInput").value = media;
   $("modalBinNameInput").value = "SFX/<Hits>";
   $("btnModalSaveBin").click();
-  check("bins: duplicate link refused", alerts.some((a) => /already linked/.test(a)), alerts.join(" | "));
+  const dupe = await answerDialog(true, "duplicate link");
+  check("bins: duplicate link refused, in the panel with one OK", /already linked/.test(dupe.message) && !dupe.cancelShown, JSON.stringify(dupe));
+  check("bins: the link dialog stays open under the message", !$("binModalOverlay").classList.contains("hidden"));
   $("btnModalCancel").click();
 
   card.children[0].children[1].children[1].click();  // 📂
@@ -627,14 +649,15 @@ try {
 
   // Reset after y.mp4 was deleted from the project; x.mp4 is still there.
   host.projectFiles.delete(toFwd(join(lib, "y.mp4")).toLowerCase());
-  confirmAnswer = false;
   calls = host.binImports.length;
   actionsOf(1)[3].click();
+  const askReset = await answerDialog(false, "reset");
+  eq("reset: asked in the panel", `${askReset.title}|${askReset.ok}|${askReset.okClass}`, "Reset watch bin|Reset|btn-primary-sm");
   await settle(20);
   eq("reset cancelled: nothing synced", host.binImports.length, calls);
   eq("reset cancelled: history kept", readJson(binsFile(aId)).bins[1].importedCount, 2);
-  confirmAnswer = true;
   actionsOf(1)[3].click();
+  await answerDialog(true, "reset ok");
   await waitFor(() => host.binImports.length === calls + 1, "reset sync");
   await settle();
   eq("reset: both files looked at again", host.binImports[calls].files.map((f) => f.split("/").pop()).join(","), "x.mp4,y.mp4");
@@ -653,11 +676,10 @@ try {
   eq("edit: folder filled in", $("modalFolderInput").value, lib);
   eq("edit: bin name filled in", $("modalBinNameInput").value, "Library");
   eq("edit: recursive filled in", $("modalRecursiveCheck").checked, true);
-  alerts.length = 0;
   calls = host.binImports.length;
   $("btnModalSaveBin").click();
   await settle(20);
-  eq("edit unchanged: not a duplicate of itself", alerts.length, 0);
+  eq("edit unchanged: not a duplicate of itself", dialog().open, false);
   eq("edit unchanged: still two bins", readJson(binsFile(aId)).bins.length, 2);
   eq("edit unchanged: nothing new to import", host.binImports.slice(calls).map((b) => b.files.length).join(","), "0");
   eq("edit unchanged: bin sorted to match the folder", host.binImports[calls] && host.binImports[calls].payload.arrange, true);
@@ -683,9 +705,9 @@ try {
   actionsOf(1)[2].click();
   $("modalFolderInput").value = media;
   $("modalBinNameInput").value = "SFX/<Hits>";
-  alerts.length = 0;
   $("btnModalSaveBin").click();
-  check("edit: cannot turn into a copy of another bin", alerts.some((a) => /already linked/.test(a)), alerts.join(" | "));
+  const copyMsg = await answerDialog(true, "edit into a copy");
+  check("edit: cannot turn into a copy of another bin", /already linked/.test(copyMsg.message), copyMsg.message);
   $("btnModalCancel").click();
   eq("edit cancelled: bin unchanged", readJson(binsFile(aId)).bins[1].binPath, "Music/Beds");
   $("btnAddBin").click();
@@ -824,6 +846,75 @@ try {
   $("autoSyncToggle").dispatch("change");
   setProject("saved", fileA);
   await advance(2500);
+
+  // ---- The in-panel dialog: keys, focus, queueing, and nothing changes behind it
+  const key = (k, extra = {}) => doc.dispatch("keydown", { key: k, target: doc.body, ...extra });
+  const binsNow = () => readJson(binsFile(aId)).bins.length;
+  const libSpare = join(work, "Media", "Spare");
+  mkdirSync(libSpare, { recursive: true });
+  $("btnAddBin").click();
+  $("modalFolderInput").value = libSpare;
+  $("modalBinNameInput").value = "Spare";
+  $("btnModalSaveBin").click();
+  await settle(20);
+  const spareIndex = binsNow() - 1;
+  const spareUnlink = () => $("binCardsList").children[spareIndex].children[0].children[1].children[4];
+  spareUnlink().click();
+  await waitFor(() => dialog().open, "unlink dialog");
+  eq("unlink: asked in the panel, red Unlink", `${dialog().title}|${dialog().ok}|${dialog().okClass}`, "Unlink watch bin|Unlink|btn-danger-sm");
+  eq("unlink: Cancel has the focus (Enter is safe)", doc.activeElement === $("dialogCancel"), true);
+  key("Enter");
+  await settle();
+  eq("unlink: Enter on Cancel keeps the bin", `${dialog().open}:${binsNow()}`, `false:${spareIndex + 1}`);
+  spareUnlink().click();
+  await waitFor(() => dialog().open, "unlink dialog again");
+  key("Escape");
+  await settle();
+  eq("unlink: Esc keeps the bin", `${dialog().open}:${binsNow()}`, `false:${spareIndex + 1}`);
+  spareUnlink().click();
+  await waitFor(() => dialog().open, "unlink dialog, close button");
+  $("dialogClose").click();
+  await settle();
+  eq("unlink: the close button keeps the bin", `${dialog().open}:${binsNow()}`, `false:${spareIndex + 1}`);
+  spareUnlink().click();
+  await answerDialog(true, "unlink ok");
+  eq("unlink: OK unlinks", binsNow(), spareIndex);
+
+  // Two messages at once: the second waits for the first.
+  $("btnAddBin").click();
+  $("modalFolderInput").value = "";
+  $("btnModalSaveBin").click();
+  $("btnModalSaveBin").click();
+  await waitFor(() => dialog().open, "first message");
+  check("message: one OK, no Cancel", dialog().ok === "OK" && !dialog().cancelShown && dialog().okClass === "btn-primary-sm", JSON.stringify(dialog()));
+  const pastesBefore = host.pastes.length;
+  key("v", { ctrlKey: true, keyCode: 86 });
+  await settle(10);
+  eq("message: Ctrl+V does nothing while a dialog is open", host.pastes.length, pastesBefore);
+  key("Enter");
+  await settle();
+  eq("message: Enter closes it and the queued one follows", dialog().open, true);
+  key("Enter");
+  await settle();
+  eq("message: then all closed", dialog().open, false);
+  $("btnModalCancel").click();
+
+  // A note tab is not deleted if another project opened while the dialog was up.
+  $("btnAddNoteTab").click();
+  await settle();
+  const tabsBefore = readJson(notesFile(aId)).tabs.length;
+  $("btnDeleteNoteTab").click();
+  await waitFor(() => dialog().open, "delete tab dialog");
+  setProject("saved", fileB);
+  await advance(2500);
+  $("dialogOk").click();
+  await settle();
+  eq("delete tab across a project switch: nothing deleted", readJson(notesFile(aId)).tabs.length, tabsBefore);
+  setProject("saved", fileA);
+  await advance(2500);
+  $("btnDeleteNoteTab").click();                      // back in A: the extra tab goes
+  await answerDialog(true, "delete the extra tab");
+  eq("delete tab back in the project: deleted", readJson(notesFile(aId)).tabs.length, tabsBefore - 1);
 
   // ---- Script to Audio: timecodes from the voiceover, then subtitles
   const LazyAlign = context.LazyAlign;
@@ -1092,6 +1183,7 @@ try {
   try { rmSync(work, { recursive: true, force: true }); } catch {}
 }
 
+eq("no native alert/confirm window was opened", nativePopups.join(" | "), "");
 console.log("LazyKick - panel tests\n");
 for (const f of failures) console.log(`  FAIL ${f}`);
 console.log(`${failures.length ? "" : "  "}${passed} passed, ${failures.length} failed`);

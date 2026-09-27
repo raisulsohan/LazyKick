@@ -22,7 +22,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.4** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.4.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -51,6 +51,8 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.4** · F
 ---
 
 ## 🆕 What's New in 1.4
+
+**1.4.1:** confirmations and messages (Reset, Unlink, Delete tab, …) now open as a dark in-panel dialog that matches Adobe's look, instead of a white Windows box with the text cut off.
 
 **🎙️ Time a script to the voiceover, then 💬 make subtitles**
 - Write your script in **📝 Notes**, one line per subtitle. Click **🎙️ Time to Audio**: LazyKick listens to the open sequence or composition and puts the time each line is spoken at the start of the line, like `[00:00:12:08] Welcome back.`
@@ -197,7 +199,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.4.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.4.1.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**

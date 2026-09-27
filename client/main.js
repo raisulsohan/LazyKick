@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.4.0";
+    var PANEL_VERSION = "1.4.1";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -169,6 +169,14 @@
         btnCopyNote:           document.getElementById("btnCopyNote"),
         btnExportNote:         document.getElementById("btnExportNote"),
         btnDeleteNoteTab:      document.getElementById("btnDeleteNoteTab"),
+
+        // In-panel dialog
+        dialogOverlay:         document.getElementById("dialogOverlay"),
+        dialogTitle:           document.getElementById("dialogTitle"),
+        dialogMessage:         document.getElementById("dialogMessage"),
+        dialogClose:           document.getElementById("dialogClose"),
+        dialogCancel:          document.getElementById("dialogCancel"),
+        dialogOk:              document.getElementById("dialogOk"),
         btnTimeToAudio:        document.getElementById("btnTimeToAudio"),
         btnSubtitles:          document.getElementById("btnSubtitles"),
 
@@ -341,8 +349,67 @@
     }
 
     function isModalOpen() {
-        return !el.binModalOverlay.classList.contains("hidden") || !el.fbOverlay.classList.contains("hidden");
+        return !el.binModalOverlay.classList.contains("hidden") || !el.fbOverlay.classList.contains("hidden") ||
+               !el.dialogOverlay.classList.contains("hidden");
     }
+
+    // ============================================================
+    // In-panel dialogs
+    // ============================================================
+    // CEP shows window.alert and window.confirm as white system windows
+    // titled "JavaScript Confirm - file:///...". These look like the panel.
+    var dialogQueue = Promise.resolve();
+    var dialogDone = null;
+
+    function finishDialog(answer) {
+        if (!dialogDone) return;
+        var done = dialogDone;
+        dialogDone = null;
+        el.dialogOverlay.classList.add("hidden");
+        done(answer);
+    }
+
+    /**
+     * One dialog at a time; resolves true for OK, false for Cancel, ✕ or Esc.
+     * opts: { title, message, ok, cancel (false: no Cancel button),
+     *         danger (a red OK, Cancel focused, for things that cannot be undone) }
+     */
+    function showDialog(opts) {
+        var run = dialogQueue.then(function () {
+            return new Promise(function (resolve) {
+                el.dialogTitle.textContent = opts.title || "LazyKick";
+                el.dialogMessage.textContent = opts.message || "";
+                el.dialogOk.textContent = opts.ok || "OK";
+                el.dialogOk.className = opts.danger ? "btn-danger-sm" : "btn-primary-sm";
+                el.dialogCancel.textContent = opts.cancel || "Cancel";
+                el.dialogCancel.style.display = opts.cancel === false ? "none" : "";
+                dialogDone = resolve;
+                el.dialogOverlay.classList.remove("hidden");
+                try { (opts.danger ? el.dialogCancel : el.dialogOk).focus(); } catch (e) {}
+            });
+        });
+        dialogQueue = run.then(function () {}, function () {});
+        return run;
+    }
+
+    /** A message with a single OK. */
+    function showMessage(title, message) {
+        return showDialog({ title: title, message: message, cancel: false });
+    }
+
+    el.dialogOk.addEventListener("click", function () { finishDialog(true); });
+    el.dialogCancel.addEventListener("click", function () { finishDialog(false); });
+    el.dialogClose.addEventListener("click", function () { finishDialog(false); });
+    document.addEventListener("keydown", function (e) {
+        if (!dialogDone) return;
+        if (e.key === "Escape") {
+            e.preventDefault();
+            finishDialog(false);
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            finishDialog(document.activeElement !== el.dialogCancel);
+        }
+    });
 
     function hasOpenProject() {
         var id = appState.projectId;
@@ -355,7 +422,7 @@
 
     function openInOS(folderPath) {
         if (!folderPath || !fs.existsSync(folderPath)) {
-            alert("Folder path does not exist on disk:\n" + folderPath);
+            showMessage("Folder not found", "This folder does not exist on disk (any more):\n" + folderPath);
             return;
         }
         // Arguments go straight to the program, never through a shell, so a
@@ -751,14 +818,24 @@
 
     el.btnDeleteNoteTab.addEventListener("click", function () {
         if (appState.notesData.activeTabId === "global") {
-            alert("The Global Scratchpad cannot be deleted.");
+            showMessage("Notes", "The Global Scratchpad cannot be deleted.");
             return;
         }
         if (appState.notesData.tabs.length <= 1) {
-            alert("You must keep at least one project note tab.");
+            showMessage("Notes", "You must keep at least one project note tab.");
             return;
         }
-        if (confirm("Delete this note tab?")) {
+        var projectBefore = appState.projectId;
+        var tabBefore = appState.notesData.activeTabId;
+        var tabName = (appState.notesData.tabs[parseInt(tabBefore, 10)] || {}).name || "this tab";
+        showDialog({
+            title: "Delete note tab",
+            message: "Delete \"" + tabName + "\"? Its notes cannot be brought back.",
+            ok: "Delete",
+            danger: true
+        }).then(function (ok) {
+            // Nothing is deleted if another project or tab came up meanwhile.
+            if (!ok || appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore) return;
             // Drop any pending save: it would write the deleted tab's text
             // into whichever tab takes its place.
             clearTimeout(appState.notesSaveTimer);
@@ -771,7 +848,7 @@
             renderNotesTabBar();
             renderActiveNoteContent();
             setStatus("Note tab deleted", 1500);
-        }
+        });
     });
 
     el.btnInsertTask.addEventListener("click", function () {
@@ -818,9 +895,9 @@
         try {
             fs.writeFileSync(targetFile, text, "utf8");
             setStatus("Exported note to: " + path.basename(targetFile), 3000);
-            alert("Note successfully exported to:\n" + targetFile);
+            showMessage("Note exported", "Saved to:\n" + targetFile);
         } catch (e) {
-            alert("Failed to export note:\n" + e.message);
+            showMessage("Export failed", "The note could not be saved:\n" + e.message);
         }
     });
 
@@ -1482,12 +1559,18 @@
             editBtn.addEventListener("click", function () { openBinModal(b); });
             resetBtn.addEventListener("click", function () { resetBin(b); });
             removeBtn.addEventListener("click", function () {
-                if (confirm("Unlink this folder from Watch Bins?\nFiles already imported stay in the project.")) {
+                showDialog({
+                    title: "Unlink watch bin",
+                    message: "Stop watching \"" + (b.binPath || "Root") + "\"?\n\nFiles already imported stay in the project.",
+                    ok: "Unlink",
+                    danger: true
+                }).then(function (ok) {
                     var at = appState.bins.indexOf(b);
-                    if (at !== -1) appState.bins.splice(at, 1);
+                    if (!ok || at === -1) return; // gone already, or another project is open now
+                    appState.bins.splice(at, 1);
                     saveBinsForProject();
                     renderBinCards();
-                }
+                });
             });
 
             el.binCardsList.appendChild(card);
@@ -1501,20 +1584,24 @@
      */
     function resetBin(bin) {
         var label = bin.binPath || "Root";
-        if (!confirm("Reset \"" + label + "\"?\n\nLazyKick forgets which files it synced from this folder and syncs it again. " +
-                     "Files that are no longer in the project come back; files still in it are not imported twice.")) {
-            return;
-        }
         var projectId = appState.projectId;
         var binsRef = appState.bins;
-        runExclusive(function () {
-            if (appState.bins !== binsRef || binsRef.indexOf(bin) === -1) return null;
-            bin.history = {};
-            bin.skipped = {};
-            bin.importedCount = 0;
-            writeBins(projectId, binsRef);
-            renderBinCards();
-            return syncBin(bin, { retrySkipped: true });
+        return showDialog({
+            title: "Reset watch bin",
+            message: "Reset \"" + label + "\"?\n\nLazyKick forgets which files it synced from this folder and syncs it again. " +
+                     "Files that are no longer in the project come back; files still in it are not imported twice.",
+            ok: "Reset"
+        }).then(function (ok) {
+            if (!ok) return null;
+            return runExclusive(function () {
+                if (appState.bins !== binsRef || binsRef.indexOf(bin) === -1) return null;
+                bin.history = {};
+                bin.skipped = {};
+                bin.importedCount = 0;
+                writeBins(projectId, binsRef);
+                renderBinCards();
+                return syncBin(bin, { retrySkipped: true });
+            });
         });
     }
 
@@ -1880,7 +1967,7 @@
     /** The watch-bin dialog: empty for a new bin, or filled in to edit `bin`. */
     function openBinModal(bin) {
         if (!hasOpenProject()) {
-            alert("Open or create a project first. Watch bins belong to a project.");
+            showMessage("Watch Bins", "Open or create a project first. Watch bins belong to a project.");
             return;
         }
         editingBin = bin || null;
@@ -1936,11 +2023,11 @@
         var isFolder = false;
         try { isFolder = !!folderPath && fs.statSync(folderPath).isDirectory(); } catch (e) { isFolder = false; }
         if (!isFolder) {
-            alert("Please select a valid folder on your computer.");
+            showMessage("Watch Bins", "Please choose a folder that exists on your computer.");
             return;
         }
         if (!el.filterVideo.checked && !el.filterAudio.checked && !el.filterImage.checked) {
-            alert("Turn on at least one media filter (Video, Audio or Image).");
+            showMessage("Watch Bins", "Turn on at least one media filter (Video, Audio or Image).");
             return;
         }
 
@@ -1950,7 +2037,7 @@
             return b !== editing && samePath(b.folderPath, folderPath) && b.binPath === binPath;
         });
         if (duplicate) {
-            alert("This folder is already linked to the '" + binPath + "' bin.");
+            showMessage("Watch Bins", "This folder is already linked to the '" + binPath + "' bin.");
             return;
         }
 

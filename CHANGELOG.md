@@ -2,6 +2,12 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.4.1
+
+- **Messages and confirmations now look like the panel.** CEP showed `alert()` / `confirm()` as white Windows boxes titled "JavaScript Confirm - file:///…", often with the text cut off. They are now an in-panel dialog in the panel's dark theme: blue for the normal choice, red for things that cannot be undone (Unlink, Delete tab), where Cancel has the focus so Enter is safe. Enter confirms, Esc or ✕ cancels, and messages wait their turn instead of stacking.
+- Deleting a note tab, unlinking and resetting a watch bin do nothing if another project opens while the dialog is up.
+- Tests: the panel may not call `alert`, `confirm` or `prompt` at all; the dialog's keys, focus, queueing and project-switch guards are covered.
+
 ## 1.4.0
 
 ### Script to audio and subtitles (Notes)

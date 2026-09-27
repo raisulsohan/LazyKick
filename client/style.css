@@ -902,6 +902,40 @@ input:checked + .slider:before { transform: translateX(12px); }
     gap: 6px;
 }
 
+/* ================= IN-PANEL DIALOG ================= */
+/* CEP shows window.alert/confirm as white system windows; this one matches the panel. */
+.dialog-overlay { z-index: 200; }
+
+.dialog-box { max-width: 340px; }
+
+.dialog-message {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.dialog-box .modal-footer button:focus {
+    outline: 1px solid var(--accent-cyan);
+    outline-offset: 1px;
+}
+
+.btn-danger-sm {
+    background: var(--danger-red);
+    color: #fff;
+    border: 1px solid #a82525;
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn-danger-sm:hover { background: #e53935; }
+
 /* ================= FOLDER BROWSER ================= */
 .fb-box { max-width: 480px; height: 380px; }
 

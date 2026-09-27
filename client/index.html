@@ -159,7 +159,7 @@
                 <span id="globalStatus" class="status-text">Ready</span>
             </div>
             <div class="footer-credits">
-                <span id="brandTag" class="brand-tag">LazyKick v1.4</span>
+                <span id="brandTag" class="brand-tag">LazyKick v1.4.1</span>
                 <span class="sep">•</span>
                 <a id="devLink" href="https://raisulsohan.com" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
             </div>
@@ -230,6 +230,23 @@
                 <span id="fbSelectedHint" class="fb-selected-hint"></span>
                 <button id="fbCancelBtn" class="btn-secondary-sm">Cancel</button>
                 <button id="fbSelectBtn" class="btn-primary-sm">Select Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= IN-PANEL DIALOG (instead of the browser's white alert/confirm) ================= -->
+    <div id="dialogOverlay" class="modal-overlay dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+        <div class="modal-box dialog-box">
+            <div class="modal-header">
+                <h3 id="dialogTitle">LazyKick</h3>
+                <button id="dialogClose" class="btn-close" title="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="dialogMessage" class="dialog-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button id="dialogCancel" class="btn-secondary-sm">Cancel</button>
+                <button id="dialogOk" class="btn-primary-sm">OK</button>
             </div>
         </div>
     </div>
