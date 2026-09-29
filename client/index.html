@@ -69,7 +69,7 @@
             <!-- Script to Audio -->
             <div class="script-bar">
                 <button id="btnTimeToAudio" class="btn-tool btn-accent" title="Listen to the timeline audio and put the time each line or paragraph is spoken at its start; every sentence is matched on its own. Select the voiceover clip or layer to use only it.">🎙️ Time to Audio</button>
-                <button id="btnSubtitles" class="btn-tool" title="Put the timed lines on the timeline as subtitles (Premiere Pro: a caption track; After Effects: text layers). An .srt file is saved next to the project too.">💬 Subtitles</button>
+                <button id="btnSubtitles" class="btn-tool" title="Put the timed lines on the timeline as subtitles: choose Single Line, Double Line or Single Word first (Premiere Pro: a caption track; After Effects: text layers). An .srt file is saved next to the project too.">💬 Subtitles</button>
                 <button id="btnFollow" class="btn-tool btn-follow" title="Follow the playhead">👁 Follow</button>
                 <span class="script-hint">Lines or whole paragraphs · select the voiceover to use only it</span>
                 <button id="btnTextSmaller" class="btn-tool btn-text-size" title="Smaller note text">A−</button>
@@ -163,7 +163,7 @@
                 <span id="globalStatus" class="status-text">Ready</span>
             </div>
             <div class="footer-credits">
-                <span id="brandTag" class="brand-tag">LazyKick v1.5.2</span>
+                <span id="brandTag" class="brand-tag">LazyKick v1.6</span>
                 <span class="sep">•</span>
                 <a id="devLink" href="https://raisulsohan.com" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
             </div>
@@ -234,6 +234,68 @@
                 <span id="fbSelectedHint" class="fb-selected-hint"></span>
                 <button id="fbCancelBtn" class="btn-secondary-sm">Cancel</button>
                 <button id="fbSelectBtn" class="btn-primary-sm">Select Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= CREATE SUBTITLES (layout, as Premiere Pro's Create captions) ================= -->
+    <div id="subModalOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="subModalTitle">
+        <div class="modal-box sub-box">
+            <div class="modal-header">
+                <h3 id="subModalTitle">Create subtitles</h3>
+                <button id="subModalClose" class="btn-close" title="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Layout</label>
+                    <div class="sub-layouts" role="radiogroup" aria-label="Layout">
+                        <label class="sub-layout"><input type="radio" name="subLayout" id="optSubSingle" value="single"> Single Line</label>
+                        <label class="sub-layout"><input type="radio" name="subLayout" id="optSubDouble" value="double" checked> Double Line</label>
+                        <label class="sub-layout"><input type="radio" name="subLayout" id="optSubWord" value="word"> Single Word</label>
+                    </div>
+                    <small id="subLayoutHint" class="hint-text">Up to two lines per subtitle</small>
+                </div>
+
+                <div class="form-group sub-row" id="subMaxCharsRow">
+                    <label for="optSubMaxChars">Maximum length in characters <span class="sub-help" title="Characters per subtitle line. 42 is the usual limit for TV and the web; vertical videos read better with less.">?</span></label>
+                    <div class="sub-slider">
+                        <input type="range" id="optSubMaxCharsRange" min="10" max="80" step="1" value="42">
+                        <input type="number" id="optSubMaxChars" min="10" max="80" step="1" value="42">
+                        <span class="sub-unit">characters</span>
+                    </div>
+                </div>
+
+                <div class="form-group sub-row" id="subMinSecondsRow">
+                    <label for="optSubMinSeconds">Minimum duration in seconds <span class="sub-help" title="A short subtitle stays up at least this long, but never into the next one.">?</span></label>
+                    <div class="sub-slider">
+                        <input type="range" id="optSubMinSecondsRange" min="0.5" max="10" step="0.1" value="3">
+                        <input type="number" id="optSubMinSeconds" min="0.5" max="10" step="0.1" value="3.0">
+                        <span class="sub-unit">seconds</span>
+                    </div>
+                </div>
+
+                <div class="form-group sub-row" id="subGapRow">
+                    <label for="optSubGap">Gap between subtitles (frames) <span class="sub-help" title="Empty frames between one subtitle and the next. 0 lets them follow each other straight away.">?</span></label>
+                    <div class="sub-slider">
+                        <input type="range" id="optSubGapRange" min="0" max="30" step="1" value="0">
+                        <input type="number" id="optSubGap" min="0" max="30" step="1" value="0">
+                        <span class="sub-unit">frames</span>
+                    </div>
+                </div>
+
+                <label class="checkbox-label">
+                    <input type="checkbox" id="optSubNoPunct">
+                    <span>Remove punctuation</span>
+                </label>
+
+                <div class="sub-preview">
+                    <div class="sub-preview-head">Preview <span id="subPreviewCount"></span></div>
+                    <div id="subPreviewList" class="sub-preview-list"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btnSubCancel" class="btn-secondary-sm">Cancel</button>
+                <button id="btnSubCreate" class="btn-primary-sm">Create subtitles</button>
             </div>
         </div>
     </div>

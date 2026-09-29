@@ -1,7 +1,7 @@
 # If something goes wrong
 
 Find the symptom, or the message the status bar shows. *Written for
-LazyKick 1.5.2.* The status bar at the bottom of the panel always says what
+LazyKick 1.6.0.* The status bar at the bottom of the panel always says what
 just happened or why something did not; hover it to read a long message in
 full.
 
@@ -203,6 +203,25 @@ The tags are before the start of the open sequence or composition, usually
 because they were made on another timeline. Open the one they belong to, or
 time the script again.
 
+### Subtitles are too long, too short or flash by
+
+Click **💬 Subtitles** again and change the settings in the *Create
+subtitles* window; the preview shows the result before anything is made.
+Lower *Maximum length* (or pick **Single Line**) for shorter subtitles, raise
+*Minimum duration* to keep short ones up longer, or pick **Single Word** for
+one word at a time. A new `.srt` is written each time; delete the old caption
+track or layers yourself.
+
+### "The project or note changed; no subtitles were made"
+
+The project or the note tab changed while the *Create subtitles* window was
+open, so nothing was placed. Click **💬 Subtitles** again.
+
+### "Nothing left to show: every word was punctuation"
+
+With *Remove punctuation* on, the timed lines held nothing but marks such as
+`---`. Untick it, or time lines with words in them.
+
 ### Premiere Pro: subtitles are only in the "Subtitles" bin
 
 That Premiere version cannot create caption tracks from a script. Drag the
@@ -323,6 +342,8 @@ The messages you may see, and what they mean. `…` stands for a name.
 | --- | --- |
 | Listening to the timeline audio… | Reading the audio; the buttons wait. |
 | Timed N lines to the (selected / timeline) audio of '…' | Done. |
+| Choose how the subtitles look | The *Create subtitles* window is open. |
+| No subtitles made | You closed it with Cancel, ✕ or Esc. |
 | Subtitles placed on a new caption track in '…' | Premiere Pro: done. |
 | N subtitle layers added to '…' | After Effects: done (with a count of any past the end of the composition). |
 | Open a sequence first / Open a composition first | No timeline open. |

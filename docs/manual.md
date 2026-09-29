@@ -1,7 +1,7 @@
 # The LazyKick manual
 
 Everything the panel does, in the order you meet it. *Written for LazyKick
-1.5.2.* For how the script timing decides where each line goes, see
+1.6.0.* For how the script timing decides where each line goes, see
 [How script timing works](script-timing.md); when something does not behave,
 see [If something goes wrong](troubleshooting.md).
 
@@ -255,7 +255,25 @@ What happens behind the button:
 ## 6. Make subtitles
 
 Click **💬 Subtitles** after timing the script (or on any lines that start
-with a timecode tag).
+with a timecode tag). The **Create subtitles** window opens first, with the
+same choices as Premiere Pro's *Create captions*:
+
+<img src="images/create-subtitles.png" width="460" alt="The Create subtitles window: Single Line, Double Line and Single Word, sliders for maximum length, minimum duration and gap, Remove punctuation, and a preview of the first three subtitles">
+
+| Choice | What it does |
+|---|---|
+| **Layout: Single Line** | One line per subtitle. |
+| **Layout: Double Line** (default) | Up to two lines per subtitle. |
+| **Layout: Single Word** | Every word is a subtitle of its own, on screen from when it is said until the next word is. The three settings below do not apply and are greyed out. |
+| **Maximum length in characters** | Characters per line, 10 to 80 (default 42, the usual limit for TV and the web; vertical videos read better with less). |
+| **Minimum duration in seconds** | A short subtitle stays up at least this long, but never into the next one: 0.5 to 10 (default 3.0). |
+| **Gap between subtitles (frames)** | Empty frames between one subtitle and the next, 0 to 30 (default 0: they follow each other straight away). |
+| **Remove punctuation** | Takes full stops, commas, question marks, quotes, brackets, dashes and the Bengali dari (।) off the ends of words. Inside a word they stay (*don't*, *3.5*, *well-known*), and so do symbols such as `$`, `%` and `#`. |
+
+The **Preview** at the bottom shows how many subtitles you will get and the
+first three with their timecodes, and changes as you change the settings.
+Click **Create subtitles** (or press Enter) to make them; **Cancel** or Esc
+makes nothing. Your choices are remembered for next time.
 
 - **Premiere Pro:** the subtitles are imported into a *Subtitles* bin and
   placed on the open sequence as a new **subtitle caption track**. Style
@@ -276,15 +294,18 @@ with a timecode tag).
   saved in a `LazyKick Subtitles` folder next to the project, named after the
   sequence or composition, never overwriting an earlier one.
 
-**Long lines become several subtitles.** A line longer than 84 characters
-(two subtitle lines of 42) or longer than 6.5 seconds is cut into pieces:
-at a sentence end if that leaves the piece at least a third full, otherwise
-at a comma, otherwise between words. Each piece starts when its first word
-is spoken. Short lines are wrapped into two lines at the space nearest the
-middle.
+**Long lines become several subtitles.** A line that does not fit the
+layout (one or two lines of the maximum length) or is longer than 6.5
+seconds is cut into pieces: at a sentence end if that leaves the piece at
+least a third full, otherwise at a comma, otherwise between words. Each
+piece starts when its first word is spoken. With Double Line, a subtitle
+longer than one line is split into two at the space nearest the middle that
+keeps both lines within the maximum; a sentence end or a comma close to the
+middle is preferred.
 
 A line with no measured end (a tag you typed) stays up for its reading time
-and never runs into the next subtitle.
+or the minimum duration, whichever is longer, and never runs into the next
+subtitle.
 
 ---
 
@@ -473,7 +494,7 @@ older versions are still found.)
 | `proj_<number>.json` | The note tabs of one project |
 | `bins_proj_<number>.json` | The watch bins of one project, with the files synced and skipped |
 | `global_scratchpad.txt` | The 🌐 Global tab |
-| `lazykick_settings.json` | Paste options, text size, Follow, Auto-Sync and the last folder picked |
+| `lazykick_settings.json` | Paste options, text size, Follow, the last subtitle choices, Auto-Sync and the last folder picked |
 | `recent_pastes.json` | The Recent Pastes list |
 | `paste_index.json` | Checksums of pasted images, to recognise a picture pasted again |
 

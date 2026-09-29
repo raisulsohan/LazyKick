@@ -412,6 +412,7 @@ doc.getElementById("noteEditor").setAttribute("contenteditable", "true");
 doc.getElementById("binModalOverlay").classList.add("hidden");
 doc.getElementById("fbOverlay").classList.add("hidden");
 doc.getElementById("dialogOverlay").classList.add("hidden");
+doc.getElementById("subModalOverlay").classList.add("hidden");
 doc.getElementById("optTargetFolder").value = "Pasted Images";
 
 const nativePopups = [];
@@ -463,6 +464,44 @@ async function answerDialog(ok, label) {
   await waitFor(() => dialog().open, `dialog: ${label}`);
   const shown = dialog();
   $(ok ? "dialogOk" : "dialogCancel").click();
+  await settle();
+  return shown;
+}
+/** The Create subtitles dialog as it stands. */
+const subForm = () => ({
+  open: !$("subModalOverlay").classList.contains("hidden"),
+  layout: $("optSubWord").checked ? "word" : $("optSubSingle").checked ? "single" : $("optSubDouble").checked ? "double" : "none",
+  maxChars: $("optSubMaxChars").value, minSeconds: $("optSubMinSeconds").value, gapFrames: $("optSubGap").value,
+  removePunctuation: $("optSubNoPunct").checked,
+  hint: $("subLayoutHint").textContent,
+  count: $("subPreviewCount").textContent,
+  rows: $("subPreviewList").children.map((r) => r.textContent),
+  greyed: ["subMaxCharsRow", "subMinSecondsRow", "subGapRow"].map((id) => $(id).classList.contains("is-off")).join(","),
+});
+/** Sets the given choices the way a user would (radio change, slider drag, box typing). */
+function chooseSubtitles(choices) {
+  if (choices.layout) {
+    const ids = { single: "optSubSingle", double: "optSubDouble", word: "optSubWord" };
+    for (const [layout, id] of Object.entries(ids)) $(id).checked = layout === choices.layout;
+    $(ids[choices.layout]).dispatch("change");
+  }
+  const sliders = { maxChars: "optSubMaxChars", minSeconds: "optSubMinSeconds", gapFrames: "optSubGap" };
+  for (const [key, id] of Object.entries(sliders)) {
+    if (choices[key] === undefined) continue;
+    $(`${id}Range`).value = String(choices[key]);
+    $(`${id}Range`).dispatch("input");
+  }
+  if (choices.removePunctuation !== undefined) {
+    $("optSubNoPunct").checked = choices.removePunctuation;
+    $("optSubNoPunct").dispatch("change");
+  }
+}
+/** Waits for the dialog, makes the choices, then clicks Create (true) or Cancel (false). Returns what it showed first. */
+async function answerSubtitles(choices, create, label) {
+  await waitFor(() => subForm().open, `subtitle dialog: ${label}`);
+  const shown = subForm();
+  chooseSubtitles(choices || {});
+  $(create === false ? "btnSubCancel" : "btnSubCreate").click();
   await settle();
   return shown;
 }
@@ -1110,11 +1149,21 @@ try {
   tags[1].setAttribute("data-t", "3.000"); tags[1].setAttribute("data-e", "6.400");   // text differs: edited by hand
   host.timeline = { ok: true, host: "ppro", name: "Seq: 01/Final", fps: 25, offset: 10, duration: 60 };
   $("btnSubtitles").click();
+  await waitFor(() => subForm().open, "subtitle dialog opens");
+  check("subtitle dialog: buttons busy while it is open", $("btnSubtitles").disabled && $("btnTimeToAudio").disabled);
+  eq("subtitle dialog: nothing placed before Create", host.subtitleCalls.length, 0);
+  const firstForm = await answerSubtitles({}, true, "first subtitles");
+  eq("subtitle dialog: Premiere's defaults the first time", `${firstForm.layout}|${firstForm.maxChars}|${firstForm.minSeconds}|${firstForm.gapFrames}|${firstForm.removePunctuation}`,
+    "double|42|3.0|0|false");
+  eq("subtitle dialog: nothing greyed out for Double Line", firstForm.greyed, "false,false,false");
+  eq("subtitle dialog: preview counts the subtitles", firstForm.count, "· 3 subtitles");
+  eq("subtitle dialog: preview shows the first one at its timecode", firstForm.rows[0], "00:00:10:20Welcome back, everyone.");
   await waitFor(() => host.subtitleCalls.length === 1, "subtitles placed");
   await settle();
+  eq("subtitle dialog: closed after Create", subForm().open, false);
   const placed = host.subtitleCalls[0];
   eq("subtitles: one cue per timed line", placed.cues.length, 3);
-  eq("subtitles: LazyKick's tag gives its exact measured start and end", `${placed.cues[0].s}-${placed.cues[0].e}`, "0.815-2.7");
+  eq("subtitles: LazyKick's tag gives its exact start, held up to the next line", `${placed.cues[0].s}-${placed.cues[0].e}`, "0.815-3.2");
   eq("subtitles: an edited tag is read from its text", placed.cues[1].s, 3.2);
   check("subtitles: its measured end kept", placed.cues[1].e === 6.4, placed.cues[1].e);
   eq("subtitles: a typed timecode (minus the timeline start)", placed.cues[2].s, 7.08);
@@ -1123,18 +1172,76 @@ try {
   eq("subtitles: SRT next to the project, named after the timeline", srtFiles.join(","), "Seq_ 01_Final.srt");
   const srt = srtFiles.length ? readFileSync(join(srtDir, srtFiles[0]), "utf8") : "";
   eq("subtitles: SRT starts with a BOM", srt.charCodeAt(0), 0xFEFF);
-  check("subtitles: SRT cues", srt.includes("1\r\n00:00:00,815 --> 00:00:02,700\r\nWelcome back, everyone.\r\n"), JSON.stringify(srt.slice(0, 80)));
+  check("subtitles: SRT cues", srt.includes("1\r\n00:00:00,815 --> 00:00:03,200\r\nWelcome back, everyone.\r\n"), JSON.stringify(srt.slice(0, 80)));
   eq("subtitles: host told where the SRT is", toFwd(placed.srtPath), toFwd(join(srtDir, srtFiles[0] || "")));
   check("subtitles: status", /caption track/.test($("globalStatus").textContent) && /SRT: Seq_ 01_Final\.srt/.test($("globalStatus").textContent), $("globalStatus").textContent);
   $("btnSubtitles").click();
+  await answerSubtitles({ minSeconds: 0.5 }, true, "second subtitles");
   await waitFor(() => host.subtitleCalls.length === 2, "second subtitles");
+  eq("subtitles: a short minimum duration keeps the measured end", host.subtitleCalls[1].cues[0].e, 2.7);
   eq("subtitles again: never overwrites the first SRT", readdirSync(srtDir).sort().join(","), "Seq_ 01_Final.srt,Seq_ 01_Final_2.srt");
+
+  // Single Word from the dialog; Enter creates. The rows it has no use for are greyed out.
+  const settingsFile = join(storage, "lazykick_settings.json");
+  eq("subtitle choices: saved", readJson(settingsFile).subtitles.minSeconds, 0.5);
+  $("btnSubtitles").click();
+  await waitFor(() => subForm().open, "dialog for single word");
+  eq("subtitle dialog: remembers the last choices", subForm().minSeconds, "0.5");
+  chooseSubtitles({ layout: "word" });
+  const wordForm = subForm();
+  const wordCount = script.join(" ").split(/\s+/).length;
+  eq("single word: length, duration and gap greyed out", wordForm.greyed, "true,true,true");
+  check("single word: their inputs disabled", $("optSubMaxChars").disabled && $("optSubMinSecondsRange").disabled && $("optSubGap").disabled);
+  eq("single word: says what it does", wordForm.hint, "One word at a time, while it is said");
+  eq("single word: preview counts every word", wordForm.count, `· ${wordCount} subtitles`);
+  eq("single word: preview's first word", wordForm.rows[0], "00:00:10:20Welcome");
+  eq("single word: preview says how many more", wordForm.rows[3], `and ${wordCount - 3} more`);
+  chooseSubtitles({ removePunctuation: true });
+  check("remove punctuation: the preview follows", subForm().rows[1].endsWith("back"), subForm().rows[1]);
+  doc.dispatch("keydown", { key: "Enter" });
+  await waitFor(() => host.subtitleCalls.length === 3, "single word subtitles");
+  const wordCues = host.subtitleCalls[2].cues;
+  eq("single word: one subtitle per word", wordCues.length, wordCount);
+  eq("single word: punctuation removed", wordCues.slice(0, 3).map((c) => c.t).join("|"), "Welcome|back|everyone");
+  check("single word: back to back inside a line", wordCues[0].e === wordCues[1].s && wordCues[1].e === wordCues[2].s, JSON.stringify(wordCues.slice(0, 3)));
+  eq("single word: remembered", readJson(settingsFile).subtitles.layout, "word");
+  chooseSubtitles({ layout: "double" });
+  eq("subtitle dialog: closed, so its inputs change nothing", readJson(settingsFile).subtitles.layout, "word");
+
+  // Cancel, Esc and a project switch while the dialog is open: nothing is placed.
+  $("btnSubtitles").click();
+  const cancelled = await answerSubtitles({}, false, "cancel");
+  eq("subtitle dialog: opens with Single Word again", `${cancelled.layout}|${cancelled.greyed}`, "word|true,true,true");
+  eq("cancel: host not called", host.subtitleCalls.length, 3);
+  check("cancel: status says so", /No subtitles made/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  check("cancel: buttons back", !$("btnSubtitles").disabled && !$("btnTimeToAudio").disabled);
+  $("btnSubtitles").click();
+  await waitFor(() => subForm().open, "dialog for Esc");
+  doc.dispatch("keydown", { key: "Escape" });
+  await settle();
+  eq("Esc: dialog closed", subForm().open, false);
+  eq("Esc: host not called", host.subtitleCalls.length, 3);
+  $("btnSubtitles").click();
+  await waitFor(() => subForm().open, "dialog for typing");
+  chooseSubtitles({ layout: "double" });
+  $("optSubMaxChars").value = "500";
+  $("optSubMaxChars").dispatch("input");
+  $("optSubMaxChars").dispatch("change");
+  eq("typed length: put in range once left", `${$("optSubMaxChars").value}|${$("optSubMaxCharsRange").value}`, "80|80");
+  setProject("saved", fileB);
+  await advance(2500);
+  $("btnSubCreate").click();
+  await settle();
+  eq("project switch: nothing placed", host.subtitleCalls.length, 3);
+  check("project switch: says why", /project or note changed/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  setProject("saved", fileA);
+  await advance(2500);
 
   setEditor([{ tag: "div", kids: ["Just words, no timecodes."] }]);
   $("btnSubtitles").click();
   await settle();
   check("subtitles: nothing timed, says what to do", /Time to Audio first/.test($("globalStatus").textContent), $("globalStatus").textContent);
-  eq("subtitles: nothing timed, host not called", host.subtitleCalls.length, 2);
+  eq("subtitles: nothing timed, host not called", host.subtitleCalls.length, 3);
   setEditor([]);
   $("btnTimeToAudio").click();
   await settle();
@@ -1253,10 +1360,11 @@ try {
   longTag.setAttribute("data-w", offsets.join(","));
   const subsBefore = host.subtitleCalls.length;
   $("btnSubtitles").click();
+  await answerSubtitles({ layout: "double", maxChars: 42, minSeconds: 3, gapFrames: 0, removePunctuation: false }, true, "long line");
   await waitFor(() => host.subtitleCalls.length === subsBefore + 1, "long subtitles");
   const longCues = host.subtitleCalls[subsBefore].cues;
   check("long line: cut into several subtitles", longCues.length >= 3, longCues.length);
-  check("long line: every subtitle fits two lines of 42", longCues.every((c) => c.t.split("\n").length <= 2 && c.t.replace("\n", " ").length <= 84), longCues.map((c) => c.t.length).join(","));
+  check("long line: every subtitle fits two lines of 42", longCues.every((c) => c.t.split("\n").length <= 2 && c.t.split("\n").every((row) => row.length <= 42)), longCues.map((c) => c.t.length).join(","));
   check("long line: pieces end at sentence ends", longCues.slice(0, -1).every((c) => /[.,]$/.test(c.t)), longCues.map((c) => c.t.slice(-8)).join(" | "));
   let wordAt = 0;
   longCues.forEach((c, i) => {

@@ -2,7 +2,7 @@
 
 What **🎙️ Time to Audio** does between the click and the timecodes, how
 accurate it is, and how to get the best result. *Written for LazyKick
-1.5.2.* The steps for using it are in [the manual](manual.md#5-time-a-script-to-the-voiceover).
+1.6.0.* The steps for using it are in [the manual](manual.md#5-time-a-script-to-the-voiceover).
 
 ## The idea
 

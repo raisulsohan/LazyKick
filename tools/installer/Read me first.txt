@@ -65,9 +65,13 @@ THE THREE TABS
        layer first, so only it is heard.
     4. Click "Time to Audio": every line starts with the time
        it is spoken, e.g. [00:00:13:15]. Any language works.
-    5. Click "Subtitles": Premiere Pro gets a caption track,
-       After Effects one text layer per subtitle, and an .srt
-       is saved in "LazyKick Subtitles" next to the project.
+    5. Click "Subtitles" and choose the look, as in Premiere
+       Pro's Create captions: Single Line, Double Line or
+       Single Word, the line length, minimum duration, gap and
+       Remove punctuation. The preview shows the result.
+    6. Click "Create subtitles": Premiere Pro gets a caption
+       track, After Effects one text layer per subtitle, and an
+       .srt is saved in "LazyKick Subtitles" next to the project.
     With "Follow" on, press play: the line and the word being
     said light up and the note scrolls along.
 

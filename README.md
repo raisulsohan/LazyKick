@@ -23,7 +23,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.5.2** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.6** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
 
@@ -34,7 +34,8 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.5.2** ·
 ## 📑 Contents
 
 - [📖 Documentation](docs/README.md)
-- [What's New in 1.5](#-whats-new-in-15)
+- [What's New in 1.6](#-whats-new-in-16)
+- [What's New in 1.5](#whats-new-in-15)
 - [What's New in 1.4](#whats-new-in-14)
 - [What's New in 1.3](#whats-new-in-13)
 - [What's New in 1.2](#whats-new-in-12)
@@ -57,7 +58,18 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.5.2** ·
 
 ---
 
-## 🆕 What's New in 1.5
+## 🆕 What's New in 1.6
+
+**💬 Choose how the subtitles look, like Premiere Pro's Create captions**
+- Click **💬 Subtitles** and a *Create subtitles* window opens first, with the same choices as Premiere Pro:
+  - **Single Line**, **Double Line** (the default) or **Single Word**: one word at a time, on screen while it is said.
+  - **Maximum length in characters** per line (42 by default), **Minimum duration in seconds** (3.0) and **Gap between subtitles** in frames (0), each with a slider and a box.
+  - **Remove punctuation**: full stops, commas, quotes, dashes and the Bengali dari (।) come off the ends of words; *don't* and *3.5* stay as they are.
+- A **preview** shows how many subtitles you will get and the first three with their timecodes, and changes as you move a slider.
+- Your choices are remembered. Enter makes the subtitles, Esc closes the window.
+- Two-line subtitles now break at a sentence end or comma near the middle when there is one, and both lines always stay within the maximum length.
+
+## What's New in 1.5
 
 **📄 Paste from Google Docs and it looks like the Doc**
 - Copy a script from Google Docs, Word or a web page and paste it into **📝 Notes**: titles, headings, paragraphs, **bold**, *italic*, underline, lists and small grey notes come across. Fonts, colours, links, images and anything hidden are left behind, in the panel's own dark style.
@@ -204,7 +216,7 @@ Always available in the panel header.
 - **Paste keeps the document's look:** headings, paragraphs, bold, italic, underline, lists and grey side notes from Google Docs, Word or the web; fonts, colours, links, images and hidden text are dropped. `Ctrl+Shift+V` pastes plain text.
 - **A− / A+ text size** (10–24 px, remembered).
 - **🎙️ Time to Audio:** times every line of the note to the voiceover on the open timeline and starts each line with its timecode. Language-independent (pauses and speaking length, no speech recognition), fully offline.
-- **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project. Headings and grey notes are skipped; long paragraphs are split into several subtitles.
+- **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project. Choose Single Line, Double Line or Single Word, the line length, minimum duration, gap and punctuation first, with a live preview. Headings and grey notes are skipped; long paragraphs are split into several subtitles.
 - **👁 Follow:** while the timeline plays, the spoken line and word light up and the note scrolls along.
 
 ### 3. 📂 Watch Bins & Media Sync
@@ -230,7 +242,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.5.2.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.6.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -296,7 +308,7 @@ Don't keep a source copy and the signed install side by side: they share one ext
 3. Music on the timeline too? Select the voiceover clip or layer first, so only it is heard.
 4. Click **🎙️ Time to Audio**. Each line now starts with the time it is spoken.
 5. Check a few lines; to fix one, edit its timecode (click Time to Audio again to redo them all).
-6. Click **💬 Subtitles**. Premiere Pro: a new caption track with the lines. After Effects: one text layer per subtitle. The `.srt` is in `LazyKick Subtitles` next to the project.
+6. Click **💬 Subtitles** and choose the look: **Single Line**, **Double Line** or **Single Word**, the maximum line length, minimum duration, gap and whether to remove punctuation (the preview shows the result). Click **Create subtitles**. Premiere Pro: a new caption track with the lines. After Effects: one text layer per subtitle. The `.srt` is in `LazyKick Subtitles` next to the project.
 7. Press play: with **👁 Follow** on, the spoken line and word light up in the note as the voiceover plays.
 
 ### Auto-import a folder
@@ -366,7 +378,7 @@ Everything stays on your computer, in:
 | `proj_<hash>.json` | Note tabs of one project (key: host + project path) |
 | `bins_proj_<hash>.json` | Watch bins of one project, with imported and skipped file lists |
 | `global_scratchpad.txt` | The 🌐 Global tab |
-| `lazykick_settings.json` | Paste options, Auto-Sync and the last folder picked in Browse |
+| `lazykick_settings.json` | Paste options, text size, Follow, the last subtitle choices, Auto-Sync and the last folder picked in Browse |
 | `recent_pastes.json` | Recent Pastes gallery |
 | `paste_index.json` | Checksums of pasted images, for duplicate detection |
 
@@ -473,9 +485,9 @@ Runs, in order (Windows, as two steps use Windows Script Host):
 
 1. `tools/check-extendscript.js`: `host.jsx` compiles as ES3 and avoids names and constructs real ExtendScript rejects.
 2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, media already in the project, timecode formatting, partial import failures and the project-changed guard.
-3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: three scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the others were held out; all must land every line within 0.2 s (they land within a few frames). The third reads whole paragraphs with longer pauses inside them than between them, and every sentence must land within 0.15 s. Also word timing inside a line, the playhead follower and the splitting of long paragraphs into subtitles.
+3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: three scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the others were held out; all must land every line within 0.2 s (they land within a few frames). The third reads whole paragraphs with longer pauses inside them than between them, and every sentence must land within 0.15 s. Also word timing inside a line, the playhead follower, the splitting of long paragraphs into subtitles and every subtitle layout (single line, double line, single word, line length, minimum duration, gap, punctuation).
 4. `tools/test-paste.mjs`: `paste.js` on the HTML that Google Docs, Word and web pages put on the clipboard: headings, side notes, bold/italic/underline and lists survive; styles, links, images, scripts, hidden text and attributes (including injection attempts) do not.
-5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, skipped headings, word times) and Subtitles (edited tags, the SRT file, long paragraphs), document paste and plain paste, text size, the follow highlight (position, pause while you scroll, off, hidden tab), the in-panel dialog, and the CEP 9 syntax guard.
+5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, skipped headings, word times) and Subtitles (edited tags, the SRT file, long paragraphs, the Create subtitles window: layouts, preview, Enter, Cancel, Esc, remembered choices, a project switch while it is open), document paste and plain paste, text size, the follow highlight (position, pause while you scroll, off, hidden tab), the in-panel dialog, and the CEP 9 syntax guard.
 
 The mocks follow the documented host APIs, but they are not the real apps. `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close After Effects first; results in `%TEMP%\lazykick-ae-smoke-results.txt`):
 
@@ -563,6 +575,7 @@ It's a **guide layer** by default: visible while you work, excluded from renders
 - **Premiere Pro:** a new *Subtitle* caption track on the open sequence, from an `.srt` imported into a *Subtitles* bin. Style them in the Essential Graphics / Text panel as usual. Very old Premiere versions can't add caption tracks by script: the `.srt` is then in the *Subtitles* bin to drag onto the sequence.
 - **After Effects:** one text layer per subtitle, named `Sub 01`, `Sub 02`, … followed by the start of its text, trimmed to its time. Change the look of all of them at once by selecting them and using the Character panel.
 - The `.srt` (UTF-8) is saved in `LazyKick Subtitles` next to the project, never overwriting an earlier one.
+- Too long, too short or too fast? Click 💬 again and change the layout, line length or minimum duration in the *Create subtitles* window; the preview shows the result first.
 </details>
 
 <details>

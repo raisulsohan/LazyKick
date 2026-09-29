@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.5.2";
+    var PANEL_VERSION = "1.6.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -132,7 +132,8 @@
             autoFit: false,
             targetFolder: DEFAULT_PASTE_FOLDER,
             notesFontSize: DEFAULT_NOTES_FONT_SIZE,
-            follow: true
+            follow: true,
+            subtitles: null   // the last Create subtitles choices (LazyAlign.cueOptions fills the gaps)
         },
         recentPastes: [],
         pasteBusy: false
@@ -191,6 +192,28 @@
         followLine:            document.getElementById("followLine"),
         followWord:            document.getElementById("followWord"),
         btnSubtitles:          document.getElementById("btnSubtitles"),
+
+        // Create subtitles dialog
+        subModalOverlay:       document.getElementById("subModalOverlay"),
+        subModalClose:         document.getElementById("subModalClose"),
+        optSubSingle:          document.getElementById("optSubSingle"),
+        optSubDouble:          document.getElementById("optSubDouble"),
+        optSubWord:            document.getElementById("optSubWord"),
+        subLayoutHint:         document.getElementById("subLayoutHint"),
+        subMaxCharsRow:        document.getElementById("subMaxCharsRow"),
+        optSubMaxChars:        document.getElementById("optSubMaxChars"),
+        optSubMaxCharsRange:   document.getElementById("optSubMaxCharsRange"),
+        subMinSecondsRow:      document.getElementById("subMinSecondsRow"),
+        optSubMinSeconds:      document.getElementById("optSubMinSeconds"),
+        optSubMinSecondsRange: document.getElementById("optSubMinSecondsRange"),
+        subGapRow:             document.getElementById("subGapRow"),
+        optSubGap:             document.getElementById("optSubGap"),
+        optSubGapRange:        document.getElementById("optSubGapRange"),
+        optSubNoPunct:         document.getElementById("optSubNoPunct"),
+        subPreviewCount:       document.getElementById("subPreviewCount"),
+        subPreviewList:        document.getElementById("subPreviewList"),
+        btnSubCancel:          document.getElementById("btnSubCancel"),
+        btnSubCreate:          document.getElementById("btnSubCreate"),
 
         // Bins Elements
         btnAddBin:             document.getElementById("btnAddBin"),
@@ -362,7 +385,7 @@
 
     function isModalOpen() {
         return !el.binModalOverlay.classList.contains("hidden") || !el.fbOverlay.classList.contains("hidden") ||
-               !el.dialogOverlay.classList.contains("hidden");
+               !el.dialogOverlay.classList.contains("hidden") || !el.subModalOverlay.classList.contains("hidden");
     }
 
     // ============================================================
@@ -493,6 +516,7 @@
             appState.settings.notesFontSize = s.notesFontSize;
         }
         if (s.follow !== undefined) appState.settings.follow = !!s.follow;
+        if (s.subtitles && typeof s.subtitles === "object") appState.settings.subtitles = s.subtitles;
 
         el.optGuideLayer.checked = appState.settings.guideLayer;
         el.optAutoFit.checked = appState.settings.autoFit;
@@ -510,7 +534,8 @@
             autoSync: appState.autoSync,
             lastPickerPath: appState.lastPickerPath,
             notesFontSize: appState.settings.notesFontSize,
-            follow: appState.settings.follow
+            follow: appState.settings.follow,
+            subtitles: appState.settings.subtitles
         });
     }
 
@@ -919,9 +944,10 @@
     // each sentence is spoken (client/align.js) and starts the line with a
     // timecode tag. The tag keeps the measured start and end in data-t /
     // data-e (seconds from the timeline start) and each word's time in
-    // data-w; a tag edited by hand is read from its text instead. 💬 turns
-    // the tagged lines into subtitles (long ones split in several), writes
-    // an .srt next to the project and has the host place them.
+    // data-w; a tag edited by hand is read from its text instead. 💬 asks
+    // for the layout (single line, double line or single word), turns the
+    // tagged lines into subtitles (long ones split in several), writes an
+    // .srt next to the project and has the host place them.
 
     var BLOCK_TAGS = { DIV: true, P: true, LI: true, UL: true, OL: true, BLOCKQUOTE: true, PRE: true,
                        H1: true, H2: true, H3: true, H4: true, H5: true, H6: true };
@@ -1130,6 +1156,143 @@
         });
     }
 
+    // ------------------------------------------------------------
+    // The Create subtitles dialog: layout, length, duration, gap and
+    // punctuation, as Premiere Pro's Create captions offers them, with a
+    // preview of the first subtitles. The choices are remembered.
+    // ------------------------------------------------------------
+
+    var subForm = { done: null, lines: null, timeline: null };
+    var SUB_LAYOUT_HINTS = {
+        single: "One line per subtitle",
+        double: "Up to two lines per subtitle",
+        word: "One word at a time, while it is said"
+    };
+    var SUB_PREVIEW_ROWS = 3;
+
+    function subtitleChoices() {
+        return LazyAlign.cueOptions(appState.settings.subtitles);
+    }
+
+    function readSubtitleForm() {
+        return LazyAlign.cueOptions({
+            layout: el.optSubWord.checked ? "word" : (el.optSubSingle.checked ? "single" : "double"),
+            maxChars: el.optSubMaxChars.value,
+            minSeconds: el.optSubMinSeconds.value,
+            gapFrames: el.optSubGap.value,
+            removePunctuation: !!el.optSubNoPunct.checked
+        });
+    }
+
+    /** Single Word has no line length, minimum duration or gap, as in Premiere Pro: those rows are greyed out. */
+    function showSubtitleLayout(layout) {
+        var byWord = layout === "word";
+        el.subLayoutHint.textContent = SUB_LAYOUT_HINTS[layout];
+        [el.subMaxCharsRow, el.subMinSecondsRow, el.subGapRow].forEach(function (row) { row.classList.toggle("is-off", byWord); });
+        [el.optSubMaxChars, el.optSubMaxCharsRange, el.optSubMinSeconds, el.optSubMinSecondsRange, el.optSubGap, el.optSubGapRange]
+            .forEach(function (input) { input.disabled = byWord; });
+    }
+
+    function fillSubtitleForm(o) {
+        el.optSubSingle.checked = o.layout === "single";
+        el.optSubDouble.checked = o.layout === "double";
+        el.optSubWord.checked = o.layout === "word";
+        el.optSubMaxChars.value = el.optSubMaxCharsRange.value = String(o.maxChars);
+        el.optSubMinSeconds.value = o.minSeconds.toFixed(1);
+        el.optSubMinSecondsRange.value = String(o.minSeconds);
+        el.optSubGap.value = el.optSubGapRange.value = String(o.gapFrames);
+        el.optSubNoPunct.checked = o.removePunctuation;
+        showSubtitleLayout(o.layout);
+    }
+
+    function subtitleCues(lines, timeline, o) {
+        return LazyAlign.makeCues(lines, {
+            layout: o.layout, maxChars: o.maxChars, minSeconds: o.minSeconds, gapFrames: o.gapFrames,
+            removePunctuation: o.removePunctuation, fps: timeline.fps
+        });
+    }
+
+    function updateSubtitlePreview() {
+        if (!subForm.done) return;
+        var o = readSubtitleForm();
+        showSubtitleLayout(o.layout);
+        var cues = subtitleCues(subForm.lines, subForm.timeline, o);
+        el.subPreviewCount.textContent = "· " + cues.length + " subtitle" + (cues.length === 1 ? "" : "s");
+        el.subPreviewList.textContent = "";
+        cues.slice(0, SUB_PREVIEW_ROWS).forEach(function (c) {
+            var row = makeEl("div", "sub-preview-row");
+            row.appendChild(makeEl("span", "sub-preview-time", LazyAlign.formatTimecode(subForm.timeline.offset + c.start, subForm.timeline.fps)));
+            row.appendChild(makeEl("span", "sub-preview-text", c.text));
+            el.subPreviewList.appendChild(row);
+        });
+        if (cues.length > SUB_PREVIEW_ROWS) el.subPreviewList.appendChild(makeEl("div", "sub-preview-more", "and " + (cues.length - SUB_PREVIEW_ROWS) + " more"));
+    }
+
+    /** Resolves to the chosen options, or null for Cancel, ✕ or Esc. */
+    function askSubtitleOptions(lines, timeline) {
+        return new Promise(function (resolve) {
+            subForm.done = resolve;
+            subForm.lines = lines;
+            subForm.timeline = timeline;
+            fillSubtitleForm(subtitleChoices());
+            updateSubtitlePreview();
+            el.subModalOverlay.classList.remove("hidden");
+            try { el.btnSubCreate.focus(); } catch (e) {}
+        });
+    }
+
+    function finishSubtitleForm(create) {
+        if (!subForm.done) return;
+        var done = subForm.done;
+        var choices = create ? readSubtitleForm() : null;
+        subForm.done = null;
+        subForm.lines = null;
+        subForm.timeline = null;
+        el.subModalOverlay.classList.add("hidden");
+        if (choices) {
+            appState.settings.subtitles = choices;
+            saveGeneralSettings();
+        }
+        done(choices);
+    }
+
+    /** A slider and its number box move together; a typed number is put in range once it is left. */
+    function linkSubtitleInputs(number, range) {
+        range.addEventListener("input", function () {
+            number.value = range.value;
+            updateSubtitlePreview();
+        });
+        number.addEventListener("input", function () {
+            if (isFinite(parseFloat(number.value))) range.value = number.value;
+            updateSubtitlePreview();
+        });
+        number.addEventListener("change", function () {
+            if (!subForm.done) return;
+            fillSubtitleForm(readSubtitleForm());
+            updateSubtitlePreview();
+        });
+    }
+
+    linkSubtitleInputs(el.optSubMaxChars, el.optSubMaxCharsRange);
+    linkSubtitleInputs(el.optSubMinSeconds, el.optSubMinSecondsRange);
+    linkSubtitleInputs(el.optSubGap, el.optSubGapRange);
+    [el.optSubSingle, el.optSubDouble, el.optSubWord, el.optSubNoPunct].forEach(function (input) {
+        input.addEventListener("change", updateSubtitlePreview);
+    });
+    el.btnSubCreate.addEventListener("click", function () { finishSubtitleForm(true); });
+    el.btnSubCancel.addEventListener("click", function () { finishSubtitleForm(false); });
+    el.subModalClose.addEventListener("click", function () { finishSubtitleForm(false); });
+    document.addEventListener("keydown", function (e) {
+        if (!subForm.done || dialogDone) return;
+        if (e.key === "Escape") {
+            e.preventDefault();
+            finishSubtitleForm(false);
+        } else if (e.key === "Enter" && document.activeElement !== el.btnSubCancel && document.activeElement !== el.subModalClose) {
+            e.preventDefault();
+            finishSubtitleForm(true);
+        }
+    });
+
     function subtitlesToTimeline() {
         if (scriptBusy) return Promise.resolve();
         var timed = scriptLines().filter(function (l) { return !!leadingTag(l.node); });
@@ -1137,42 +1300,46 @@
             setStatus("No timed lines yet: click 🎙️ Time to Audio first (or start lines with a timecode)", 5000);
             return Promise.resolve();
         }
+        var projectBefore = appState.projectId;
+        var tabBefore = appState.notesData.activeTabId;
         setScriptBusy(true);
-        setStatus("Making subtitles...");
+        setStatus("Reading the timeline...");
 
         return evalScriptP("getTimelineInfo()").then(function (timeline) {
             if (!timeline || !timeline.ok) {
                 setStatus((timeline && timeline.msg) || "Open a sequence or composition first", 4000);
                 return null;
             }
-            var cues = LazyAlign.makeCues(timed.map(function (l) {
+            var lines = timed.map(function (l) {
                 var tag = leadingTag(l.node);
                 var times = tagTimes(tag, timeline);
                 if (!times) return null;
                 var words = LazyAlign.splitWords(l.text);
                 var end = times.end !== undefined ? times.end : times.start + LazyAlign.readingTime(l.text);
                 return { start: times.start, end: times.end, text: l.text, words: wordTimesOf(tag, words, times.start, end) };
-            }).filter(function (c) { return c && c.start >= 0; }));
-            if (!cues.length) {
+            }).filter(function (c) { return c && c.start >= 0; });
+            if (!subtitleCues(lines, timeline, subtitleChoices()).length) {
                 setStatus("None of the timecodes fall on '" + timeline.name + "'", 4000);
                 return null;
             }
-            return currentProjectFolder().then(function (projectFolder) {
-                var dir = path.join(projectFolder || os.homedir(), "LazyKick Subtitles");
-                mkdirp(dir);
-                var base = sanitizeRelativePath(String(timeline.name || "").replace(/[\/\\]/g, "_"), "Subtitles");
-                var srtPath = uniqueFilePath(dir, base + ".srt");
-                // UTF-8 with a BOM, so every app reads Bengali and other scripts right.
-                fs.writeFileSync(srtPath, String.fromCharCode(0xFEFF) + LazyAlign.buildSrt(cues), "utf8");
-                var payload = {
-                    srtPath: normPath(srtPath),
-                    cues: cues.map(function (c) { return { s: Math.round(c.start * 1000) / 1000, e: Math.round(c.end * 1000) / 1000, t: c.text }; })
-                };
-                return evalScriptP("placeSubtitles(" + JSON.stringify(JSON.stringify(payload)) + ")").then(function (r) {
-                    if (r && r.ok) setStatus(r.msg + " · SRT: " + path.basename(srtPath), 6000);
-                    else setStatus(((r && r.msg) || "The host did not answer") + " · SRT saved: " + srtPath, 7000);
-                    return { reply: r, srtPath: srtPath, cues: cues };
-                });
+            setStatus("Choose how the subtitles look");
+            return askSubtitleOptions(lines, timeline).then(function (choices) {
+                if (!choices) {
+                    setStatus("No subtitles made", 2500);
+                    return null;
+                }
+                if (appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore ||
+                    !timed.every(function (l) { return l.node.parentNode === el.noteEditor; })) {
+                    setStatus("The project or note changed; no subtitles were made", 4000);
+                    return null;
+                }
+                var cues = subtitleCues(lines, timeline, choices);
+                if (!cues.length) {
+                    setStatus("Nothing left to show: every word was punctuation", 4000);
+                    return null;
+                }
+                setStatus("Making subtitles...");
+                return placeSubtitleCues(cues, timeline);
             });
         }).catch(function (err) {
             setStatus("Subtitles failed: " + (err && err.message ? err.message : err), 5000);
@@ -1180,6 +1347,27 @@
         }).then(function (result) {
             setScriptBusy(false);
             return result;
+        });
+    }
+
+    /** Writes the SRT next to the project and has the host lay the cues on the open timeline. */
+    function placeSubtitleCues(cues, timeline) {
+        return currentProjectFolder().then(function (projectFolder) {
+            var dir = path.join(projectFolder || os.homedir(), "LazyKick Subtitles");
+            mkdirp(dir);
+            var base = sanitizeRelativePath(String(timeline.name || "").replace(/[\/\\]/g, "_"), "Subtitles");
+            var srtPath = uniqueFilePath(dir, base + ".srt");
+            // UTF-8 with a BOM, so every app reads Bengali and other scripts right.
+            fs.writeFileSync(srtPath, String.fromCharCode(0xFEFF) + LazyAlign.buildSrt(cues), "utf8");
+            var payload = {
+                srtPath: normPath(srtPath),
+                cues: cues.map(function (c) { return { s: Math.round(c.start * 1000) / 1000, e: Math.round(c.end * 1000) / 1000, t: c.text }; })
+            };
+            return evalScriptP("placeSubtitles(" + JSON.stringify(JSON.stringify(payload)) + ")").then(function (r) {
+                if (r && r.ok) setStatus(r.msg + " · SRT: " + path.basename(srtPath), 6000);
+                else setStatus(((r && r.msg) || "The host did not answer") + " · SRT saved: " + srtPath, 7000);
+                return { reply: r, srtPath: srtPath, cues: cues };
+            });
         });
     }
 

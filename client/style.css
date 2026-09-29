@@ -977,6 +977,144 @@ input:checked + .slider:before { transform: translateX(12px); }
     gap: 6px;
 }
 
+/* ================= CREATE SUBTITLES ================= */
+.sub-box { max-width: 400px; max-height: 100%; }
+.sub-box .modal-body { overflow-y: auto; }
+
+.sub-layouts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+}
+
+.form-group .sub-layout {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.sub-layout input { margin: 0; cursor: pointer; }
+
+.sub-help {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    line-height: 13px;
+    margin-left: 3px;
+    border-radius: 50%;
+    background: #55555c;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    text-align: center;
+    cursor: help;
+}
+
+.sub-slider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sub-slider input[type="range"] {
+    -webkit-appearance: none;
+    flex: 1;
+    min-width: 60px;
+    height: 16px;
+    background: transparent;
+    cursor: pointer;
+}
+.sub-slider input[type="range"]::-webkit-slider-runnable-track {
+    height: 2px;
+    background: #55555c;
+    border-radius: 1px;
+}
+.sub-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 11px;
+    height: 11px;
+    margin-top: -4.5px;
+    border-radius: 50%;
+    background: #1e1e1e;
+    border: 1.5px solid #d0d0d6;
+}
+.sub-slider input[type="range"]:focus { outline: none; }
+.sub-slider input[type="range"]:focus::-webkit-slider-thumb { border-color: var(--accent-cyan); }
+
+.sub-slider input[type="number"] {
+    width: 52px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-primary);
+    padding: 4px 6px;
+    font-size: 11.5px;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+}
+.sub-slider input[type="number"]:focus { border-color: var(--accent-blue); }
+
+.sub-unit {
+    width: 58px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.sub-row.is-off { opacity: 0.4; }
+.sub-row.is-off input { cursor: default; }
+
+.sub-preview {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 6px 8px;
+}
+
+.sub-preview-head {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+}
+.sub-preview-head span { text-transform: none; letter-spacing: 0; }
+
+.sub-preview-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 118px;   /* three two-line subtitles: the dialog keeps its size between layouts */
+}
+
+.sub-preview-row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.sub-preview-time {
+    flex: none;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 10px;
+    color: var(--accent-cyan);
+}
+
+.sub-preview-text {
+    font-size: 11.5px;
+    line-height: 1.35;
+    color: var(--text-primary);
+    white-space: pre-line;
+    word-break: break-word;
+}
+
+.sub-preview-more {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
 /* ================= IN-PANEL DIALOG ================= */
 /* CEP shows window.alert/confirm as white system windows; this one matches the panel. */
 .dialog-overlay { z-index: 200; }

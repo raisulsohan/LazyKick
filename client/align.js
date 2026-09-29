@@ -513,15 +513,30 @@
         return Math.max(1.2, lineWeight(text) / 15 + 0.3);
     }
 
-    /** One line, or two at the space nearest the middle when it is longer than `max`. */
+    /**
+     * One line, or two when it is longer than `max`, split at a space that
+     * keeps both lines within `max` (any space when none does): the one
+     * nearest the middle, though a sentence end or a comma a little further
+     * away reads better.
+     */
     function wrapSubtitle(text, max) {
         var s = String(text || "").replace(/\s+/g, " ").replace(/^ | $/g, "");
         max = max || 42;
         if (s.length <= max) return s;
         var mid = Math.floor(s.length / 2);
         var bestAt = -1;
+        var bestFits = false;
+        var bestScore = 0;
         for (var i = 0; i < s.length; i++) {
-            if (s.charAt(i) === " " && (bestAt < 0 || Math.abs(i - mid) < Math.abs(bestAt - mid))) bestAt = i;
+            if (s.charAt(i) !== " ") continue;
+            var fits = i <= max && s.length - i - 1 <= max;
+            var before = s.substr(0, i);
+            var score = Math.abs(i - mid) - (SENTENCE_END.test(before) ? 0.3 : (PHRASE_END.test(before) ? 0.2 : 0)) * s.length;
+            if (bestAt < 0 || (fits && !bestFits) || (fits === bestFits && score < bestScore)) {
+                bestAt = i;
+                bestFits = fits;
+                bestScore = score;
+            }
         }
         return bestAt < 0 ? s : s.substr(0, bestAt) + "\n" + s.substr(bestAt + 1);
     }
@@ -701,30 +716,80 @@
     // Subtitle cues
     // ============================================================
 
-    var CUE_CHARS = 84;      // two subtitle lines of 42
     var CUE_SECONDS = 6.5;   // longer than this is hard to read along
+
+    // The choices of Premiere Pro's Create captions dialog, with its defaults:
+    // layout "single" (one line), "double" (up to two lines) or "word" (one
+    // word at a time); maxChars per line; minSeconds a subtitle stays up;
+    // gapFrames between two subtitles; removePunctuation.
+    var CUE_DEFAULTS = { layout: "double", maxChars: 42, minSeconds: 3, gapFrames: 0, removePunctuation: false };
+    var CUE_LIMITS = { maxChars: [10, 80], minSeconds: [0.5, 10], gapFrames: [0, 30] };
 
     var SENTENCE_END = /[.!?\u0964\u2026]["'\u201D\u2019)\]]*$/;
     var PHRASE_END = /[,;:\u2013\u2014]["'\u201D\u2019)\]]*$/;
 
+    // What Remove punctuation takes off the ends of words. Inside a word
+    // (don't, 3.5, well-known) it stays, and so do symbols such as $ % #.
+    var PUNCTUATION = "[.,!?;:\"'()\\[\\]{}\\u00A1\\u00AB\\u00BB\\u00BF\\u2010-\\u2015\\u2018-\\u201F\\u2026" +
+                      "\\u0964\\u0965\\u060C\\u061B\\u061F\\u3001\\u3002\\uFF01\\uFF0C\\uFF1A\\uFF1B\\uFF1F-]+";
+    var EDGE_PUNCTUATION = new RegExp("^" + PUNCTUATION + "|" + PUNCTUATION + "$", "g");
+
+    /** Subtitle options with every value in range; missing or unreadable ones take the defaults. */
+    function cueOptions(opts) {
+        var o = opts || {};
+        function num(key, decimals) {
+            var v = typeof o[key] === "number" ? o[key] : parseFloat(o[key]);
+            if (!isFinite(v)) return CUE_DEFAULTS[key];
+            var scale = Math.pow(10, decimals);
+            return Math.min(CUE_LIMITS[key][1], Math.max(CUE_LIMITS[key][0], Math.round(v * scale) / scale));
+        }
+        return {
+            layout: o.layout === "single" || o.layout === "word" ? o.layout : "double",
+            maxChars: num("maxChars", 0),
+            minSeconds: num("minSeconds", 1),
+            gapFrames: num("gapFrames", 0),
+            removePunctuation: o.removePunctuation === true
+        };
+    }
+
+    function stripPunctuation(text) {
+        return splitWords(text).map(function (w) { return w.replace(EDGE_PUNCTUATION, ""); })
+            .filter(function (w) { return w.length > 0; }).join(" ");
+    }
+
     /**
-     * Cuts a line's words into subtitle-sized pieces [{ from, to }]. A piece
-     * that must end early ends at a sentence end when one leaves it at least
-     * a third full, else at a comma, else at the last word that fits.
+     * Cuts a line's words into subtitle-sized pieces [{ from, to }]: each
+     * fits `maxLines` lines (default one) of `maxChars` and `maxSeconds`. A
+     * piece that must end early ends at a sentence end when one leaves it at
+     * least a third full, else at a comma, else at the last word that fits.
      */
-    function chunkWords(words, times, maxChars, maxSeconds) {
+    function chunkWords(words, times, maxChars, maxSeconds, maxLines) {
+        var lines = maxLines || 1;
         var chunks = [];
         var from = 0;
         while (from < words.length) {
             var len = 0;
+            var row = 0;
+            var rowLen = 0;
             var to = from;
             var sentence = -1;
             var phrase = -1;
             var lenAt = {};
             for (var i = from; i < words.length; i++) {
-                var add = (i > from ? 1 : 0) + words[i].length;
-                if (i > from && (len + add > maxChars || (times && times[i] - times[from] > maxSeconds))) break;
-                len += add;
+                // Lines filled one after another take the fewest lines there are.
+                var nextRow = row;
+                var nextRowLen = rowLen + 1 + words[i].length;
+                if (i === from) {
+                    nextRow = 1;
+                    nextRowLen = words[i].length;
+                } else if (nextRowLen > maxChars) {
+                    nextRow = row + 1;
+                    nextRowLen = words[i].length;
+                }
+                if (i > from && (nextRow > lines || (times && times[i] - times[from] > maxSeconds))) break;
+                row = nextRow;
+                rowLen = nextRowLen;
+                len += (i > from ? 1 : 0) + words[i].length;
                 lenAt[i] = len;
                 to = i;
                 if (SENTENCE_END.test(words[i])) sentence = i;
@@ -732,8 +797,9 @@
             }
             var end = to;
             if (to < words.length - 1) {
-                if (sentence >= from && sentence < to && lenAt[sentence] >= maxChars / 3) end = sentence;
-                else if (phrase >= from && phrase < to && lenAt[phrase] >= maxChars / 3) end = phrase;
+                var third = maxChars * lines / 3;
+                if (sentence >= from && sentence < to && lenAt[sentence] >= third) end = sentence;
+                else if (phrase >= from && phrase < to && lenAt[phrase] >= third) end = phrase;
             }
             chunks.push({ from: from, to: end });
             from = end + 1;
@@ -741,37 +807,77 @@
         return chunks;
     }
 
+    /** One piece per word; a lone mark ("-", "...") stays with the word before it, or after it at the start. */
+    function wordChunks(words) {
+        var chunks = [];
+        for (var i = 0; i < words.length; i++) {
+            if (!chunks.length || (isSpoken(words[i]) && isSpoken(words.slice(chunks[chunks.length - 1].from, i).join("")))) {
+                chunks.push({ from: i, to: i });
+            } else {
+                chunks[chunks.length - 1].to = i;
+            }
+        }
+        return chunks;
+    }
+
     /**
      * Subtitle cues from timed lines [{ start, end?, text, words? }]
-     * (seconds; `words`: absolute start time of each word of the text). Each
-     * line ends where it was measured to end but never runs into the next,
-     * and one without a measured end stays up for its reading time. A line
-     * too long for one subtitle (a pasted paragraph) is cut into pieces that
-     * start when their first word is spoken.
+     * (seconds; `words`: absolute start time of each word of the text), laid
+     * out by `opts` (cueOptions, plus the timeline's `fps` for the gap).
+     *
+     * A line ends where it was measured to end, or after its reading time
+     * when nothing was measured, and is held up for the minimum duration,
+     * but never runs into the next line less the gap. A line too long for
+     * one subtitle (a pasted paragraph) is cut into pieces that start when
+     * their first word is spoken; "word" makes each word a subtitle, from
+     * when it is said until the next one is.
      */
-    function makeCues(lines) {
+    function makeCues(lines, opts) {
+        var o = cueOptions(opts);
+        var byWord = o.layout === "word";
+        var fps = opts && opts.fps > 0 ? opts.fps : 25;
+        var gap = byWord ? 0 : o.gapFrames / fps;
+        var shortest = byWord ? 0.05 : 0.3;   // no piece is shorter than this
         var sorted = lines.filter(function (l) { return l && typeof l.start === "number" && isFinite(l.start) && isSpoken(l.text); })
             .sort(function (a, b) { return a.start - b.start; });
         var cues = [];
         for (var i = 0; i < sorted.length; i++) {
             var l = sorted[i];
             var next = sorted[i + 1];
-            var end = (typeof l.end === "number" && l.end > l.start + 0.1) ? l.end : l.start + readingTime(l.text);
-            if (next) end = Math.min(end, next.start - 0.04);
-            if (next && end - l.start < 0.5) end = Math.max(end, Math.min(l.start + 0.5, next.start));
-            if (end <= l.start) continue;
             var start = Math.max(0, l.start);
+            var natural = (typeof l.end === "number" && l.end > l.start + 0.1) ? l.end : l.start + readingTime(l.text);
+            var limit = next ? next.start - gap : Infinity;
+            var end = Math.min(natural, limit);
+            if (next && end - start < 0.5) end = Math.max(end, Math.min(start + 0.5, next.start));
+            if (end <= start) continue;
             var words = splitWords(l.text);
-            if (l.text.replace(/\s+/g, " ").length <= CUE_CHARS && end - start <= CUE_SECONDS) {
-                cues.push({ start: start, end: end, text: wrapSubtitle(l.text) });
-                continue;
-            }
             var times = (l.words && l.words.length === words.length) ? l.words : proportionalWordTimes(words, start, end);
-            var chunks = chunkWords(words, times, CUE_CHARS, CUE_SECONDS);
+            var chunks = byWord ? wordChunks(words) : chunkWords(words, times, o.maxChars, CUE_SECONDS, o.layout === "single" ? 1 : 2);
+            // Each piece starts on its first word, in order and inside the line;
+            // one that would be too short is shown with the piece before it.
+            var pieces = [];
             for (var c = 0; c < chunks.length; c++) {
-                var cs = Math.max(start, Math.min(times[chunks[c].from], end - 0.2));
-                var ce = c < chunks.length - 1 ? Math.max(cs + 0.3, times[chunks[c + 1].from] - 0.04) : end;
-                cues.push({ start: cs, end: Math.min(ce, end), text: wrapSubtitle(words.slice(chunks[c].from, chunks[c].to + 1).join(" ")) });
+                var text = words.slice(chunks[c].from, chunks[c].to + 1).join(" ");
+                var prev = pieces[pieces.length - 1];
+                var cs = prev ? Math.max(times[chunks[c].from], prev.start + shortest) : start;
+                if (prev && cs > end - shortest) {
+                    prev.text += " " + text;
+                    continue;
+                }
+                pieces.push({ start: cs, text: text });
+            }
+            for (var p = 0; p < pieces.length; p++) {
+                var ce;
+                if (p < pieces.length - 1) {
+                    ce = Math.max(pieces[p + 1].start - gap, pieces[p].start + shortest);
+                } else {
+                    ce = end;
+                    if (!byWord) ce = Math.max(ce, Math.min(pieces[p].start + o.minSeconds, limit));
+                }
+                var shown = o.removePunctuation ? stripPunctuation(pieces[p].text) : pieces[p].text;
+                if (!shown) continue;
+                if (o.layout === "double") shown = wrapSubtitle(shown, o.maxChars);
+                cues.push({ start: pieces[p].start, end: ce, text: shown });
             }
         }
         return cues;
@@ -807,6 +913,9 @@
         proportionalWordTimes: proportionalWordTimes,
         followAt: followAt,
         chunkWords: chunkWords,
+        cueOptions: cueOptions,
+        cueLimits: CUE_LIMITS,
+        stripPunctuation: stripPunctuation,
         makeCues: makeCues,
         srtTime: srtTime,
         buildSrt: buildSrt

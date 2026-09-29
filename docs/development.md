@@ -1,7 +1,7 @@
 # Building from source
 
 How LazyKick is put together, the rules its code keeps, how it is tested
-and how a release is built. *Written for LazyKick 1.5.2.*
+and how a release is built. *Written for LazyKick 1.6.0.*
 
 **Contents**
 
@@ -229,9 +229,23 @@ works](script-timing.md) explains the maths in plain words.
 
 ### Subtitles
 
-`makeCues` turns timed lines into cues, splitting lines over 84 characters or
-6.5 seconds (`chunkWords`) and wrapping at 42. `buildSrt` writes the SRT
-(UTF-8 with a BOM, CRLF), and the host places it.
+💬 first opens the *Create subtitles* dialog (`askSubtitleOptions` in
+`main.js`), with Premiere Pro's choices: layout `single`, `double` or
+`word`, `maxChars` per line, `minSeconds`, `gapFrames` and
+`removePunctuation`. `cueOptions` in `align.js` holds the defaults and limits
+and brings any value into range; the panel remembers the last choices as
+`subtitles` in `lazykick_settings.json`. The dialog's preview runs the same
+`makeCues` as the real thing.
+
+`makeCues(lines, options)` turns timed lines into cues. `chunkWords` cuts a
+line into pieces that fit one or two lines of `maxChars` (filled one after
+another) and 6.5 seconds; `wordChunks` makes one piece per word for `word`,
+keeping a lone mark with its word. Each piece starts on its first word; the
+last piece of a line is held for `minSeconds`, never past the next line's
+start less `gapFrames`. `wrapSubtitle` splits a Double Line cue at the space
+nearest the middle that keeps both lines within the maximum, preferring a
+sentence end or comma nearby. `buildSrt` writes the SRT (UTF-8 with a BOM,
+CRLF), and the host places it.
 
 ### Follow
 
@@ -278,7 +292,9 @@ Windows only, as two steps use Windows Script Host. In order:
    project-changed guard.
 3. **`test-align.mjs`**: the WAV reader on every PCM and float layout (split
    at any byte), the speech finder, Bengali and English spoken lengths,
-   timecodes, SRT, cues, the follower, and timing on real speech from
+   timecodes, SRT, cues in every layout (single line, double line, single
+   word, line length, minimum duration, gap, punctuation), the follower, and
+   timing on real speech from
    `tools/fixtures/tts-voiceover.json`: three scripts read by Windows' voices
    with natural pauses, rushed pauses and a music bed. Every line must start
    within 0.2 s; in the *paragraphs* fixture every sentence within 0.15 s.
@@ -289,8 +305,10 @@ Windows only, as two steps use Windows Script Host. In order:
    (with CEP's `module` on the page), a fake host and fake PowerShell, on
    real temp files. Notes, tabs, project switches, unsaved-to-saved moves,
    paste duplicates and names, watch-bin syncs, races and edits, Time to
-   Audio and Subtitles on both hosts, document paste, text size, Follow, the
-   in-panel dialog, and the CEP 9 syntax guard.
+   Audio and Subtitles on both hosts, the Create subtitles dialog (defaults,
+   preview, greyed-out rows, Enter, Cancel, Esc, remembered choices, a project
+   switch while it is open), document paste, text size, Follow, the in-panel
+   dialog, and the CEP 9 syntax guard.
 
 `tools/make-tts-fixture.mjs` rebuilds the speech fixture with Windows'
 System.Speech voices: each sentence is spoken on its own and joined with

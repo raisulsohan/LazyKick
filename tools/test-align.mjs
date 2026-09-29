@@ -306,16 +306,23 @@ section("timecodes and subtitles", () => {
   eq("long subtitle splits at the middle space", A.wrapSubtitle("This line is far too long to fit on a single subtitle row"),
     "This line is far too long to\nfit on a single subtitle row");
 
-  const cues = A.makeCues([
+  const threeLines = [
     { start: 5, end: 7.5, text: "Second" },
     { start: 1, end: 5.2, text: "First runs into the next" },
     { start: 7.5, text: "Third, no measured end" },
     { start: 20, text: "-----" },
-  ]);
+  ];
+  const cues = A.makeCues(threeLines, { gapFrames: 1, fps: 25, minSeconds: 0.5 });
   eq("cues: sorted, dividers dropped", cues.map((c) => c.text.split(" ")[0]).join(","), "First,Second,Third,");
-  near("cues: end pulled back before the next start", cues[0].end, 4.96, 1e-9);
+  near("cues: end pulled back a frame before the next start", cues[0].end, 4.96, 1e-9);
   near("cues: measured end kept when it fits", cues[1].end, 7.46, 1e-9);
   near("cues: no end, reading time", cues[2].end, 7.5 + A.readingTime("Third, no measured end"), 1e-9);
+  const held = A.makeCues(threeLines);
+  eq("cues: Premiere's defaults", JSON.stringify(A.cueOptions()),
+    '{"layout":"double","maxChars":42,"minSeconds":3,"gapFrames":0,"removePunctuation":false}');
+  near("cues: no gap by default, up to the next start", held[0].end, 5, 1e-9);
+  near("cues: the hold never runs into the next line", held[1].end, 7.5, 1e-9);
+  near("cues: a short last line held for the minimum duration", held[2].end, 10.5, 1e-9);
   // A pasted paragraph: cut at sentence ends, each piece starting on its first word.
   const para = "In 1920, a country decided to delete a problem. Not reduce it. Not manage it. Delete it. " +
     "The United States looked at alcohol, at the drunkenness and the broken homes and the crime that came with it, " +
@@ -324,7 +331,7 @@ section("timecodes and subtitles", () => {
   const paraTimes = paraWords.map((w, i) => 10 + i * 0.3);
   const long = A.makeCues([{ start: 10, end: 10 + paraWords.length * 0.3, text: para, words: paraTimes }]);
   check("paragraph: several cues", long.length >= 3, long.length);
-  check("paragraph: each fits two subtitle lines", long.every((c) => c.text.split("\n").length <= 2 && c.text.replace("\n", " ").length <= 84), long.map((c) => c.text.length).join(","));
+  check("paragraph: each fits two subtitle lines of 42", long.every((c) => c.text.split("\n").length <= 2 && c.text.split("\n").every((row) => row.length <= 42)), long.map((c) => c.text.length).join(","));
   eq("paragraph: nothing lost", long.map((c) => c.text.replace("\n", " ")).join(" "), para);
   check("paragraph: cues in order, never overlapping", long.every((c, i) => c.end > c.start && (i === 0 || c.start >= long[i - 1].end)));
   eq("paragraph: the first cue ends at a sentence end", /[.]$/.test(long[0].text), true);
@@ -341,6 +348,44 @@ section("timecodes and subtitles", () => {
   check("a slow short line is cut by time too", slow.length >= 2, slow.length);
   const chunks = A.chunkWords("aaaa bbbb, cccc dddd eeee".split(" "), null, 14, 99);
   eq("chunks prefer a comma when one is a third full", JSON.stringify(chunks), "[{\"from\":0,\"to\":1},{\"from\":2,\"to\":4}]");
+  const five = "aaaa bbbb cccc dddd eeee".split(" ");
+  eq("chunks: one line of 9", JSON.stringify(A.chunkWords(five, null, 9, 99)), '[{"from":0,"to":1},{"from":2,"to":3},{"from":4,"to":4}]');
+  eq("chunks: two lines of 9", JSON.stringify(A.chunkWords(five, null, 9, 99, 2)), '[{"from":0,"to":3},{"from":4,"to":4}]');
+
+  // Premiere Pro's layouts: single line, double line, single word.
+  const opts = A.cueOptions({ layout: "x", maxChars: "200", minSeconds: "2.34", gapFrames: -3, removePunctuation: "yes" });
+  eq("options: out-of-range values brought into range", JSON.stringify(opts),
+    '{"layout":"double","maxChars":80,"minSeconds":2.3,"gapFrames":0,"removePunctuation":false}');
+  eq("options: too short a line length", A.cueOptions({ maxChars: 3 }).maxChars, 10);
+  const rowsOk = (list, max) => list.every((c) => c.text.split("\n").every((row) => row.length <= max));
+  const single = A.makeCues([{ start: 10, end: 10 + paraWords.length * 0.3, text: para, words: paraTimes }], { layout: "single" });
+  check("single line: one line each", single.every((c) => !c.text.includes("\n")), single.map((c) => c.text).join(" | "));
+  check("single line: each within 42", rowsOk(single, 42), single.map((c) => c.text.length).join(","));
+  check("single line: more subtitles than double", single.length > long.length, `${single.length} vs ${long.length}`);
+  eq("single line: nothing lost", single.map((c) => c.text).join(" "), para);
+  check("single line: in order, never overlapping", single.every((c, i) => c.end > c.start && (i === 0 || c.start >= single[i - 1].end)));
+  const narrow = A.makeCues([{ start: 10, end: 10 + paraWords.length * 0.3, text: para, words: paraTimes }], { layout: "double", maxChars: 24 });
+  check("double line at 24: two lines, each within 24", narrow.every((c) => c.text.split("\n").length <= 2) && rowsOk(narrow, 24), narrow.map((c) => JSON.stringify(c.text)).join(" "));
+  eq("double line at 24: nothing lost", narrow.map((c) => c.text.replace("\n", " ")).join(" "), para);
+  const words = A.makeCues([{ start: 10, end: 10 + paraWords.length * 0.3, text: para, words: paraTimes }, { start: 40, end: 41, text: "Wait — what?" }],
+    { layout: "word", minSeconds: 5, gapFrames: 10, fps: 25 });
+  eq("single word: one subtitle per word", words.length, paraWords.length + 2);
+  eq("single word: a lone dash stays with the word before", words[paraWords.length].text, "Wait —");
+  check("single word: each on screen from its word to the next", words.slice(0, paraWords.length).every((c, i) =>
+    Math.abs(c.start - paraTimes[i]) < 1e-9 && Math.abs(c.end - (i < paraWords.length - 1 ? paraTimes[i + 1] : 10 + paraWords.length * 0.3)) < 1e-9));
+  near("single word: no minimum duration and no gap", words[words.length - 1].end, 41, 1e-9);
+  const bare = A.makeCues([{ start: 0, end: 4, text: "Hello, world! Don't stop: 3.5% (really)." }, { start: 5, end: 6, text: "আমি ভালো আছি।" }],
+    { removePunctuation: true });
+  eq("remove punctuation: word ends only", bare[0].text, "Hello world Don't stop 3.5% really");
+  eq("remove punctuation: the Bengali danda too", bare[1].text, "আমি ভালো আছি");
+  const bareWords = A.makeCues([{ start: 0, end: 2, text: "Yes — no!" }], { layout: "word", removePunctuation: true });
+  eq("remove punctuation, single word: no empty subtitles", bareWords.map((c) => c.text).join("|"), "Yes|no");
+  const gapped = A.makeCues([{ start: 1, end: 3, text: "One line." }, { start: 3, end: 4, text: "Right after." }], { gapFrames: 5, fps: 25 });
+  near("gap: five frames before the next subtitle", gapped[0].end, 2.8, 1e-9);
+  near("gap: the minimum duration still stops before it", A.makeCues([{ start: 1, end: 1.5, text: "Short." }, { start: 3, end: 4, text: "Next." }], { gapFrames: 5, fps: 25 })[0].end, 2.8, 1e-9);
+  eq("wrap: at a sentence end near the middle", A.wrapSubtitle("Delete it. The United States looked at alcohol,", 42), "Delete it.\nThe United States looked at alcohol,");
+  const lopsided = A.wrapSubtitle("It is done. And then everybody went back home after the long hot day", 42);
+  check("wrap: both lines always within the maximum when they can be", lopsided.split("\n").every((row) => row.length <= 42), JSON.stringify(lopsided));
 
   eq("srt time", A.srtTime(3725.0456), "01:02:05,046");
   eq("srt", A.buildSrt([{ start: 1, end: 2.5, text: "One" }, { start: 3, end: 4, text: "Two\nlines" }]),

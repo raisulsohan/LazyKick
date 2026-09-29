@@ -2,6 +2,23 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.6.0
+
+### 💬 Choose how the subtitles look
+- **💬 Subtitles now opens a *Create subtitles* window first**, with the choices of Premiere Pro's *Create captions*:
+  - **Layout**: **Single Line**, **Double Line** (default) or **Single Word**. Single Word makes every word a subtitle, on screen from when it is said until the next word is; a lone dash or ellipsis stays with its word. The three settings below do not apply to it and are greyed out.
+  - **Maximum length in characters** per line, 10 to 80 (default 42). Lines are filled one after another, so a Double Line subtitle holds what fits in two lines of that length.
+  - **Minimum duration in seconds**, 0.5 to 10 (default 3.0): a short subtitle stays up that long, but never into the next one.
+  - **Gap between subtitles (frames)**, 0 to 30 (default 0).
+  - **Remove punctuation**: full stops, commas, question and exclamation marks, colons, quotes, brackets, dashes, ellipses and the Bengali dari (।) come off the ends of words; inside a word they stay (*don't*, *3.5*, *well-known*), and symbols such as `$`, `%` and `#` are kept.
+- Each setting has a slider and a number box; a typed number is brought into range when you leave the box.
+- A **preview** shows the number of subtitles and the first three with their timecodes, worked out by the same code that makes them, and follows every change.
+- The choices are remembered in `lazykick_settings.json`. Enter creates, Esc or Cancel makes nothing. If the project or note changes while the window is open, nothing is placed.
+
+### Changed
+- The defaults follow Premiere Pro: a short subtitle is now held for 3 seconds when nothing follows it straight away (it used to disappear the moment the line was said), and subtitles follow each other with no gap (it used to be 0.04 s).
+- A two-line subtitle breaks at a sentence end or comma near the middle when there is one, and both lines always stay within the maximum length (before, a split at the middle could leave one line over 42).
+
 ## 1.5.2
 
 - 🎙️ Time to Audio on a note with nothing to time now says *Write or paste the script first: lines or whole paragraphs, in the order they are spoken*. It used to ask for one line per subtitle, which has not been needed since whole paragraphs are timed sentence by sentence.
