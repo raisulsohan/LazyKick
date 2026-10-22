@@ -287,8 +287,14 @@ sentence, several paragraphs) and right-click:
   through: they are no longer timed or put in subtitles, and every timecode
   after them moves earlier to match.
 - **💾 Save this audio as WAV** saves the selected words' audio as a WAV
-  file, with its word-by-word SRT, and changes nothing on the timeline. A
-  window then shows the file; **Show in folder** opens its folder.
+  file, with its word-by-word SRT, and changes nothing on the timeline.
+  First a box shows the file name, for example `Rough Cut 00-01-12-04`:
+  press Enter to keep it, or type another name and click **Save**. The WAV
+  and the SRT both get that name; characters Windows does not allow become
+  `_`, and a name that is already there gets `_2`. **Cancel** saves nothing.
+  Clear **Ask for a name every time** in the box (or the same switch in
+  🛠️ Paste & Tools › 💾 Saved Audio) to save at once with the name LazyKick
+  makes. A window then shows the file; **Show in folder** opens its folder.
 
 **The audio that is taken out is saved first.** Before ✂️ Remove from the
 timeline and ✂️ Retakes take anything out, its audio is saved as a WAV file in
@@ -569,6 +575,7 @@ Every setting is remembered across restarts.
 | 🛠️ Paste & Tools | Paste as Guide Layer | On | After Effects: pasted layers are guide layers (shown, never rendered). |
 | 🛠️ Paste & Tools | Shrink large images to fit the comp | Off | After Effects: scales images larger than the composition down to fit. Never enlarges. |
 | 🛠️ Paste & Tools | Save Folder / Bin Name | `Pasted Images` | The folder next to the project **and** the project bin the images go into. `/` makes nested folders; `..` and characters Windows forbids are removed. |
+| 🛠️ Paste & Tools | Ask for a name when saving audio | On | **💾 Save this audio as WAV** first shows a box with the file name to keep or change. Off: it saves at once with the timeline's name and timecode. The box has the same switch. |
 | 📝 Notes | A− / A+ | 14 px | Note text size, 10 to 24 px. |
 | 📝 Notes | 🔠 Titles | On | Time titles and headings and make them subtitles, like spoken lines. Off: leave them out. |
 | 📝 Notes | 👁 Follow | On | Highlight the spoken line and word while the timeline plays. |

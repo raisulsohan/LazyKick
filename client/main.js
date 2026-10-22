@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.11.0";
+    var PANEL_VERSION = "1.12.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -134,6 +134,7 @@
             notesFontSize: DEFAULT_NOTES_FONT_SIZE,
             follow: true,
             timeTitles: true, // 🔠 Titles: headings are timed and subtitled like spoken lines
+            askAudioName: true, // 💾 Save this audio as WAV asks for a file name first
             subtitles: null   // the last Create subtitles choices (LazyAlign.cueOptions fills the gaps)
         },
         recentPastes: [],
@@ -195,6 +196,10 @@
         dialogOverlay:         document.getElementById("dialogOverlay"),
         dialogTitle:           document.getElementById("dialogTitle"),
         dialogMessage:         document.getElementById("dialogMessage"),
+        dialogInput:           document.getElementById("dialogInput"),
+        dialogCheckRow:        document.getElementById("dialogCheckRow"),
+        dialogCheck:           document.getElementById("dialogCheck"),
+        dialogCheckLabel:      document.getElementById("dialogCheckLabel"),
         dialogClose:           document.getElementById("dialogClose"),
         dialogCancel:          document.getElementById("dialogCancel"),
         dialogOk:              document.getElementById("dialogOk"),
@@ -269,6 +274,7 @@
         // Tools Elements
         optGuideLayer:         document.getElementById("optGuideLayer"),
         optAutoFit:            document.getElementById("optAutoFit"),
+        optAskAudioName:       document.getElementById("optAskAudioName"),
         optTargetFolder:       document.getElementById("optTargetFolder"),
         btnOpenPasteFolder:    document.getElementById("btnOpenPasteFolder"),
         recentPastesGallery:   document.getElementById("recentPastesGallery"),
@@ -424,9 +430,13 @@
     /**
      * One dialog at a time; resolves true for OK, false for Cancel, ✕ or Esc.
      * opts: { title, message, ok, cancel (false: no Cancel button),
-     *         danger (a red OK, Cancel focused, for things that cannot be undone) }
+     *         danger (a red OK, Cancel focused, for things that cannot be undone),
+     *         input (a text box holding this text, all of it selected or the first opts.select characters),
+     *         check ({ label, checked }: a switch under it) }
+     * With input, it resolves to { text, checked } for OK and null otherwise.
      */
     function showDialog(opts) {
+        var asking = typeof opts.input === "string";
         var run = dialogQueue.then(function () {
             return new Promise(function (resolve) {
                 el.dialogTitle.textContent = opts.title || "LazyKick";
@@ -435,9 +445,23 @@
                 el.dialogOk.className = opts.danger ? "btn-danger-sm" : "btn-primary-sm";
                 el.dialogCancel.textContent = opts.cancel || "Cancel";
                 el.dialogCancel.style.display = opts.cancel === false ? "none" : "";
-                dialogDone = resolve;
+                el.dialogInput.classList.toggle("hidden", !asking);
+                el.dialogInput.value = asking ? opts.input : "";
+                el.dialogCheckRow.classList.toggle("hidden", !opts.check);
+                el.dialogCheck.checked = !!(opts.check && opts.check.checked);
+                el.dialogCheckLabel.textContent = opts.check ? opts.check.label : "";
+                dialogDone = asking ? function (answer) {
+                    resolve(answer ? { text: String(el.dialogInput.value), checked: !!el.dialogCheck.checked } : null);
+                } : resolve;
                 el.dialogOverlay.classList.remove("hidden");
-                try { (opts.danger ? el.dialogCancel : el.dialogOk).focus(); } catch (e) {}
+                try {
+                    if (asking) {
+                        el.dialogInput.focus();
+                        if (typeof el.dialogInput.setSelectionRange === "function") el.dialogInput.setSelectionRange(0, opts.select === undefined ? opts.input.length : opts.select);
+                    } else {
+                        (opts.danger ? el.dialogCancel : el.dialogOk).focus();
+                    }
+                } catch (e) {}
             });
         });
         dialogQueue = run.then(function () {}, function () {});
@@ -534,10 +558,12 @@
         }
         if (s.follow !== undefined) appState.settings.follow = !!s.follow;
         if (s.timeTitles !== undefined) appState.settings.timeTitles = !!s.timeTitles;
+        if (s.askAudioName !== undefined) appState.settings.askAudioName = !!s.askAudioName;
         if (s.subtitles && typeof s.subtitles === "object") appState.settings.subtitles = s.subtitles;
 
         el.optGuideLayer.checked = appState.settings.guideLayer;
         el.optAutoFit.checked = appState.settings.autoFit;
+        el.optAskAudioName.checked = appState.settings.askAudioName;
         el.optTargetFolder.value = appState.settings.targetFolder;
         el.autoSyncToggle.checked = appState.autoSync;
         applyNotesFontSize();
@@ -555,6 +581,7 @@
             notesFontSize: appState.settings.notesFontSize,
             follow: appState.settings.follow,
             timeTitles: appState.settings.timeTitles,
+            askAudioName: appState.settings.askAudioName,
             subtitles: appState.settings.subtitles
         });
     }
@@ -2601,12 +2628,14 @@
 
     /**
      * Saves the audio of `stretches` ([{ s, e }]) as WAV files in LazyKick
-     * Cuts next to the project, named by the timeline, `label` and the start
-     * timecode. The audio is what 🎙️ Time to Audio hears: only the selected
-     * clips' or layers' when some are selected. Resolves to
-     * { ok, files: [path], dir, msg }; ok only when every stretch was saved.
+     * Cuts next to the project, each with a word-by-word SRT of the `words`
+     * said in it, named `name` or else by the timeline, `label` and the start
+     * timecode (never over an earlier file). The audio is what 🎙️ Time to
+     * Audio hears: only the selected clips' or layers' when some are
+     * selected. Resolves to { ok, files: [path], subtitles: [path], dir, msg };
+     * ok only when every stretch was saved.
      */
-    function saveStretchAudio(timeline, stretches, label, words) {
+    function saveStretchAudio(timeline, stretches, label, words, name) {
         var stamp = Date.now();
         var punctuationOff = subtitleChoices().removePunctuation;
         var items = stretches.map(function (r, i) {
@@ -2621,12 +2650,10 @@
                 var failed = ((r && r.failures) || []).slice();
                 if (!r) failed.push("The host did not answer");
                 else if (!r.ok && !rendered.length && !failed.length) failed.push(r.msg || "Nothing was saved");
-                var base = sanitizeRelativePath(String(timeline.name || "").replace(/[\/\\]/g, "_"), "Timeline").replace(/\//g, " ");
                 rendered.forEach(function (f) {
-                    var tc = LazyAlign.formatTimecode(timeline.offset + f.s, timeline.fps).replace(/[:;]/g, "-");
                     try {
                         mkdirp(dir);
-                        var stem = uniqueStem(dir, base + (label ? " " + label : "") + " " + tc);
+                        var stem = uniqueStem(dir, name || stretchFileName(timeline, f.s, label));
                         writeStretchWav(f.path, stem + ".wav", f.s, f.e);
                         saved.push(stem + ".wav");
                         // Word by word, timed from the start of the saved audio.
@@ -2661,11 +2688,52 @@
         }));
     }
 
-    /** 💾 Save this audio as WAV: the picked words' stretch and its word-by-word SRT, with nothing on the timeline changed. */
+    /** A file name as typed: no folder, no characters Windows refuses, no .wav or .srt at the end; "" when nothing is left. */
+    function cleanFileName(text) {
+        return String(text || "").replace(/[\/\\<>:"|?*\x00-\x1f]/g, "_").trim()
+            .replace(/\.(wav|srt)$/i, "").replace(/[\s.]+$/, "").trim();
+    }
+
+    /** The name a saved stretch gets by itself: the timeline's name, a label and the start timecode. */
+    function stretchFileName(timeline, start, label) {
+        var base = sanitizeRelativePath(String(timeline.name || "").replace(/[\/\\]/g, "_"), "Timeline").replace(/\//g, " ");
+        var tc = LazyAlign.formatTimecode(timeline.offset + start, timeline.fps).replace(/[:;]/g, "-");
+        return base + (label ? " " + label : "") + " " + tc;
+    }
+
+    /**
+     * 💾 Save this audio as WAV: the picked words' stretch and its
+     * word-by-word SRT, with nothing on the timeline changed. With "Ask for
+     * a name when saving audio" on, a box offers the name first.
+     */
     function saveAudioOf(timeline, span) {
+        if (!appState.settings.askAudioName) return saveAudioNamed(timeline, span, "");
+        var start = Math.round(span.s * timeline.fps) / timeline.fps;   // the whole frame the host saves from
+        var suggested = stretchFileName(timeline, start, "");
+        return showDialog({
+            title: "Save the audio as",
+            message: "A WAV file and its word-by-word SRT, in '" + CUTS_FOLDER + "' next to the project. Change the name, or keep it.",
+            input: suggested,
+            check: { label: "Ask for a name every time", checked: true },
+            ok: "Save"
+        }).then(function (answer) {
+            if (!answer) {
+                setStatus("Nothing was saved", 2500);
+                return null;
+            }
+            if (!answer.checked) {
+                appState.settings.askAudioName = false;
+                el.optAskAudioName.checked = false;
+                saveGeneralSettings();
+            }
+            return saveAudioNamed(timeline, span, cleanFileName(answer.text) || suggested);
+        });
+    }
+
+    function saveAudioNamed(timeline, span, name) {
         setScriptBusy(true);
         setStatus("Saving the audio...");
-        return saveStretchAudio(timeline, [span], "", noteWords(timeline)).catch(function (err) {
+        return saveStretchAudio(timeline, [span], "", noteWords(timeline), name).catch(function (err) {
             return { ok: false, files: [], subtitles: [], msg: err && err.message ? err.message : String(err) };
         }).then(function (saved) {
             setScriptBusy(false);
@@ -3222,6 +3290,10 @@
     });
     el.optAutoFit.addEventListener("change", function () {
         appState.settings.autoFit = el.optAutoFit.checked;
+        saveGeneralSettings();
+    });
+    el.optAskAudioName.addEventListener("change", function () {
+        appState.settings.askAudioName = el.optAskAudioName.checked;
         saveGeneralSettings();
     });
     el.optTargetFolder.addEventListener("input", function () {

@@ -593,6 +593,21 @@ async function answerDialog(ok, label) {
   await settle();
   return shown;
 }
+/**
+ * Waits for the "Save the audio as" box, types \`text\` (if given), sets its
+ * "Ask for a name every time" switch to \`ask\`, then clicks Save (ok) or
+ * Cancel. Returns what it showed first: { title, message, name, ask, ok }.
+ */
+async function answerNameBox(label, { text, ask = true, ok = true } = {}) {
+  await waitFor(() => dialog().open && $("dialogTitle").textContent === "Save the audio as", `name box: ${label}`);
+  const shown = { ...dialog(), name: $("dialogInput").value, ask: $("dialogCheck").checked,
+    inputShown: !$("dialogInput").classList.contains("hidden"), checkShown: !$("dialogCheckRow").classList.contains("hidden") };
+  if (text !== undefined) $("dialogInput").value = text;
+  $("dialogCheck").checked = ask;
+  $(ok ? "dialogOk" : "dialogCancel").click();
+  await settle();
+  return shown;
+}
 /** The Create subtitles dialog as it stands. */
 const subForm = () => ({
   open: !$("subModalOverlay").classList.contains("hidden"),
@@ -1842,8 +1857,14 @@ try {
   selectText(textIn(cutB, "Today"), 0, script[1].length);
   $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
   eq("save: offered for timed words", $("noteMenuSaveAudio").disabled, false);
+  check("save: the name box is on at the start, in Paste & Tools too", $("optAskAudioName").checked === true);
   $("noteMenuSaveAudio").click();
+  const nameBox = await answerNameBox("first save");
+  check("save: a name box first, with the timeline's name and timecode, and a switch that is on",
+    nameBox.inputShown && nameBox.checkShown && nameBox.ask === true && nameBox.ok === "Save" && /^Seq 01 \d\d-\d\d-\d\d-\d\d$/.test(nameBox.name) &&
+    /LazyKick Cuts/.test(nameBox.message), JSON.stringify(nameBox));
   const savedShown = await answerDialog(true, "audio saved");
+  check("save: the window after it has no name box", $("dialogInput").classList.contains("hidden") && $("dialogCheckRow").classList.contains("hidden"));
   const shownWav = savedShown.message.split(", with the words")[0];
   check("save: the dialog names the SRT too", /, with the words one by one in Seq 01 [\d-]+(_\d+)?\.srt$/.test(savedShown.message), savedShown.message);
   const plainSrt = readSavedSrt(shownWav.replace(/\.wav$/, ".srt"));
@@ -1854,16 +1875,42 @@ try {
   const plainSaved = readSavedWav(shownWav);
   check("save: the words' stretch, from the pause before them", plainSaved && Math.abs(plainSaved.first - (bursts[0].e + bursts[1].s) / 2) < 0.1 &&
     Math.abs(plainSaved.first + plainSaved.seconds - (bursts[1].e + bursts[2].s) / 2) < 0.1, JSON.stringify(plainSaved));
-  check("save: no label in the name", /^Seq 01 \d\d-\d\d-\d\d-\d\d(_\d+)?\.wav$/.test(shownWav.split(/[\\/]/).pop()), shownWav);
+  check("save: the name as offered", shownWav.split(/[\\/]/).pop() === nameBox.name + ".wav", shownWav);
+
+  // Cancel in the name box: nothing is saved.
+  const savesBeforeCancel = host.audioSaves.length;
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  $("noteMenuSaveAudio").click();
+  await answerNameBox("cancelled", { ok: false });
+  await waitFor(() => /Nothing was saved/.test($("globalStatus").textContent), "nothing saved");
+  eq("save: Cancel in the name box saves nothing", host.audioSaves.length, savesBeforeCancel);
 
   host.saveWhole = true;   // a Premiere Pro that rendered the whole sequence
   $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
   $("noteMenuSaveAudio").click();
+  await answerNameBox("renamed", { text: "  Intro: take 2?.WAV " });
   const wholeShown = await answerDialog(false, "audio saved from the whole sequence");
-  const wholeSaved = readSavedWav(wholeShown.message.split(", with the words")[0]);
+  const wholeWav = wholeShown.message.split(", with the words")[0];
+  eq("save: renamed in the box, the file name made safe, WAV and SRT alike", `${wholeWav.split(/[\\/]/).pop()}|${existsSync(wholeWav.replace(/\.wav$/, ".srt"))}`, "Intro_ take 2_.wav|true");
+  const wholeSaved = readSavedWav(wholeWav);
   check("save: from a render of the whole sequence, only the stretch is kept", wholeSaved && Math.abs(wholeSaved.seconds - plainSaved.seconds) < 0.002 &&
     Math.abs(wholeSaved.first - plainSaved.first) < 0.002 && Math.abs(wholeSaved.last - plainSaved.last) < 0.002, JSON.stringify(wholeSaved));
   host.saveWhole = false;
+
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  $("noteMenuSaveAudio").click();
+  await answerNameBox("switched off", { text: "Intro_ take 2_", ask: false });
+  const sameName = await answerDialog(false, "saved, the switch now off");
+  eq("save: the same name again gets _2, nothing is overwritten", sameName.message.split(", with the words")[0].split(/[\\/]/).pop(), "Intro_ take 2__2.wav");
+  check("save: the switch off is remembered, and shown in Paste & Tools", readJson(join(storage, "lazykick_settings.json")).askAudioName === false && $("optAskAudioName").checked === false);
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  $("noteMenuSaveAudio").click();
+  const noBox = await answerDialog(false, "saved without a name box");
+  check("save: switched off, no name box, saved at once with the timeline's name", noBox.title === "Audio saved" &&
+    /^Seq 01 \d\d-\d\d-\d\d-\d\d(_\d+)?\.wav$/.test(noBox.message.split(", with the words")[0].split(/[\\/]/).pop()) && $("dialogInput").classList.contains("hidden"), noBox.message);
+  $("optAskAudioName").checked = true;
+  $("optAskAudioName").dispatch("change");
+  eq("save: switched on again in Paste & Tools, remembered", readJson(join(storage, "lazykick_settings.json")).askAudioName, true);
 
   host.saveFails = true;
   $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });

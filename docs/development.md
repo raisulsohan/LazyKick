@@ -347,6 +347,8 @@ host reports, wraps the removed words in `span.note-cut` (skipped by
 `textWithoutTags` and `lineTexts`, so they are no longer timed) and drops
 `heardAudio`, which no longer fits the timeline.
 
+`showDialog` takes an `input` (and a `check` switch) for the name box of 💾 Save this audio as WAV and then resolves to `{ text, checked }` or null; `cleanFileName` makes the typed name safe, and `settings.askAudioName` (🛠️ Paste & Tools) says whether the box shows.
+
 Before that, `saveStretchAudio` has the host render each stretch to a temp
 file (`saveTimelineAudio`) and `writeStretchWav` copies it into *LazyKick
 Cuts* as a plain WAV: `LazyAlign.audioLayout` finds the samples of a WAV or

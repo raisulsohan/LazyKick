@@ -2,6 +2,15 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.12.0
+
+### ✏️ Name the audio you save
+- **💾 Save this audio as WAV** first shows a **Save the audio as** box with the name LazyKick would use (the timeline's name and the start timecode), selected so it can be typed over. Enter or **Save** keeps or uses the name for both the WAV and its word-by-word SRT; **Cancel** saves nothing.
+- A typed name is made safe for a file name: characters Windows refuses become `_`, a `.wav` or `.srt` typed at the end is dropped, and an empty name falls back to the one offered. A name already in *LazyKick Cuts* gets `_2`, so nothing is overwritten.
+- **On/off:** a new **🛠️ Paste & Tools › 💾 Saved Audio** card has **Ask for a name when saving audio** (on by default, remembered), and the box itself has the same switch, **Ask for a name every time**. Off: the audio is saved at once with the name LazyKick makes.
+- ✂️ Remove from the timeline and ✂️ Retakes keep naming their files by themselves.
+- The in-panel dialog (`showDialog`) can now hold a text box and a switch (`input`, `check`).
+
 ## 1.11.0
 
 ### 💾 The audio taken out of the timeline is kept, with a word-by-word SRT

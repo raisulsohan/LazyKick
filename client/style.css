@@ -1230,6 +1230,35 @@ input:checked + .slider:before { transform: translateX(12px); }
     -webkit-user-select: text;
 }
 
+/* A name to type (Save this audio as WAV) and a switch under it. */
+.dialog-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 10px;
+    padding: 6px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-size: 12px;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+}
+.dialog-input:focus { border-color: var(--accent-blue); }
+.dialog-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.dialog-check input { accent-color: var(--accent-cyan); margin: 0; }
+.dialog-input.hidden, .dialog-check.hidden { display: none; }
+
 .dialog-box .modal-footer button:focus {
     outline: 1px solid var(--accent-cyan);
     outline-offset: 1px;

@@ -144,6 +144,19 @@
                     </div>
                 </div>
 
+                <!-- Saved audio (✂️ / 💾 in the notes) -->
+                <div class="tool-card">
+                    <div class="card-header">
+                        <h3>💾 Saved Audio</h3>
+                    </div>
+                    <div class="card-body">
+                        <label class="setting-row">
+                            <span class="setting-desc">Ask for a name when saving audio <small>(💾 Save this audio as WAV in the notes; off: saved at once with the timeline's name and timecode)</small></span>
+                            <input type="checkbox" id="optAskAudioName" checked>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Recent Pastes Gallery -->
                 <div class="tool-card">
                     <div class="card-header">
@@ -165,7 +178,7 @@
                 <span id="globalStatus" class="status-text">Ready</span>
             </div>
             <div class="footer-credits">
-                <span id="brandTag" class="brand-tag">LazyKick v1.11</span>
+                <span id="brandTag" class="brand-tag">LazyKick v1.12</span>
                 <span class="sep">•</span>
                 <a id="devLink" href="https://raisulsohan.com" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
             </div>
@@ -330,6 +343,8 @@
             </div>
             <div class="modal-body">
                 <p id="dialogMessage" class="dialog-message"></p>
+                <input type="text" id="dialogInput" class="dialog-input hidden" spellcheck="false" aria-labelledby="dialogMessage">
+                <label id="dialogCheckRow" class="dialog-check hidden"><input type="checkbox" id="dialogCheck"> <span id="dialogCheckLabel"></span></label>
             </div>
             <div class="modal-footer">
                 <button id="dialogCancel" class="btn-secondary-sm">Cancel</button>
