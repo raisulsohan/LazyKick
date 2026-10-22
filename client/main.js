@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.9.0";
+    var PANEL_VERSION = "1.9.1";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -1166,13 +1166,30 @@
         });
     }
 
-    /** The pinned lines among `lines` ([{ node }]): [{ line: index, t: seconds }]. */
+    /**
+     * The pins among `lines` ([{ node }]): [{ line: index, word, t: seconds }].
+     * A line's start is pinned on its tag (data-anchor), a word inside it by
+     * a span.note-pin around the word (data-pin).
+     */
     function pinsOf(lines) {
         var pins = [];
         for (var i = 0; i < lines.length; i++) {
             var tag = leadingTag(lines[i].node);
             var t = tag ? parseFloat(tag.getAttribute("data-anchor")) : NaN;
-            if (isFinite(t)) pins.push({ line: i, t: t });
+            if (isFinite(t)) pins.push({ line: i, word: 0, t: t });
+            var spans = lines[i].node.querySelectorAll(".note-pin");
+            if (!spans.length) continue;
+            var ranges = wordRanges(lines[i].node);
+            for (var s = 0; s < spans.length; s++) {
+                var at = parseFloat(spans[s].getAttribute("data-pin"));
+                if (!isFinite(at)) continue;
+                for (var w = 0; w < ranges.length; w++) {
+                    if (spans[s].contains(ranges[w].startContainer)) {
+                        pins.push({ line: i, word: w, t: at });
+                        break;
+                    }
+                }
+            }
         }
         return pins;
     }
@@ -1210,8 +1227,8 @@
                 setStatus("The note changed while listening; nothing was changed", 4000);
                 return null;
             }
-            var pinOf = {};
-            pins.forEach(function (p) { pinOf[p.line] = p.t; });
+            var pinOf = {};   // lines pinned at their start keep the pin on their tag
+            pins.forEach(function (p) { if (!p.word) pinOf[p.line] = p.t; });
             spans.forEach(function (span, i) {
                 setLeadingTag(lines[i].node, span, r, span.words, pinOf[i]);
             });
@@ -1653,6 +1670,7 @@
     }
 
     var menuLine = null; // the note line the menu was opened on
+    var menuWord = -1;   // the word of it under the pointer
 
     /** Whether a note line is timed when Time to Audio runs (so it can be pinned). */
     function isScriptLine(line) {
@@ -1667,9 +1685,9 @@
         el.noteMenuCut.disabled = !selected;
         el.noteMenuCopy.disabled = !selected;
         menuLine = lineOf(e.target);
-        var tag = isScriptLine(menuLine) ? leadingTag(menuLine) : null;
+        menuWord = isScriptLine(menuLine) ? wordIndexAt(menuLine, e.clientX || 0, e.clientY || 0) : -1;
         el.noteMenuPin.disabled = !isScriptLine(menuLine) || scriptBusy;
-        el.noteMenuUnpin.classList.toggle("hidden", !(tag && tag.hasAttribute("data-anchor")));
+        el.noteMenuUnpin.classList.toggle("hidden", !isScriptLine(menuLine) || !hasPins(menuLine));
         el.noteMenu.classList.remove("hidden");
         // At the pointer, but inside the panel near its right and bottom edges.
         var width = window.innerWidth || document.body.clientWidth || 0;
@@ -1720,17 +1738,45 @@
     el.noteMenuPaste.addEventListener("click", function () { pasteFromMenu(false); });
     el.noteMenuPastePlain.addEventListener("click", function () { pasteFromMenu(true); });
     el.noteMenuPin.addEventListener("click", function () {
-        if (!el.noteMenuPin.disabled) pinLineAtPlayhead(menuLine);
+        if (!el.noteMenuPin.disabled) pinAtPlayhead(menuLine, menuWord);
     });
     el.noteMenuUnpin.addEventListener("click", function () { unpinLine(menuLine); });
 
+    /** A pin on the line's start (its tag) or on a word in it. */
+    function hasPins(line) {
+        var tag = leadingTag(line);
+        return !!(tag && tag.hasAttribute("data-anchor")) || line.querySelectorAll(".note-pin").length > 0;
+    }
+
     /**
-     * Pins a line to the playhead: the line starts there (with the voice
-     * just after it), and every other line is timed again around it. For a
-     * retake or a wrong line the timing could not tell by itself: put the
-     * playhead where the line is really said, then pin it.
+     * Puts the start of a word (a DOM range from wordRanges) in a pin span,
+     * splitting its text node: the pin stays with the word when text before
+     * it is edited. A word already pinned keeps its span.
      */
-    function pinLineAtPlayhead(line) {
+    function pinSpanAt(range) {
+        var node = range.startContainer;
+        var parent = node.parentNode;
+        if (parent.classList && parent.classList.contains("note-pin") && range.startOffset === 0) return parent;
+        var text = String(node.nodeValue);
+        var end = range.endContainer === node ? range.endOffset : text.length;
+        var span = document.createElement("span");
+        span.className = "note-pin";
+        span.appendChild(document.createTextNode(text.slice(range.startOffset, end)));
+        if (range.startOffset > 0) parent.insertBefore(document.createTextNode(text.slice(0, range.startOffset)), node);
+        parent.insertBefore(span, node);
+        if (end < text.length) parent.insertBefore(document.createTextNode(text.slice(end)), node);
+        parent.removeChild(node);
+        return span;
+    }
+
+    /**
+     * Pins the word right-clicked to the playhead: it starts there (with the
+     * voice just after it), and everything else is timed again around it.
+     * For a retake or a sentence the timing could not tell by itself: put
+     * the playhead where it is really said, then pin it. The first word of
+     * a line pins the line's start, on its timecode tag.
+     */
+    function pinAtPlayhead(line, word) {
         hideNoteMenu();
         if (!isScriptLine(line) || scriptBusy) return Promise.resolve();
         var projectBefore = appState.projectId;
@@ -1740,19 +1786,24 @@
                 return null;
             }
             if (appState.projectId !== projectBefore || !isScriptLine(line)) return null;
-            setLeadingTag(line, { start: p.t, end: p.t }, p, null, p.t);
+            var range = word > 0 ? wordRanges(line)[word] : null;
+            if (range) pinSpanAt(range).setAttribute("data-pin", p.t.toFixed(3));
+            else setLeadingTag(line, { start: p.t, end: p.t }, p, null, p.t);
             noteChanged();
             saveCurrentNote();
             return timeToAudio({ reuse: true });
         });
     }
 
-    /** Lets a pinned line be timed freely again, and re-times the note. */
+    /** Lets a line and every word in it be timed freely again, and re-times the note. */
     function unpinLine(line) {
         hideNoteMenu();
-        var tag = isScriptLine(line) ? leadingTag(line) : null;
-        if (!tag || scriptBusy) return Promise.resolve();
-        tag.removeAttribute("data-anchor");
+        if (!isScriptLine(line) || !hasPins(line) || scriptBusy) return Promise.resolve();
+        var tag = leadingTag(line);
+        if (tag) tag.removeAttribute("data-anchor");
+        var spans = line.querySelectorAll(".note-pin");
+        for (var s = 0; s < spans.length; s++) unwrap(spans[s]);
+        if (line.normalize) line.normalize();
         noteChanged();
         saveCurrentNote();
         return timeToAudio({ reuse: true });

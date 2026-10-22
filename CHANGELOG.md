@@ -2,6 +2,15 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.9.1
+
+### Fixed
+- **A pin always moved the line's first timecode**, so in a script pasted as paragraphs a retake inside a paragraph could not be pinned. Pins now go on the word you right-click: **📌 Start this word at the playhead** (the menu item's new name). Right-click the first word of the sentence where it is really said.
+- The pinned word starts with the voice at or just after the playhead. The paragraph is cut there, both parts are timed on their own and joined again, so it keeps one timecode and a time for every word; everything else is timed again around it at once.
+- A pinned word is kept in a small `span.note-pin` around it, marked with a 📌 and an amber underline, so the pin stays with the word when text before it is edited. A pin on a line's first word stays on its timecode tag (amber, as in 1.9.0), and pins from 1.9.0 still work.
+- **Unpin this line** removes every pin in the line.
+- After timing, a word's pin was also copied onto the line's timecode, pinning the line's start as well; it no longer is.
+
 ## 1.9.0
 
 ### 🎙️ Retakes in an unedited recording

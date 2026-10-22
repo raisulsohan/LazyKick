@@ -156,9 +156,10 @@ You pasted an image file into the notes. Images are placed with
   ad-libbed. Retakes in an unedited recording are left out by themselves
   when the reader waited before starting again (the later take counts).
 - **Still wrong, for example after a quick restart?** Put the playhead where
-  the line is really said, right-click the line and choose **📌 Start this
-  line at the playhead**. The other lines are timed again around it, at
-  once. **Unpin this line** in the same menu undoes it.
+  the sentence is really said, right-click its first word and choose
+  **📌 Start this word at the playhead** (it works inside a paragraph too).
+  Everything else is timed again around it, at once. **Unpin this line** in
+  the same menu undoes it.
 - **Music or effects under the voice** hide the pauses. Select the
   voiceover clip (Premiere) or layer (After Effects) first, so only it is
   heard.

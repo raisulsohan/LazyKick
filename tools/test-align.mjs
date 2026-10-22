@@ -293,7 +293,31 @@ section("retakes", () => {
       if (Math.abs(pinned[l].start - v.lines[l].start) <= 0.1 && worstStart(pinned) <= 0.3) goodPins++;
     }
     check(`${name}: pinned at its true start, a line stays and the others still land (10 of the 11 pins at least)`, goodPins >= 10, goodPins);
+
+    // A sentence inside a paragraph pinned by its first word.
+    const paraTexts = paras.map((p) => p.map((l) => l.text).join(" "));
+    const inner = [];
+    paras.forEach((p, i) => { let w = 0; for (const l of p) { if (w) inner.push({ line: i, word: w, t: l.start }); w += A.splitWords(l.text).length; } });
+    let goodInner = 0;
+    for (const s of inner) {
+      const pinned = A.alignScript(paraTexts, speech, { anchors: [{ line: s.line, word: s.word, t: s.t - 0.1 }] });
+      let worstAll = 0;
+      inner.forEach((x) => { worstAll = Math.max(worstAll, Math.abs(pinned[x.line].start + pinned[x.line].words[x.word] - x.t)); });
+      const own = Math.abs(pinned[s.line].start + pinned[s.line].words[s.word] - s.t);
+      const counts = pinned.every((l, i) => l.words.length === A.splitWords(paraTexts[i]).length);
+      if (own <= 0.1 && worstAll <= 0.3 && counts) goodInner++;
+    }
+    check(`${name}: a sentence pinned inside its paragraph stays and the rest still land (all but one at least)`, goodInner >= inner.length - 1, `${goodInner} of ${inner.length}`);
   }
+
+  // A pin on a word inside a line cuts the line there; the line keeps one time per word.
+  const twoParts = A.alignScript(["One two three. Four five six.", "Seven."],
+    { segments: [{ s: 1, e: 2.5 }, { s: 3, e: 4.5 }, { s: 8, e: 9.5 }, { s: 10, e: 11 }], dips: [] }, { anchors: [{ line: 0, word: 3, t: 8 }] });
+  near("word pin: the line still starts with its first words", twoParts[0].start, 1, 1e-9);
+  near("word pin: the pinned word starts at its time", twoParts[0].start + twoParts[0].words[3], 8, 1e-9);
+  eq("word pin: one time per word, in order", twoParts[0].words.length === 6 && twoParts[0].words.every((t, i) => !i || t >= twoParts[0].words[i - 1]), true);
+  check("word pin: the next line comes after it", twoParts[1].start >= 9.5, JSON.stringify(twoParts[1]));
+  near("word pin: a word that is not in the line is ignored", A.alignScript(["One two."], { segments: [{ s: 1, e: 2 }], dips: [] }, { anchors: [{ line: 0, word: 9, t: 5 }] })[0].start, 1, 1e-9);
 
   // Pins on speech made by hand: each section is timed on its own.
   const speech = { segments: [{ s: 1, e: 3 }, { s: 3.5, e: 5 }, { s: 9, e: 11 }, { s: 11.4, e: 13 }], dips: [] };

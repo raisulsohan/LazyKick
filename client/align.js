@@ -849,21 +849,30 @@
         if (!texts.length) return [];
         if (!speech || !speech.segments || !speech.segments.length) return null;
         opts = opts || {};
-        var anchors = usableAnchors(opts.anchors, texts.length);
+        var anchors = usableAnchors(opts.anchors, texts);
         if (!anchors.length) return alignSection(texts, speech, opts);
 
-        // Pinned lines (anchors: [{ line, t }]) cut the script and the speech
-        // into sections, each timed on its own: a pinned line starts with the
-        // first speech at or after its time, and a retake just before it can
-        // be left out of the section before.
+        // Pinned words (anchors: [{ line, word, t }]; word 0, or none, is the
+        // line's start) cut the script and the speech into sections, each
+        // timed on its own: a pinned word starts with the first speech at or
+        // after its time, and a retake just before it can be left out of the
+        // section before. A pin inside a line cuts the line in two parts.
         var gap = opts.retakeGap || retakeGap(speech);
-        var out = new Array(texts.length);
-        out.outtakes = [];
-        var bounds = [{ line: 0, t: -Infinity }].concat(anchors, [{ line: texts.length, t: Infinity }]);
+        var words = texts.map(function (t) { return splitWords(t); });
+        var parts = [];   // every piece of a line that was timed: { line, from, start, end, words }
+        var outtakes = [];
+        var bounds = [{ line: 0, word: 0, t: -Infinity }].concat(anchors, [{ line: texts.length, word: 0, t: Infinity }]);
         for (var b = 0; b + 1 < bounds.length; b++) {
             var from = bounds[b];
             var to = bounds[b + 1];
-            if (to.line <= from.line) continue;
+            // The pieces of lines between the two pins.
+            var pieces = [];
+            for (var ln = from.line; ln <= to.line && ln < texts.length; ln++) {
+                var w0 = ln === from.line ? from.word : 0;
+                var w1 = ln === to.line ? to.word : words[ln].length;
+                if (w1 > w0 || (!words[ln].length && ln < to.line && w0 === 0)) pieces.push({ line: ln, from: w0, to: w1 });
+            }
+            if (!pieces.length) continue;
             var part = speechBetween(speech, from.t, to.t);
             var section = {};
             for (var key in opts) if (opts.hasOwnProperty(key) && key !== "anchors") section[key] = opts[key];
@@ -883,29 +892,48 @@
                     section.endGap = next - (last >= 0 ? part.segments[last].e : from.t);
                 }
             }
-            var lines = texts.slice(from.line, to.line);
+            var lines = pieces.map(function (p) { return words[p.line].slice(p.from, p.to).join(" "); });
             var timed = part.segments.length ? alignSection(lines, part, section) : null;
             if (!timed) timed = unheard(lines, isFinite(from.t) ? from.t : null, to.t);
-            for (var i = 0; i < timed.length; i++) out[from.line + i] = timed[i];
-            out.outtakes = out.outtakes.concat(timed.outtakes || []);
+            for (var i = 0; i < pieces.length; i++) {
+                parts.push({ line: pieces[i].line, from: pieces[i].from, start: timed[i].start, end: timed[i].end, words: timed[i].words });
+            }
+            outtakes = outtakes.concat(timed.outtakes || []);
         }
+
+        // Each line from its pieces: it starts with the first, ends with the
+        // last, and its word times run on from piece to piece.
+        var out = new Array(texts.length);
+        for (var p = 0; p < parts.length; p++) {
+            var pc = parts[p];
+            var line = out[pc.line];
+            if (!line) line = out[pc.line] = { start: pc.start, end: pc.end, words: [] };
+            line.end = Math.max(line.end, pc.end);
+            for (var k = 0; k < pc.words.length; k++) line.words.push(Math.round((pc.start + pc.words[k] - line.start) * 1000) / 1000);
+        }
+        out.outtakes = outtakes;
         return out;
     }
 
-    /** Anchors that can be used: one per line, in line order, each later than the one before. */
-    function usableAnchors(anchors, n) {
+    /**
+     * Anchors that can be used: [{ line, word, t }] in script order, each
+     * later than the one before, one per word; `word` (default 0) must be a
+     * word of the line.
+     */
+    function usableAnchors(anchors, texts) {
         var list = [];
         for (var i = 0; anchors && i < anchors.length; i++) {
             var a = anchors[i];
-            if (a && a.line >= 0 && a.line < n && a.line === Math.floor(a.line) && typeof a.t === "number" && isFinite(a.t)) {
-                list.push({ line: a.line, t: Math.max(0, a.t) });
-            }
+            if (!a || !(a.line >= 0 && a.line < texts.length) || a.line !== Math.floor(a.line) || typeof a.t !== "number" || !isFinite(a.t)) continue;
+            var word = a.word === undefined ? 0 : a.word;
+            if (!(word >= 0) || word !== Math.floor(word) || (word > 0 && word >= splitWords(texts[a.line]).length)) continue;
+            list.push({ line: a.line, word: word, t: Math.max(0, a.t) });
         }
-        list.sort(function (x, y) { return x.line - y.line; });
+        list.sort(function (x, y) { return x.line - y.line || x.word - y.word; });
         var out = [];
         for (var k = 0; k < list.length; k++) {
             var last = out[out.length - 1];
-            if (last && (list[k].line === last.line || list[k].t <= last.t)) continue;
+            if (last && ((list[k].line === last.line && list[k].word === last.word) || list[k].t <= last.t)) continue;
             out.push(list[k]);
         }
         return out;

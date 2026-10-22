@@ -125,8 +125,8 @@ IF SOMETHING GOES WRONG
       order. Retakes are left out when the reader waited before
       saying the passage again. Select only the voiceover if there
       is music, then click Time to Audio again. Still wrong? Put
-      the playhead where the line is said, right-click the line,
-      "Start this line at the playhead".
+      the playhead where the sentence is said, right-click its
+      first word, "Start this word at the playhead".
 
   More help: https://github.com/raisulsohan/LazyKick/tree/main/docs
 

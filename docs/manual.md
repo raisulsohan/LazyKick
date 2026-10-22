@@ -262,17 +262,20 @@ and says a passage again, the earlier take is left out and the later take
 counts. The status bar says how many retakes were left out, for example
 *Timed 32 lines … · 6 retakes left out*.
 
-**Pin a line** when a line still gets the wrong time (a quick restart with no
-wait, say):
+**Pin a word** when a sentence still gets the wrong time (a quick restart with
+no wait, say), also inside a paragraph:
 
-1. Put the playhead where the line is really said. **Ctrl+click** a nearby
-   word to get close, then scrub.
-2. Right-click the line and choose **📌 Start this line at the playhead**.
-3. The line starts there and its timecode turns amber with a 📌. Every other
-   line is timed again around it at once, from the audio already heard.
+1. Put the playhead where the sentence is really said. **Ctrl+click** a
+   nearby word to get close, then scrub.
+2. Right-click **the first word of that sentence** and choose **📌 Start this
+   word at the playhead**.
+3. The word starts there and gets a 📌 and an amber underline (on a line's
+   first word, the line's timecode turns amber instead). Everything else is
+   timed again around it at once, from the audio already heard.
 
-Pins stay when 🎙️ Time to Audio runs again. Right-click a pinned line and
-choose **Unpin this line** to let it be timed freely again.
+Pins stay when 🎙️ Time to Audio runs again, and a pinned word keeps its pin
+when you edit the text before it. Right-click a line and choose **Unpin this
+line** to remove every pin in it.
 
 What happens behind the button:
 

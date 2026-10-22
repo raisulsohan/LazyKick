@@ -195,6 +195,9 @@ function fakeRect(left, top, width, height) { return { left, top, width, height,
 class FakeRange {
   selectNodeContents() {} collapse() {}
   get startContainer() { return this.sn; }
+  get startOffset() { return this.so; }
+  get endContainer() { return this.en; }
+  get endOffset() { return this.eo; }
   setStart(node, offset) { this.sn = node; this.so = offset; }
   setEnd(node, offset) { this.en = node; this.eo = offset; }
   getBoundingClientRect() {
@@ -1636,6 +1639,39 @@ try {
   await waitFor(() => /1 pinned/.test($("globalStatus").textContent), "pinned after a change");
   eq("pin: a timeline that changed is listened to again", host.audioCalls.length, listensThen + 1);
   host.timeline = { ...host.timeline, duration: total };
+  openMenuOn(pinLine);
+  $("noteMenuUnpin").click();
+  await waitFor(() => !/pinned/.test($("globalStatus").textContent) && /Timed 3 lines/.test($("globalStatus").textContent), "unpinned after the change");
+
+  // ---- Pin a word inside a paragraph: a sentence the timing put on the wrong take
+  setEditor([{ tag: "p", kids: [`${script[0]} ${script[1]}`] }, { tag: "p", kids: [script[2]] }]);
+  $("noteEditor").scrollTop = 0;
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 2 lines/.test($("globalStatus").textContent), "paragraph timed");
+  const pinPara = $("noteEditor").children[0];
+  const charsBefore = (text) => (1 + `${script[0]} ${script[1]}`.indexOf(text)) * 7;   // the space after the tag, then the text, 7 px a character
+  const wordPin = bursts[1].s + 0.3;
+  $("noteEditor").dispatch("contextmenu", { target: pinPara, clientX: charsBefore("Today") + 10, clientY: 6 });
+  eq("word pin: offered", $("noteMenuPin").disabled, false);
+  host.playhead = wordPin;
+  $("noteMenuPin").click();
+  await waitFor(() => /1 pinned/.test($("globalStatus").textContent), "word pinned");
+  const pinSpans = pinPara.querySelectorAll(".note-pin");
+  eq("word pin: the right-clicked word is marked, nothing else", pinSpans.map((s) => s.textContent).join("|"), "Today");
+  eq("word pin: it keeps the pinned time", pinSpans[0] && pinSpans[0].getAttribute("data-pin"), wordPin.toFixed(3));
+  eq("word pin: the line's start is not pinned", tagOf(pinPara).hasAttribute("data-anchor"), false);
+  const paraStart = parseFloat(tagOf(pinPara).getAttribute("data-t"));
+  const paraWords = tagOf(pinPara).getAttribute("data-w").split(",").map(Number);
+  near("word pin: the line still starts at its first words", paraStart, bursts[0].s, 0.06);
+  near("word pin: the pinned word starts at the playhead", paraStart + paraWords[3], wordPin, 0.02);
+  eq("word pin: the text is unchanged", pinPara.textContent.replace(/^\[[^\]]*\]\s*/, "").replace(/ /g, " ").trim(), `${script[0]} ${script[1]}`);
+  $("noteEditor").dispatch("contextmenu", { target: pinPara, clientX: 20, clientY: 6 });
+  check("word pin: Unpin offered on its line", !$("noteMenuUnpin").classList.contains("hidden"));
+  $("noteMenuUnpin").click();
+  await waitFor(() => !/pinned/.test($("globalStatus").textContent) && /Timed 2 lines/.test($("globalStatus").textContent), "word unpinned");
+  eq("word unpin: the mark is gone", pinPara.querySelectorAll(".note-pin").length, 0);
+  eq("word unpin: the text is unchanged", pinPara.textContent.replace(/^\[[^\]]*\]\s*/, "").replace(/ /g, " ").trim(), `${script[0]} ${script[1]}`);
+  near("word unpin: the word is timed freely again, at its words", parseFloat(tagOf(pinPara).getAttribute("data-t")) + tagOf(pinPara).getAttribute("data-w").split(",").map(Number)[3], bursts[1].s, 0.15);
 
   // ---- A long paragraph becomes several subtitles, each when its first word is said
   const longText = "In 1920, a country decided to delete a problem. Not reduce it. Not manage it. Delete it. " +

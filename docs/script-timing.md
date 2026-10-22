@@ -101,15 +101,17 @@ recording the passage is there twice; in the script once. LazyKick takes
 
 The status bar tells how many retakes were left out.
 
-### Pinned lines
+### Pinned words
 
-When the timing still gets a line wrong, **pin** it: put the playhead where
-the line is really said, right-click the line and choose **📌 Start this
-line at the playhead**. The pinned line starts with the voice at or just
-after that point, and the script and the speech are cut there into sections
-that are timed on their own. A retake just before the pinned line can be
-left out of the section before it. Pins stay until you unpin them, also when
-🎙️ Time to Audio runs again.
+When the timing still gets a sentence wrong, **pin** it: put the playhead
+where it is really said, right-click its first word and choose **📌 Start
+this word at the playhead**. The pinned word starts with the voice at or
+just after that point, and the script and the speech are cut there into
+sections that are timed on their own; a pin inside a paragraph cuts the
+paragraph in two, and the paragraph keeps one start and a time for every
+word. A retake just before the pinned word can be left out of the section
+before it. Pins stay until you unpin them, also when 🎙️ Time to Audio runs
+again.
 
 A line (or pasted paragraph) then **starts with its first sentence and ends
 with its last**.

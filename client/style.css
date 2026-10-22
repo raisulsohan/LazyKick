@@ -508,6 +508,16 @@ body, html {
     margin-right: 3px;
 }
 
+/* A word pinned to a time inside a line. */
+.rich-editor .note-pin {
+    box-shadow: inset 0 -2px 0 #f5b041;
+}
+.rich-editor .note-pin::before {
+    content: "\1F4CC";
+    font-size: 9px;
+    margin-right: 2px;
+}
+
 /* A click on a timecode, or Ctrl/Cmd+click on a word, moves the playhead there. */
 .rich-editor .timecode-tag,
 .rich-editor.jump-keys { cursor: pointer; }

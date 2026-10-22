@@ -279,13 +279,17 @@ a real 19-minute unedited English recording scored against Windows' speech
 recogniser; `retakes: false` gives the old behaviour.
 
 **Pins.** A line's tag may carry `data-anchor` (seconds from the timeline
-start). `alignScript(texts, speech, { anchors: [{ line, t }] })` cuts the
-script and the speech at every pin (out-of-order pins are ignored) and times
-each section on its own: a pinned section starts with the first speech at
+start), and a word inside it a `span.note-pin` with `data-pin`.
+`alignScript(texts, speech, { anchors: [{ line, word, t }] })` cuts the
+script and the speech at every pin, inside a line too (out-of-order pins are
+ignored), times each section on its own and joins a line's pieces again: a pinned section starts with the first speech at
 or after its pin (`keepStart`, no leading skip), and the section before it
 may leave out a trailing retake, weighed against the pinned line's speech
 (`endGap`, `nextStart`). A section with no speech gets reading times. The
-menu's *Start this line at the playhead* writes the pin and re-times with
+menu's *Start this word at the playhead* writes the pin (the right-clicked
+word, found by `wordIndexAt`: on the first word the tag's `data-anchor`,
+else a `span.note-pin` with `data-pin` around the word, so the pin moves
+with the word when text before it is edited) and re-times with
 the speech of the last listen when the timeline (project, name, fps, offset,
 duration) is the same (`heardAudio`), else it listens again.
 
@@ -370,7 +374,8 @@ Windows only, as two steps use Windows Script Host. In order:
    normal read may leave any speech out. `tools/fixtures/tts-retakes.json` is
    an unedited read with four retakes: every line within 0.1 s of its later
    take (also inside paragraphs), every earlier take left out, and at least
-   10 of 11 single pinned lines keeping the others in place.
+   10 of 11 single pinned lines (and all but one sentence pinned inside its
+   paragraph) keeping the others in place.
 4. **`test-paste.mjs`**: the HTML Google Docs, Word and web pages put on the
    clipboard. Structure survives; styles, links, images, scripts, hidden
    text and attributes (including injection attempts) do not.

@@ -23,7 +23,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.9** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.9.1** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
 
@@ -62,6 +62,8 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.9** · F
 ---
 
 ## 🆕 What's New in 1.9
+
+**1.9.1:** pins go on the **word you right-click**, so a sentence inside a paragraph can be pinned too: right-click its first word and choose **📌 Start this word at the playhead**. Before, a pin always moved the line's first timecode.
 
 **🎙️ Unedited recordings with retakes**
 - When the reader stumbles, waits and says the passage again, LazyKick now leaves the earlier take out and times the line to **the later take**. The rest of the script no longer slips out of place after a retake, so 👁 Follow and 💬 Subtitles stay with the voice.
@@ -255,7 +257,7 @@ Always available in the panel header.
 - **Right-click menu** in the note: Cut, Copy, Paste, Paste without formatting, Select all.
 - **A− / A+ text size** (10–24 px, remembered).
 - **🎙️ Time to Audio:** times every line of the note to the voiceover on the open timeline and starts each line with its timecode. Language-independent (pauses and speaking length, no speech recognition), fully offline. Unedited recordings work too: when the reader waits and says a passage again, the earlier take is left out.
-- **📌 Pin a line:** right-click a line and choose *Start this line at the playhead*; it stays there and every other line is timed again around it.
+- **📌 Pin a word:** right-click the first word of a sentence (also inside a paragraph) and choose *Start this word at the playhead*; it stays there and everything else is timed again around it.
 - **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project. Choose Single Line, Double Line or Single Word, the line length, minimum duration, gap and punctuation first, with a live preview. Grey notes are skipped, and titles and headings too when **🔠 Titles** is off; long paragraphs are split into several subtitles.
 - **👁 Follow:** while the timeline plays, the spoken line and word light up and the note scrolls along.
 - **Jump to a word:** click a timecode to move the playhead to its line, or Ctrl+click (Cmd+click) a word to move it to the moment the word is said.
@@ -283,7 +285,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.9.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.9.1.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -530,9 +532,9 @@ Runs, in order (Windows, as two steps use Windows Script Host):
 
 1. `tools/check-extendscript.js`: `host.jsx` compiles as ES3 and avoids names and constructs real ExtendScript rejects.
 2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, media already in the project, timecode formatting, partial import failures and the project-changed guard.
-3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: three scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the others were held out; all must land every line within 0.2 s (they land within a few frames). The third reads whole paragraphs with longer pauses inside them than between them, and every sentence must land within 0.15 s. An unedited read with four retakes (`tts-retakes.json`) must land every line within 0.1 s of its later take, leave every earlier take out and keep at least 10 of 11 pinned lines in place; no normal read may leave anything out. Also word timing inside a line, the playhead follower, the splitting of long paragraphs into subtitles and every subtitle layout (single line, double line, single word, line length, minimum duration, gap, punctuation).
+3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: three scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the others were held out; all must land every line within 0.2 s (they land within a few frames). The third reads whole paragraphs with longer pauses inside them than between them, and every sentence must land within 0.15 s. An unedited read with four retakes (`tts-retakes.json`) must land every line within 0.1 s of its later take, leave every earlier take out and keep at least 10 of 11 pinned lines and all but one sentence pinned inside its paragraph in place; no normal read may leave anything out. Also word timing inside a line, the playhead follower, the splitting of long paragraphs into subtitles and every subtitle layout (single line, double line, single word, line length, minimum duration, gap, punctuation).
 4. `tools/test-paste.mjs`: `paste.js` on the HTML that Google Docs, Word and web pages put on the clipboard: headings, side notes, bold/italic/underline/strikethrough, lists, highlights and text colours survive (dark colours lightened for the note, a page's own white or dark background ignored); fonts, links, images, scripts, hidden text and attributes (including injection attempts) do not.
-5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, 🔠 Titles on and off, word times, pinning a line to the playhead with the audio already heard) and Subtitles (edited tags, the SRT file, long paragraphs, the Create subtitles window: layouts, preview, Enter, Cancel, Esc, remembered choices, a project switch while it is open), document paste and plain paste (into a heading left empty, sizes copied from a heading), colour spans after a paste, the notes' right-click menu (Cut, Copy, Paste and Paste without formatting through Chromium or the PowerShell clipboard, a note changed while reading), text size, the follow highlight (position, pause while you scroll, off, hidden tab), jumping to a word or a timecode, the in-panel dialog, and the CEP 9 syntax guard.
+5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, 🔠 Titles on and off, word times, pinning a line or a word inside a paragraph to the playhead with the audio already heard, unpinning) and Subtitles (edited tags, the SRT file, long paragraphs, the Create subtitles window: layouts, preview, Enter, Cancel, Esc, remembered choices, a project switch while it is open), document paste and plain paste (into a heading left empty, sizes copied from a heading), colour spans after a paste, the notes' right-click menu (Cut, Copy, Paste and Paste without formatting through Chromium or the PowerShell clipboard, a note changed while reading), text size, the follow highlight (position, pause while you scroll, off, hidden tab), jumping to a word or a timecode, the in-panel dialog, and the CEP 9 syntax guard.
 
 The mocks follow the documented host APIs, but they are not the real apps. `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close After Effects first; results in `%TEMP%\lazykick-ae-smoke-results.txt`):
 
@@ -608,7 +610,7 @@ It's a **guide layer** by default: visible while you work, excluded from renders
 <summary><strong>Time to Audio: a line got the wrong time</strong></summary>
 
 - LazyKick times lines by the pauses in the voice and how long each line takes to say, so the script must match the recording: same lines, same order, nothing left out. Remove lines the voiceover skips, or add what was ad-libbed. Retakes are left out by themselves when the reader waited before starting again.
-- Still a wrong line? Put the playhead where it is really said, right-click it and choose **📌 Start this line at the playhead**: the other lines are timed again around it.
+- Still a wrong sentence? Put the playhead where it is really said, right-click its first word and choose **📌 Start this word at the playhead**: everything else is timed again around it.
 - **Music or effects under the voice** make pauses hard to hear. Select the voiceover clip (Premiere) or layer (After Effects) before clicking, so only it is heard.
 - Whole paragraphs are fine: every sentence is matched to the voice on its own, and long paragraphs become several subtitles. Timecodes from before 1.5 were timed by paragraph; click 🎙️ once more to re-time them.
 - Fix a single line by editing its timecode; 💬 Subtitles uses what you typed. Clicking 🎙️ again re-times every line.
