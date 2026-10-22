@@ -127,6 +127,39 @@ const DOCS = '<meta charset="utf-8"><b style="font-weight:normal;" id="docs-inte
   eq("nothing to paste", paste("<p> </p><br><p>&nbsp;</p>").html, "");
 }
 
+/* ----------------------------- Word: sizes and looks kept in <style> */
+{
+  // Word keeps the body's 11pt in p.MsoNormal and writes only the title's own 15pt on the text.
+  const STYLE = "<head><style><!-- /* Style Definitions */ p.MsoNormal, li.MsoNormal, div.MsoNormal {mso-style-unhide:no; margin:0in; " +
+    "line-height:115%; font-size:11.0pt; font-family:\"Arial\",sans-serif;} @page WordSection1 {size:8.5in 11.0in;} --></style></head>";
+  const BODY = "<body lang=EN-US><div class=WordSection1>" +
+    "<p class=MsoNormal><span style='font-size:15.0pt;line-height:115%;background:#FF9900'>Map Part</span></p>" +
+    "<p class=MsoNormal><span style='font-size:15.0pt'><o:p>&nbsp;</o:p></span></p>" +
+    "<p class=MsoNormal><span style='font-size:15.0pt;line-height:115%'>Video Title: 1,256 Drones in ONE Day<o:p></o:p></span></p>" +
+    "<p class=MsoNormal><o:p>&nbsp;</o:p></p>" +
+    "<p class=MsoNormal>Russia just admitted something it never wanted to say out loud.</p>" +
+    "<p class=MsoNormal>Look at where these numbers come from first.</p></div></body>";
+  const EXPECTED = "<h2><span class=\"note-color\" data-fg=\"111111\" data-bg=\"ff9900\" style=\"color:#111111;background-color:#ff9900\">Map Part</span></h2>" +
+    "<h2>Video Title: 1,256 Drones in ONE Day</h2><p>Russia just admitted something it never wanted to say out loud.</p><p>Look at where these numbers come from first.</p>";
+  eq("word styles: a 15pt title over the 11pt body of p.MsoNormal is a heading", paste(`<html>${STYLE}${BODY}</html>`).html, EXPECTED);
+  eq("word styles: with no <style> at all, text with no size counts as body", paste(BODY).html, EXPECTED);
+
+  const TITLE = "<html><head><style>p.MsoTitle, li.MsoTitle, div.MsoTitle {mso-style-name:Title; font-size:26.0pt; font-weight:bold;} " +
+    "p.MsoNormal {font-size:11.0pt;} .MsoChpDefault {font-size:11.0pt;}</style></head><body>" +
+    "<p class=MsoTitle>Chapter One</p><p class=MsoNormal>It began with a single law.</p><p class=MsoNormal>Then another.</p></body></html>";
+  eq("word styles: a paragraph in Word's Title style is a big heading", paste(TITLE).html,
+    "<h1>Chapter One</h1><p>It began with a single law.</p><p>Then another.</p>");
+
+  const CLASSES = "<style>span.Secret {display:none} .Mark {background:yellow} p.Note {color:#808080; font-size:9pt}</style>" +
+    "<p style='font-size:11pt'>Shown <span class=Secret>hidden </span>and <span class=Mark>marked</span>.</p>" +
+    "<p class=Note>A grey side note</p><p style='font-size:11pt'>Body again.</p>";
+  eq("class rules: hide, mark and make side notes like inline styles do", paste(CLASSES).html,
+    "<p>Shown and <span class=\"note-color\" data-fg=\"111111\" data-bg=\"ffff00\" style=\"color:#111111;background-color:#ffff00\">marked</span>.</p>" +
+    "<p class=\"note-muted\">A grey side note</p><p>Body again.</p>");
+  eq("class rules: nothing but numbers from them either",
+    paste("<style>span.X {background:url(javascript:alert(1)); color: expression(alert(2))}</style><p>a <span class=X>b</span></p>").html, "a b");
+}
+
 /* ------------------------------------------ highlights & coloured text */
 {
   // Google Docs: Highlight colour is the span's background-color, Text colour its color.

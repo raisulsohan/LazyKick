@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.7.0";
+    var PANEL_VERSION = "1.7.1";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -1647,7 +1647,9 @@
 
     /**
      * Windows' "HTML Format" (CF_HTML) is a header with byte offsets, then
-     * the page; the copied part lies between StartFragment and EndFragment.
+     * the page. The page from StartHTML to EndHTML is what Chromium hands to
+     * Ctrl+V: the copied part (between StartFragment and EndFragment) inside
+     * it, and the page's <style>, where Word keeps its paragraph styles.
      */
     function htmlFromCfHtml(bytes) {
         var head = bytes.slice(0, Math.min(bytes.length, 512)).toString("latin1");
@@ -1655,10 +1657,12 @@
             var m = new RegExp(name + ":\\s*(\\d+)").exec(head);
             return m ? parseInt(m[1], 10) : -1;
         }
+        var page = offset("StartHTML");
+        var pageEnd = offset("EndHTML");
+        if (page >= 0 && pageEnd > page && pageEnd <= bytes.length) return bytes.slice(page, pageEnd).toString("utf8");
         var start = offset("StartFragment");
         var end = offset("EndFragment");
         if (start >= 0 && end > start && end <= bytes.length) return bytes.slice(start, end).toString("utf8");
-        var page = offset("StartHTML");
         if (page >= 0 && page < bytes.length) return bytes.slice(page).toString("utf8");
         var text = bytes.toString("utf8");
         var at = text.indexOf("<");

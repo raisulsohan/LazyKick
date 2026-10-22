@@ -182,7 +182,7 @@ source, on the panel's dark note:
 
 | In the document | In the notes |
 | --- | --- |
-| Title, large text | Big heading |
+| Title, large text (by hand or by a Word style) | Big heading |
 | Heading, bold short line (no full stop) | Heading |
 | Paragraph | Paragraph |
 | **Bold**, *italic*, underline, strikethrough | Kept |

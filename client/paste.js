@@ -67,6 +67,7 @@
         purple: [128, 0, 128], pink: [255, 192, 203]
     };
     var MARK_YELLOW = [255, 255, 0];
+    var UNSIZED_PT = 12;
 
     /** [r, g, b] for a CSS colour, or null (unknown, or fully transparent). */
     function parseColor(value) {
@@ -106,8 +107,38 @@
         return undefined;
     }
 
-    /** The parts of an inline style that matter here, on top of `base`. */
-    function readStyle(node, base) {
+    /**
+     * Class rules from the page's own <style>, as { "p.msonormal": "declarations" }.
+     * Word writes the look of its paragraph styles there, not on the text:
+     * the body's 11pt is p.MsoNormal, a Title is p.MsoTitle. Only selectors
+     * that are a class, or a tag with a class, are kept.
+     */
+    function readClassRules(rootNode) {
+        var css = "";
+        (function find(node) {
+            if (String(node.nodeName).toUpperCase() === "STYLE") {
+                css += " " + (node.textContent !== undefined ? String(node.textContent) : "");
+                return;
+            }
+            var kids = node.childNodes || [];
+            for (var i = 0; i < kids.length; i++) find(kids[i]);
+        })(rootNode);
+        css = css.replace(/<!--|-->/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+        var rules = {};
+        var re = /([^{}]+)\{([^{}]*)\}/g;
+        var m;
+        while ((m = re.exec(css))) {
+            var selectors = m[1].split(",");
+            for (var k = 0; k < selectors.length; k++) {
+                var sel = selectors[k].replace(/^\s+|\s+$/g, "").toLowerCase();
+                if (/^[a-z0-9]*\.[\w-]+$/.test(sel)) rules[sel] = (rules.hasOwnProperty(sel) ? rules[sel] + ";" : "") + m[2];
+            }
+        }
+        return rules;
+    }
+
+    /** The parts of an element's look that matter here, on top of `base`: its class rules, then its inline style. */
+    function readStyle(node, base, rules) {
         var s = { b: base.b, i: base.i, u: base.u, s: base.s, size: base.size, color: base.color, bg: base.bg, pre: base.pre, hidden: false };
         var tag = node.nodeName;
         var inline = !BLOCKS[tag] && !BOXES[tag];
@@ -121,7 +152,15 @@
             if (fontColor) s.color = fontColor;
         }
         if (tag === "PRE" || tag === "CODE") s.pre = tag === "PRE" || s.pre;
-        var style = attr(node, "style").split(";");
+        var fromClasses = "";
+        var classes = attr(node, "class").toLowerCase().split(/\s+/);
+        for (var n = 0; n < classes.length && rules; n++) {
+            if (!classes[n]) continue;
+            var own = String(tag).toLowerCase() + "." + classes[n];
+            if (rules.hasOwnProperty("." + classes[n])) fromClasses += rules["." + classes[n]] + ";";
+            if (rules.hasOwnProperty(own)) fromClasses += rules[own] + ";";
+        }
+        var style = (fromClasses + attr(node, "style")).split(";");
         for (var k = 0; k < style.length; k++) {
             var colon = style[k].indexOf(":");
             if (colon < 0) continue;
@@ -158,6 +197,7 @@
         var blocks = [];
         var current = null;
         var lists = [];
+        var rules = readClassRules(rootNode);
 
         function open(kind, list, n) {
             current = { kind: kind, list: list || "", n: n || 0, runs: [], tag: null };
@@ -182,7 +222,7 @@
             if (node.nodeType !== 1 && node.nodeType !== 9 && node.nodeType !== 11) return;
             var tag = node.nodeName ? String(node.nodeName).toUpperCase() : "";
             if (SKIP[tag] || /^(O|V|W|ST1):/.test(tag) && tag !== "O:P") return;
-            var s = node.nodeType === 1 ? readStyle(node, style) : style;
+            var s = node.nodeType === 1 ? readStyle(node, style, rules) : style;
             if (s.hidden) return;
 
             // LazyKick's own timecode tags survive a copy inside the notes.
@@ -290,12 +330,16 @@
      * side note ("Series: ... | Target: 8-12 min").
      */
     function classify(blocks) {
+        // Text with no size of its own is body text at the size a page has
+        // when nothing sets one (12pt, a browser's 16px): a title set larger
+        // than unsized body text is still a title.
         var sizes = [];
         for (var i = 0; i < blocks.length; i++) {
             if (blocks[i].kind !== "p") continue;
             for (var r = 0; r < blocks[i].runs.length; r++) {
                 var run = blocks[i].runs[r];
-                if (run.size) for (var c = 0; c < Math.min(200, run.text.length); c++) sizes.push(run.size);
+                if (run.tag) continue;
+                for (var c = 0; c < Math.min(200, run.text.length); c++) sizes.push(run.size || UNSIZED_PT);
             }
         }
         sizes.sort(function (a, b) { return a - b; });

@@ -213,10 +213,16 @@ clips, sync-locked tracks included.
 ### Notes paste
 
 `paste.js` walks the parsed clipboard document into blocks, reading each
-run's font weight, style, decoration, size, colour and visibility. Blocks
-are classified against the body text size: 1.6× or more is a title, 1.25× a
-heading, a short all-bold line without an end stop a small heading, grey or
-0.85× and smaller a side note. The result is rebuilt from the whitelist and
+run's font weight, style, decoration, size, colour and visibility, from the
+element's class rules in the page's own `<style>` (`readClassRules`: only
+`.Class` and `tag.Class` selectors) and then its inline style. Word keeps the
+look of its paragraph styles there: the body's 11pt is `p.MsoNormal`, a
+Title is `p.MsoTitle`, and only direct formatting (a title made 15pt by hand)
+is written on the text. Blocks are classified against the body text size, the
+median over all paragraph text, where text with no size at all counts as
+12pt (a page's default): 1.6× or more is a title, 1.25× a heading, a short
+all-bold line without an end stop a small heading, grey or 0.85× and smaller
+a side note. The result is rebuilt from the whitelist and
 inserted with `execCommand("insertHTML")`, and `main.js` tidies what the
 browser adds while pasting.
 
@@ -237,8 +243,8 @@ PowerShell. That script reads "HTML Format" through WPF, which decodes it as
 UTF-8; Windows Forms on .NET Framework decodes it in the ANSI code page
 (garbled Bengali and curly quotes, byte offsets that no longer fit), so it is
 only the fallback, turned back into bytes with `Encoding.Default`.
-`htmlFromCfHtml` cuts the copied part out by the StartFragment / EndFragment
-byte offsets.
+`htmlFromCfHtml` takes the page from StartHTML to EndHTML, as Chromium hands
+it to Ctrl+V: the copied part with the page's `<style>` around it.
 
 ### Time to Audio
 

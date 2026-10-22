@@ -2,6 +2,12 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.7.1
+
+### Fixed
+- **A title pasted from Word came in as a normal line** (not bold, not a heading, and 🎙️ Time to Audio timed it as speech) when it was only made larger by hand. Word writes the body's 11pt in the page's own `<style>` (`p.MsoNormal`), not on the text, so the body had no size and the title's 15pt was taken for the body size. Pasting now reads the page's class rules (`.Class` and `tag.Class`: size, bold, italic, decoration, colour, highlight, hidden), so Word's paragraph styles count, a paragraph in Word's *Title* style included. Text with no size anywhere counts as 12pt body text, so a larger title is still found without a `<style>`.
+- **Paste in the right-click menu** now reads the whole page from the clipboard, `<style>` included, as Ctrl+V does; it read only the copied part before.
+
 ## 1.7.0
 
 ### 🖍️ Pasted notes keep their highlights and colours

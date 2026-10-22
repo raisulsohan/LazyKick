@@ -133,6 +133,9 @@ That is by design: notes belong to the project file, and an `.aep` and a
 - **Paste** in the right-click menu says *Could not read the clipboard*: the
   menu reads the clipboard through PowerShell (Windows) or AppleScript
   (macOS). Use **Ctrl+V** instead, which does not need them.
+- A title pasted as a normal line: titles are found by size against the
+  body text (1.25× or more), or by a heading style. Make the title a little
+  bigger in the document, or give it a Heading or Title style.
 - Something pasted as one heading that should be a paragraph: a short line
   (up to five words) that is entirely bold with no full stop is read as a
   heading, as documents write them. Add a full stop or un-bold it.

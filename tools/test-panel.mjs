@@ -385,11 +385,11 @@ async function advance(ms) {
   await settle();
 }
 
-/* Windows' "HTML Format": a header with byte offsets, then the page around the copied fragment. */
-function cfHtml(fragment) {
+/* Windows' "HTML Format": a header with byte offsets, then the page (with `head`, as Word writes its styles) around the copied fragment. */
+function cfHtml(fragment, head = "") {
   const pad = (n) => String(n).padStart(10, "0");
   const header = (sh, eh, sf, ef) => `Version:0.9\r\nStartHTML:${pad(sh)}\r\nEndHTML:${pad(eh)}\r\nStartFragment:${pad(sf)}\r\nEndFragment:${pad(ef)}\r\n`;
-  const pre = "<html><body>\r\n<!--StartFragment-->";
+  const pre = `<html><head>${head}</head><body>\r\n<!--StartFragment-->`;
   const post = "<!--EndFragment-->\r\n</body></html>";
   const sh = Buffer.byteLength(header(0, 0, 0, 0));
   const sf = sh + Buffer.byteLength(pre);
@@ -1419,10 +1419,24 @@ try {
   check("menu Paste: HTML read through WPF (UTF-8); Windows Forms (ANSI) only as a fallback, turned back into bytes",
     clipboard.lastScript.indexOf("PresentationCore") !== -1 && clipboard.lastScript.indexOf("PresentationCore") < clipboard.lastScript.indexOf("System.Windows.Forms") &&
     clipboard.lastScript.includes("[System.Text.Encoding]::Default.GetBytes"), clipboard.lastScript);
-  eq("menu Paste: the copied part of the page, highlight and Bengali intact", (menuCmds.find((c) => c.cmd === "insertHTML") || {}).value,
+  eq("menu Paste: the page from the clipboard, highlight and Bengali intact", (menuCmds.find((c) => c.cmd === "insertHTML") || {}).value,
     "<p><span class=\"note-color\" data-fg=\"000000\" data-bg=\"ffff00\" style=\"color:#000000;background-color:#ffff00\">আমি</span> marked it</p><p>Second line</p>");
   eq("menu Paste: says so", $("globalStatus").textContent, "Pasted");
   check("menu Paste: closed", !menuOpen());
+
+  // Word keeps the body's 11pt in the page's <style>, outside the copied part: the menu reads it too, as Ctrl+V does.
+  const docClipboard = { html: clipboard.html, text: clipboard.text };
+  clipboard.html = cfHtml("<p class=MsoNormal><span style='font-size:15.0pt'>Video Title: The Dam</span></p>" +
+    "<p class=MsoNormal>It flows east for a thousand kilometres.</p><p class=MsoNormal>Then it turns.</p>",
+    "<style><!-- p.MsoNormal, li.MsoNormal, div.MsoNormal {margin:0in; font-size:11.0pt;} --></style>");
+  clipboard.text = "Video Title: The Dam\r\nIt flows east for a thousand kilometres.\r\nThen it turns.";
+  menuExecBefore = doc.execCommands.length;
+  rightClick();
+  $("noteMenuPaste").click();
+  await waitFor(() => commandsSince(menuExecBefore).some((c) => c.cmd === "insertHTML"), "menu paste of a Word page");
+  eq("menu Paste: Word's paragraph style is read, so the larger title is a heading", (commandsSince(menuExecBefore).find((c) => c.cmd === "insertHTML") || {}).value,
+    "<h2>Video Title: The Dam</h2><p>It flows east for a thousand kilometres.</p><p>Then it turns.</p>");
+  Object.assign(clipboard, docClipboard);
 
   menuExecBefore = doc.execCommands.length;
   rightClick();
