@@ -23,7 +23,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.7.3** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.8** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
 
@@ -34,7 +34,8 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.7.3** ·
 ## 📑 Contents
 
 - [📖 Documentation](docs/README.md)
-- [What's New in 1.7](#-whats-new-in-17)
+- [What's New in 1.8](#-whats-new-in-18)
+- [What's New in 1.7](#whats-new-in-17)
 - [What's New in 1.6](#whats-new-in-16)
 - [What's New in 1.5](#whats-new-in-15)
 - [What's New in 1.4](#whats-new-in-14)
@@ -59,7 +60,15 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.7.3** ·
 
 ---
 
-## 🆕 What's New in 1.7
+## 🆕 What's New in 1.8
+
+**🎯 Jump to a word**
+- **Click a timecode** in the note, like `[00:00:14:28]`, and the playhead goes to the start of that line.
+- **Ctrl+click a word** (Cmd+click on macOS) and the playhead goes to the moment that word is said; with 👁 Follow on, the word lights up at once.
+- A plain click still only puts the caret there, so editing the note never moves the timeline. Hold Ctrl (Cmd) and the pointer shows that a click jumps.
+- Works in Premiere Pro and After Effects, on every line 🎙️ Time to Audio timed (or that starts with a timecode you typed).
+
+## What's New in 1.7
 
 **1.7.3:** with **👁 Follow**, the word being said is easy to see on a pasted highlight too: it gets a dark and white ring and keeps its own colours.
 
@@ -237,6 +246,7 @@ Always available in the panel header.
 - **🎙️ Time to Audio:** times every line of the note to the voiceover on the open timeline and starts each line with its timecode. Language-independent (pauses and speaking length, no speech recognition), fully offline.
 - **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project. Choose Single Line, Double Line or Single Word, the line length, minimum duration, gap and punctuation first, with a live preview. Grey notes are skipped, and titles and headings too when **🔠 Titles** is off; long paragraphs are split into several subtitles.
 - **👁 Follow:** while the timeline plays, the spoken line and word light up and the note scrolls along.
+- **Jump to a word:** click a timecode to move the playhead to its line, or Ctrl+click (Cmd+click) a word to move it to the moment the word is said.
 
 ### 3. 📂 Watch Bins & Media Sync
 
@@ -261,7 +271,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.7.3.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.8.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -346,6 +356,8 @@ Don't keep a source copy and the signed install side by side: they share one ext
 | `Ctrl+V` / `Cmd+V` | Panel focused, outside text fields | LazyPaste |
 | `Ctrl+V` / `Cmd+V` | Notes editor | Paste, keeping headings, bold, italic, lists, highlights and colours |
 | `Ctrl+Shift+V` / `Cmd+Shift+V` | Notes editor | Paste without formatting (text only) |
+| `Ctrl`+click / `Cmd`+click a word | Notes editor | Move the playhead to the moment the word is said |
+| Click a timecode | Notes editor | Move the playhead to the start of that line |
 | Right-click | Notes editor | Cut, Copy, Paste, Paste without formatting, Select all |
 | Double-click | Note tab | Rename (Enter saves, Esc cancels) |
 | `Enter` | Folder browser path box | Go to that path |
@@ -442,6 +454,7 @@ LazyKick is a standard **CEP extension**: an HTML/JS panel (Chromium with Node.j
 | `syncWatchBin(binPath, payloadJson, expectedProjectId)` | Payload `{ folder, arrange, files: [{ p, s, n }] }` (path, subfolder, new). Relinks moved files, imports new ones into the bin mirroring their subfolder, and with `arrange` sorts media already inside the watch bin. Returns `importedFiles`, `failedFiles`, `existingFiles` (already in the project, left alone), `relinkedFiles` (`{ from, to }`), `moved`; `projectChanged: true` if another project is open |
 | `getTimelineInfo()` | The open sequence/composition: `name`, `fps`, `offset` (seconds its timecode starts at), `duration` |
 | `getPlayhead()` | For 👁 Follow, polled several times a second: `t` (seconds from the timeline start), `fps`, `offset`, `name` |
+| `setPlayhead(seconds)` | For a click on a timecode or a Ctrl/Cmd+click on a word: moves the playhead to `seconds` from the timeline start (After Effects `comp.time`, Premiere `setPlayerPosition`) |
 | `getTimelineAudio(wavPath)` | Premiere: exports the sequence mix to `wavPath` with its own *Waveform Audio 48kHz 16-bit* preset (`kind: "wav"`). After Effects: runs *Convert Audio to Keyframes* on the audible layers and returns one loudness value a frame (`kind: "levels"`, `step`, `start`, `values`). With audio clips/layers selected only they are heard (`used: "selected"`); mutes, audio switches, selection and work area are put back |
 | `placeSubtitles(payloadJson)` | `{ srtPath, cues: [{ s, e, t }] }`. Premiere: imports the SRT into a *Subtitles* bin and calls `createCaptionTrack`. After Effects: one text layer per cue |
 | `importFilesToBin(binPath, filesJson, expectedProjectId)` | The 1.2 call: imports straight into one bin, no subfolders or sorting. Same result fields |
@@ -507,7 +520,7 @@ Runs, in order (Windows, as two steps use Windows Script Host):
 2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, media already in the project, timecode formatting, partial import failures and the project-changed guard.
 3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: three scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the others were held out; all must land every line within 0.2 s (they land within a few frames). The third reads whole paragraphs with longer pauses inside them than between them, and every sentence must land within 0.15 s. Also word timing inside a line, the playhead follower, the splitting of long paragraphs into subtitles and every subtitle layout (single line, double line, single word, line length, minimum duration, gap, punctuation).
 4. `tools/test-paste.mjs`: `paste.js` on the HTML that Google Docs, Word and web pages put on the clipboard: headings, side notes, bold/italic/underline/strikethrough, lists, highlights and text colours survive (dark colours lightened for the note, a page's own white or dark background ignored); fonts, links, images, scripts, hidden text and attributes (including injection attempts) do not.
-5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, 🔠 Titles on and off, word times) and Subtitles (edited tags, the SRT file, long paragraphs, the Create subtitles window: layouts, preview, Enter, Cancel, Esc, remembered choices, a project switch while it is open), document paste and plain paste (into a heading left empty, sizes copied from a heading), colour spans after a paste, the notes' right-click menu (Cut, Copy, Paste and Paste without formatting through Chromium or the PowerShell clipboard, a note changed while reading), text size, the follow highlight (position, pause while you scroll, off, hidden tab), the in-panel dialog, and the CEP 9 syntax guard.
+5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, 🔠 Titles on and off, word times) and Subtitles (edited tags, the SRT file, long paragraphs, the Create subtitles window: layouts, preview, Enter, Cancel, Esc, remembered choices, a project switch while it is open), document paste and plain paste (into a heading left empty, sizes copied from a heading), colour spans after a paste, the notes' right-click menu (Cut, Copy, Paste and Paste without formatting through Chromium or the PowerShell clipboard, a note changed while reading), text size, the follow highlight (position, pause while you scroll, off, hidden tab), jumping to a word or a timecode, the in-panel dialog, and the CEP 9 syntax guard.
 
 The mocks follow the documented host APIs, but they are not the real apps. `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close After Effects first; results in `%TEMP%\lazykick-ae-smoke-results.txt`):
 
@@ -627,7 +640,6 @@ Notes are keyed by app and project file, so an `.aep` and a `.prproj` have separ
 ## 🗺️ Roadmap Ideas
 
 - Shrink-to-fit for Premiere Pro stills.
-- Timecode stamps you can click to jump the playhead.
 - Subtitle style presets (font, size, box) for Time to Audio.
 - Search across all project notes.
 

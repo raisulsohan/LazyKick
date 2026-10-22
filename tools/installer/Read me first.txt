@@ -76,6 +76,8 @@ THE THREE TABS
        .srt is saved in "LazyKick Subtitles" next to the project.
     With "Follow" on, press play: the line and the word being
     said light up and the note scrolls along.
+    Click a timecode to move the playhead to its line, or
+    Ctrl+click (Cmd+click) a word to move it to that word.
 
   WATCH BINS
     Link a folder on your computer (Downloads, SFX, client

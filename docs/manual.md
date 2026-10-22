@@ -342,6 +342,18 @@ any highlight colour.
   saved or copied.
 - Click **👁 Follow** to switch it off or on; the choice is remembered.
 
+**Jump to a word:** move the playhead from the note.
+
+1. Click a line's timecode, like `[00:00:14:28]`. The playhead goes to the
+   start of that line.
+2. Hold **Ctrl** (**Cmd** on macOS) and click a word. The playhead goes to
+   the moment that word is said, and the word lights up.
+
+A plain click on a word only puts the caret there, so editing the note never
+moves the timeline. Line starts are measured from the voiceover; words inside
+a line are spread by their length, so a word can be a few frames early or
+late. A line with no timecode tells you to click 🎙️ Time to Audio first.
+
 The panel asks the app where the playhead is five times a second while it
 moves and about once a second while it rests, and glides the highlight in
 between. It asks nothing while the Notes tab is hidden, a dialog is open or
@@ -491,6 +503,8 @@ The folder browser also remembers the last folder you picked.
 | `Ctrl+V` / `Cmd+V` | Panel focused, outside text fields | Paste Image |
 | `Ctrl+V` / `Cmd+V` | Notes | Paste, keeping headings, bold, italic, lists, highlights and colours |
 | `Ctrl+Shift+V` / `Cmd+Shift+V` | Notes | Paste without formatting (text only) |
+| `Ctrl`+click / `Cmd`+click a word | Notes | Move the playhead to the moment the word is said |
+| Click a timecode | Notes | Move the playhead to the start of that line |
 | Right-click | Notes | Cut, Copy, Paste, Paste without formatting, Select all |
 | Double-click | Note tab | Rename (Enter saves, Esc cancels) |
 | `Enter` / `Esc` | Dialog | OK / Cancel (Cancel is focused on red dialogs) |

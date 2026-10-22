@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.7.3";
+    var PANEL_VERSION = "1.8.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -2014,9 +2014,10 @@
 
     function showFollowState() {
         el.btnFollow.classList.toggle("is-on", !!appState.settings.follow);
-        el.btnFollow.title = appState.settings.follow
+        var jumpHint = " Click a timecode, or " + (process.platform === "darwin" ? "Cmd" : "Ctrl") + "+click a word, to move the playhead there.";
+        el.btnFollow.title = (appState.settings.follow
             ? "Following the playhead: the line and word being said light up and the note scrolls along. Click to stop."
-            : "Follow the playhead: light up the line and word being said while the timeline plays (needs timed lines).";
+            : "Follow the playhead: light up the line and word being said while the timeline plays (needs timed lines).") + jumpHint;
     }
 
     el.btnFollow.addEventListener("click", function () {
@@ -2056,6 +2057,113 @@
     window.addEventListener("resize", function () {
         if (follow.shownT !== null && !el.followLayer.classList.contains("hidden")) showFollowAt(follow.shownT);
     });
+
+    // ============================================================
+    // JUMP TO A WORD (click a timecode, or Ctrl/Cmd+click a word)
+    // ============================================================
+    //
+    // The reverse of following: a click on a line's timecode moves the
+    // playhead to the line's start, and Ctrl+click (Cmd+click on macOS) on a
+    // word moves it to the moment that word is said, from the same word
+    // times 👁 Follow uses. A plain click on a word still only places the
+    // caret, so editing never moves the timeline.
+
+    var JUMP_KEY_NAME = process.platform === "darwin" ? "Meta" : "Control";
+
+    function isJumpClick(e) {
+        return process.platform === "darwin" ? !!e.metaKey : !!e.ctrlKey;
+    }
+
+    /** The note line (a block directly in the editor) a node sits in, or null. */
+    function lineOf(node) {
+        while (node && node.parentNode !== el.noteEditor) node = node.parentNode;
+        return node || null;
+    }
+
+    /** The index of the word of `line` under the point (x, y), else the nearest word on that row, or -1. */
+    function wordIndexAt(line, x, y) {
+        var ranges = wordRanges(line);
+        var best = -1;
+        var bestGap = Infinity;
+        for (var i = 0; i < ranges.length; i++) {
+            var rects = ranges[i].getClientRects();
+            for (var k = 0; k < rects.length; k++) {
+                var r = rects[k];
+                if (y < r.top - 2 || y > r.bottom + 2) continue;
+                var gap = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
+                if (gap < bestGap) {
+                    bestGap = gap;
+                    best = i;
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Moves the playhead to `t` (seconds from the timeline start) and shows the word there at once. */
+    function movePlayhead(t, timeline) {
+        return evalScriptP("setPlayhead(" + JSON.stringify(Math.max(0, t)) + ")").then(function (r) {
+            if (!r || !r.ok) {
+                setStatus((r && r.msg) || "Could not move the playhead", 3000);
+                return;
+            }
+            // A jump is not playback: the highlight must not glide on from it.
+            follow.lastT = r.t;
+            follow.lastAt = Date.now();
+            follow.rate = 0;
+            follow.movingUntil = 0;
+            if (appState.settings.follow && notesShowing()) showFollowAt(r.t);
+            scheduleFollow(FOLLOW_SLOW_MS);
+            setStatus("Playhead at " + LazyAlign.formatTimecode(timeline.offset + r.t, timeline.fps), 2000);
+        });
+    }
+
+    /** `tag`: jump to its line's start. Else jump to word `wordIndex` of `line` (its start when -1). */
+    function jumpInNote(line, wordIndex, tag) {
+        return evalScriptP("getPlayhead()").then(function (p) {
+            if (!p || !p.ok) {
+                setStatus((p && p.msg ? p.msg + ": " : "") + "open the sequence or composition first", 3000);
+                return;
+            }
+            if (tag) {
+                var times = tagTimes(tag, p);
+                if (!times) return setStatus("This timecode cannot be read: write it like [00:01:24:12]", 4000);
+                return movePlayhead(times.start, p);
+            }
+            var lines = followModel(p).lines;
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i].node !== line) continue;
+                var t = wordIndex >= 0 && wordIndex < lines[i].words.length ? lines[i].words[wordIndex] : lines[i].start;
+                return movePlayhead(t, p);
+            }
+            setStatus("This line has no timecode yet: click 🎙️ Time to Audio first", 4000);
+        });
+    }
+
+    el.noteEditor.addEventListener("click", function (e) {
+        if (isModalOpen() || noteMenuOpen() || !hasOpenProject()) return;
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed) return; // a drag that selected text
+        var tag = e.target && e.target.closest ? e.target.closest(".timecode-tag") : null;
+        if (tag && el.noteEditor.contains(tag)) {
+            jumpInNote(lineOf(tag), -1, tag);
+            return;
+        }
+        if (!isJumpClick(e)) return;
+        var line = lineOf(e.target);
+        if (!line) return;
+        e.preventDefault();
+        jumpInNote(line, wordIndexAt(line, e.clientX, e.clientY), null);
+    });
+
+    // While Ctrl (Cmd) is held over the note, the pointer shows that a click jumps.
+    document.addEventListener("keydown", function (e) {
+        if (e.key === JUMP_KEY_NAME) el.noteEditor.classList.add("jump-keys");
+    });
+    document.addEventListener("keyup", function (e) {
+        if (e.key === JUMP_KEY_NAME) el.noteEditor.classList.remove("jump-keys");
+    });
+    window.addEventListener("blur", function () { el.noteEditor.classList.remove("jump-keys"); });
 
     // ============================================================
     // LAZYPASTE ENGINE (Clipboard Image to Timeline)

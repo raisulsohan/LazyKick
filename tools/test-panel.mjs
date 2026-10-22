@@ -292,6 +292,7 @@ const host = {
   subtitleCalls: [],
   playhead: null,            // seconds from the timeline start, or null for no timeline
   playheadCalls: 0,
+  jumps: [],                 // times the panel moved the playhead to (setPlayhead)
   refuseProject: false,
   timecode: { ok: true, timecode: "00:00:05:00" },
 };
@@ -347,6 +348,11 @@ function answer(script) {
     case "getPlayhead":
       host.playheadCalls++;
       return JSON.stringify(host.playhead === null ? { ok: false, msg: "No sequence" } : { ok: true, t: host.playhead, fps: 25, offset: 0, name: "Seq 01" });
+    case "setPlayhead":
+      if (host.playhead === null) return JSON.stringify({ ok: false, msg: "Open a sequence first" });
+      host.jumps.push(args[0]);
+      host.playhead = args[0];
+      return JSON.stringify({ ok: true, t: args[0] });
     case "getTimelineAudio": {
       host.audioCalls.push(args[0]);
       const reply = host.audioReply(args[0]);
@@ -1649,6 +1655,42 @@ try {
   await advance(250);
   check("follow: before the first line, nothing shows", $("followLayer").classList.contains("hidden"));
   eq("follow: no scrolling while everything is in view", doc.scrolls.length, 0);
+
+  // ---- Jump: Ctrl+click a word, or click a timecode, and the playhead goes there
+  const lineAt = (i) => $("noteEditor").children[i];
+  // The fake DOM does not bubble: the click goes to the editor, with the clicked element as its target.
+  const clickOn = (target, props) => $("noteEditor").dispatch("click", { target, ...props });
+  const ctrlClick = (i, x) => clickOn(lineAt(i), { ctrlKey: true, clientX: x, clientY: i * 20 + 6 });
+  ctrlClick(2, 5 * 7 + 6);                              // on "two" (5 characters in, 7 px each)
+  await settle();
+  eq("jump: Ctrl+click a word, the playhead goes to the moment it is said", host.jumps.join(","), "1.6");
+  eq("jump: the word lights up at once", $("followWord").style.left, `${5 * 7 - 2}px`);
+  check("jump: says where", /Playhead at 00:00:01:15/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  ctrlClick(2, 9 * 7 + 4 * 7 + 30);                     // past the end of "three", the nearest word
+  await settle();
+  eq("jump: a click beside the words takes the nearest word", host.jumps.slice(-1)[0], 2.2);
+  clickOn(lineAt(3), { clientX: 6 * 7 + 6, clientY: 3 * 20 + 6 });
+  await settle();
+  eq("jump: a plain click on a word only places the caret", host.jumps.length, 2);
+  clickOn(tagOf(lineAt(3)), { clientX: 4, clientY: 3 * 20 + 6 });
+  await settle();
+  eq("jump: a click on a timecode goes to its line's start", host.jumps.slice(-1)[0], 4);
+  ctrlClick(0, 10);                                     // the title: no timecode
+  await settle();
+  eq("jump: a line with no timecode does not move the playhead", host.jumps.length, 3);
+  check("jump: ... and says what to do", /no timecode yet: click 🎙️ Time to Audio first/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  const playheadBefore = host.playhead;
+  host.playhead = null;
+  ctrlClick(2, 10);
+  await settle();
+  eq("jump: no sequence open, nothing moves", host.jumps.length, 3);
+  check("jump: ... and says so", /open the sequence or composition first/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  host.playhead = playheadBefore;
+  // A jump leaves Follow at its resting pace; playback going on picks the fast pace up again.
+  host.playhead = 0.2;
+  await advance(1000);
+  doc.scrolls = [];
+
   host.playhead = 10 + 23 * 2 + 0.2;                   // the last filler line, far below the fold
   await advance(250);
   eq("follow: a line out of view is scrolled up to a third of the way down", doc.scrolls[0], (4 + 23) * 20 - 400 * 0.3);

@@ -39,7 +39,7 @@ if (typeof JSON === "undefined" || !JSON.stringify) {
 var LazyKickHost = (function () {
     "use strict";
 
-    var VERSION = "1.7.3";
+    var VERSION = "1.8.0";
     var PASTE_BIN_DEFAULT = "Pasted Images";
     var TIME_EPSILON = 0.0005; // seconds; clip edges and the playhead are floats
 
@@ -1375,6 +1375,36 @@ var LazyKickHost = (function () {
         }
     }
 
+    /**
+     * Moves the playhead to `seconds` from the timeline's start (the time the
+     * note's tags are measured in), when a timecode or a word in the note is
+     * clicked. Never before the start; in After Effects never past the end.
+     */
+    function setPlayhead(seconds) {
+        try {
+            var t = Number(seconds);
+            if (isNaN(t) || !isFinite(t)) return reply(false, "Not a time: " + seconds);
+            if (t < 0) t = 0;
+            var host = getHostName();
+            if (host === "ae") {
+                var tl = timelineAE();
+                if (!tl) return reply(false, "Open a composition first");
+                if (tl.duration > 0 && t > tl.duration) t = tl.duration;
+                tl.comp.time = t;
+                return reply(true, "OK", { t: t });
+            }
+            if (host === "ppro") {
+                var seq = app.project.activeSequence;
+                if (!seq) return reply(false, "Open a sequence first");
+                seq.setPlayerPosition(String(Math.round(t * TICKS_PER_SECOND)));
+                return reply(true, "OK", { t: t });
+            }
+            return reply(false, "Unsupported host application");
+        } catch (e) {
+            return reply(false, "Error: " + e.toString());
+        }
+    }
+
     /** Premiere's own "Waveform Audio 48kHz 16-bit" export preset, wherever Premiere is installed. */
     function wavPresetPPRO() {
         var starts = [];
@@ -1700,6 +1730,7 @@ var LazyKickHost = (function () {
         syncWatchBin: syncWatchBin,
         getTimelineInfo: getTimelineInfo,
         getPlayhead: getPlayhead,
+        setPlayhead: setPlayhead,
         getTimelineAudio: getTimelineAudio,
         placeSubtitles: placeSubtitles,
         // Pure helpers, exported for tools/test-host.js
@@ -1726,5 +1757,6 @@ function syncWatchBin(binPath, payloadJson, expectedProjectId) {
 }
 function getTimelineInfo() { return LazyKickHost.getTimelineInfo(); }
 function getPlayhead() { return LazyKickHost.getPlayhead(); }
+function setPlayhead(seconds) { return LazyKickHost.setPlayhead(seconds); }
 function getTimelineAudio(wavPath) { return LazyKickHost.getTimelineAudio(wavPath); }
 function placeSubtitles(payloadJson) { return LazyKickHost.placeSubtitles(payloadJson); }

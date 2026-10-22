@@ -986,6 +986,13 @@ section("Premiere Pro: script to audio", function () {
 
     var ph = parse(getPlayhead());
     eq("ppro playhead: seconds from the sequence start, with fps and offset", ph.ok + ":" + ph.t + ":" + ph.fps + ":" + ph.offset + ":" + ph.name, "true:0:25:3600:Seq 01");
+    var positions = [];
+    app.project.activeSequence.setPlayerPosition = function (ticks) { positions.push(ticks); };
+    var jumped = parse(setPlayhead(12.5));
+    eq("ppro set playhead: ticks from the sequence start, as a string", jumped.ok + ":" + typeof positions[0] + ":" + positions[0], "true:string:" + String(12.5 * TICKS));
+    parse(setPlayhead(-3));
+    eq("ppro set playhead: never before the start", positions[1], "0");
+    eq("ppro set playhead: not a time", parse(setPlayhead("x")).ok + ":" + positions.length, "false:2");
     var info = parse(getTimelineInfo());
     eq("ppro info: sequence", info.ok + ":" + info.name + ":" + info.fps, "true:Seq 01:25");
     eq("ppro info: timecode offset and length", info.offset + ":" + info.duration, "3600:3690");
@@ -1025,6 +1032,7 @@ section("Premiere Pro: script to audio", function () {
     eq("ppro audio: no sequence", parse(getTimelineAudio("C:/Temp/x.wav")).msg, "Open a sequence first");
     eq("ppro info: no sequence", parse(getTimelineInfo()).ok, false);
     eq("ppro playhead: no sequence", parse(getPlayhead()).ok, false);
+    eq("ppro set playhead: no sequence", parse(setPlayhead(1)).msg, "Open a sequence first");
 
     // Subtitles: the SRT goes into a Subtitles bin and onto a caption track.
     setupPremiereAudio([new PAudioTrack("A1", false, [])]);
@@ -1151,6 +1159,10 @@ section("After Effects: script to audio", function () {
     comp.time = 2.48;
     var aePh = parse(getPlayhead());
     eq("ae playhead: comp time, fps and start offset", aePh.ok + ":" + aePh.t + ":" + aePh.fps + ":" + aePh.offset + ":" + aePh.name, "true:2.48:25:0:Explainer");
+    eq("ae set playhead: the comp's time", parse(setPlayhead(3.2)).ok + ":" + comp.time, "true:3.2");
+    parse(setPlayhead(99));
+    eq("ae set playhead: never past the comp's end", comp.time, 10);
+    comp.time = 2.48;
     var info = parse(getTimelineInfo());
     eq("ae info: composition", info.ok + ":" + info.name + ":" + info.fps + ":" + info.duration, "true:Explainer:25:10");
 
@@ -1214,6 +1226,7 @@ section("After Effects: script to audio", function () {
     eq("ae subtitles: no comp", parse(placeSubtitles(JSON.stringify({ cues: cues }))).msg, "Open a composition first");
     eq("ae audio: no comp", parse(getTimelineAudio("")).msg, "Open a composition first");
     eq("ae playhead: no comp", parse(getPlayhead()).ok, false);
+    eq("ae set playhead: no comp", parse(setPlayhead(1)).msg, "Open a composition first");
 });
 
 // ------------------------------------------------------------------ report

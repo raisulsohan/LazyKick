@@ -496,6 +496,10 @@ body, html {
     color: var(--text-muted);
 }
 
+/* A click on a timecode, or Ctrl/Cmd+click on a word, moves the playhead there. */
+.rich-editor .timecode-tag,
+.rich-editor.jump-keys { cursor: pointer; }
+
 .timecode-tag {
     display: inline-block;
     background: rgba(60, 169, 255, 0.15);

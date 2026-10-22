@@ -177,6 +177,7 @@ returns a JSON string `{ ok, msg, … }` unless noted.
 | `importFilesToBin(binPath, filesJson, expectedProjectId)` | The 1.2 call: straight into one bin, no subfolders or sorting |
 | `getTimelineInfo()` | The open sequence or composition: `name`, `fps`, `offset` (the time its timecode starts at, seconds), `duration` |
 | `getPlayhead()` | Kept tiny for polling: `t` (seconds from the timeline start), `fps`, `offset`, `name` |
+| `setPlayhead(seconds)` | Moves the playhead to `seconds` from the timeline start: After Effects `comp.time` (kept inside the comp), Premiere `setPlayerPosition` in ticks; never before 0. Returns `t` |
 | `getTimelineAudio(wavPath)` | Premiere Pro: exports the sequence mix to `wavPath` with *Waveform Audio 48kHz 16-bit* (`kind: "wav"`). After Effects: *Convert Audio to Keyframes* on the audible layers, one loudness value a frame (`kind: "levels"`, `step`, `start`, `values`). `used: "selected"` when only the selected clips or layers were heard |
 | `placeSubtitles(payloadJson)` | `{ srtPath, cues: [{ s, e, t }] }`. Premiere Pro: imports the SRT into a *Subtitles* bin and calls `createCaptionTrack`. After Effects: one box-text layer per cue |
 
@@ -290,6 +291,13 @@ absolutely positioned layer over the editor (`#followLayer`), sized from DOM
 `Range` rectangles of each word, so it is never part of the note. Between two
 answers it glides at the measured playback rate with `requestAnimationFrame`.
 Auto-scroll pauses for 2.5 s after the user scrolls, clicks or types.
+
+The jump is the reverse: a click on a `.timecode-tag`, or Ctrl+click (Cmd on
+macOS) on a word, asks `getPlayhead()` for the timeline's fps and offset,
+finds the word under the pointer from the same `wordRanges` rectangles (the
+nearest word on that row when the click falls between words), takes its time
+from the follow model, and calls `setPlayhead(seconds)`. The follow state is
+reset to that time with no glide rate, since a jump is not playback.
 
 ### Watch bins
 

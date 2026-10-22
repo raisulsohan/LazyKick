@@ -2,6 +2,16 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.8.0
+
+### 🎯 Jump to a word
+- **Click a line's timecode** and the playhead moves to the start of that line (the measured start, or the time written in a tag you typed or edited).
+- **Ctrl+click a word** (Cmd+click on macOS) and the playhead moves to the moment that word is said, from the same word times 👁 Follow uses. A click between words takes the nearest word on that row. With 👁 Follow on, the word lights up at once, and the highlight does not glide on from the jump, since a jump is not playback.
+- A plain click on a word still only places the caret, so editing never moves the timeline. While Ctrl (Cmd) is held over the note, and over any timecode, the pointer is a hand.
+- A line with no timecode says to click 🎙️ Time to Audio first; with no sequence or composition open, the status bar says so too. The status bar shows where the playhead went, in the timeline's own timecode.
+- New host function `setPlayhead(seconds)`: After Effects sets the composition's time (kept inside the comp), Premiere Pro calls `setPlayerPosition` in ticks; never before the timeline's start.
+- Roadmap item "timecode stamps you can click to jump the playhead" is done.
+
 ## 1.7.3
 
 ### Fixed
