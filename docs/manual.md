@@ -328,9 +328,11 @@ subtitle.
 ## 7. Follow the voiceover while it plays
 
 With **👁 Follow** on (it is on by default), press play: the line being
-spoken gets a soft blue band, the word being said glows, and the note
-scrolls so the line stays in view. Scrubbing works too. No more searching
-for where you are in a long script.
+spoken gets a soft blue band, the word being said gets a ring around it,
+and the note scrolls so the line stays in view. Scrubbing works too. No more
+searching for where you are in a long script. On a pasted highlight the
+word keeps its own colours and gets a dark and white ring, which shows on
+any highlight colour.
 
 - It needs timed lines (🎙️ Time to Audio, or lines starting with a
   timecode).

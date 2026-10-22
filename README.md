@@ -23,7 +23,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.7.2** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.7.3** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
 
@@ -60,6 +60,8 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.7.2** ·
 ---
 
 ## 🆕 What's New in 1.7
+
+**1.7.3:** with **👁 Follow**, the word being said is easy to see on a pasted highlight too: it gets a dark and white ring and keeps its own colours.
 
 **1.7.2:** a new **🔠 Titles** switch next to 🎙️ Time to Audio, on by default: the title and headings are timed and become subtitles like spoken lines; switch it off when they are not said in the voiceover. Also, Paste without formatting into an emptied note no longer turns the text into a large heading.
 
@@ -259,7 +261,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.7.2.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.7.3.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**

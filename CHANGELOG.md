@@ -2,6 +2,11 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.7.3
+
+### Fixed
+- **👁 Follow: the word being said could not be seen on a pasted highlight.** Its see-through blue glow mixed with an orange or cyan mark, so the word looked muddy and the highlight did not stand out. The word now gets a ring: on a highlight, a dark and a white ring with no fill, so the word keeps its own colours and the ring shows on any mark colour; on plain text, a white and dark ring with a light blue fill. The blue haze around it is gone.
+
 ## 1.7.2
 
 ### 🔠 Titles: time the title the voiceover reads

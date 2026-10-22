@@ -397,9 +397,15 @@ body, html {
 .follow-word {
     position: absolute;
     border-radius: 3px;
-    background: rgba(60, 169, 255, 0.26);
-    box-shadow: 0 0 6px rgba(60, 169, 255, 0.35);
+    background: rgba(60, 169, 255, 0.22);
+    box-shadow: 0 0 0 1.5px #fff, 0 0 0 3px rgba(0, 0, 0, 0.75);
     transition: left 0.09s linear, top 0.12s ease, width 0.09s linear, height 0.12s ease;
+}
+/* On a pasted highlight the word keeps its own colours: no fill (it muddied the
+   mark and hid the word), only a dark and a white ring, which show on any mark. */
+.follow-word.on-mark {
+    background: transparent;
+    box-shadow: 0 0 0 2px #111, 0 0 0 3.5px #fff;
 }
 
 /* ---- Pasted documents: the structure of the Doc, in the panel's colours ---- */

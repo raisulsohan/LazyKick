@@ -191,6 +191,7 @@ function fakeRect(left, top, width, height) { return { left, top, width, height,
 /** Ranges measure words on the fake layout: the line's top, and 7 px per character before the start. */
 class FakeRange {
   selectNodeContents() {} collapse() {}
+  get startContainer() { return this.sn; }
   setStart(node, offset) { this.sn = node; this.so = offset; }
   setEnd(node, offset) { this.en = node; this.eo = offset; }
   getBoundingClientRect() {
@@ -1612,7 +1613,9 @@ try {
     { tag: "h1", kids: ["Title"] },
     { tag: "p", cls: "note-muted", kids: ["Series: x"] },
     lineEl("One two three", 1, 3, "0,0.6,1.2"),
-    lineEl("Four five six seven", 4, 6, "0,0.5,1,1.5"),
+    // On a pasted orange highlight.
+    { tag: "p", kids: [{ tag: "span", cls: "timecode-tag", text: `[${LazyAlign.formatTimecode(4, 25)}]` }, " ", { tag: "span", cls: "note-color", text: "Four five six seven" }],
+      t: 4, e: 6, w: "0,0.5,1,1.5", mark: "ff9900" },
   ];
   for (let i = 0; i < 24; i++) followLines.push(lineEl(`Filler line ${i}`, 10 + i * 2, 11.5 + i * 2, "0,0.5,1"));
   setEditor(followLines);
@@ -1620,6 +1623,7 @@ try {
     const spec = followLines[i];
     const tg = tagOf(k);
     if (tg && spec.t !== undefined) { tg.setAttribute("data-t", String(spec.t)); tg.setAttribute("data-e", String(spec.e)); tg.setAttribute("data-w", spec.w); }
+    if (spec.mark) k.children.find((c) => c.classList.contains("note-color")).setAttribute("data-bg", spec.mark);
   });
   $("noteEditor").dispatch("input");
   $("tabNotes").classList.add("active");
@@ -1632,10 +1636,12 @@ try {
   eq("follow: on the line being said (the third block: headings are skipped)", $("followLine").style.top, `${2 * 20 - 2}px`);
   eq("follow: on the word being said (\"two\" starts 5 characters in)", `${$("followWord").style.left}|${$("followWord").style.width}`, `${5 * 7 - 2}px|${3 * 7 + 4}px`);
   check("follow: the word shows", !$("followWord").classList.contains("hidden"));
+  check("follow: on plain text, the usual look (ring and blue fill)", !$("followWord").classList.contains("on-mark"));
   host.playhead = 4.6;
   await advance(900);
   eq("follow: next line", $("followLine").style.top, `${3 * 20 - 2}px`);
   eq("follow: its second word (\"five\" starts 6 characters in)", $("followWord").style.left, `${6 * 7 - 2}px`);
+  check("follow: on a pasted highlight, the ring without fill that shows on any mark", $("followWord").classList.contains("on-mark"));
   host.playhead = 3.5;
   await advance(250);
   eq("follow: in a pause the line stays, no word", `${$("followLine").style.top}|${$("followWord").classList.contains("hidden")}`, `${2 * 20 - 2}px|true`);

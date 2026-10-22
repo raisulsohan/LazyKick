@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.7.2";
+    var PANEL_VERSION = "1.7.3";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -1914,6 +1914,13 @@
         try { editor.scrollTo({ top: top, behavior: "smooth" }); } catch (e) { editor.scrollTop = top; }
     }
 
+    /** True when a text node sits on a pasted highlight (a colour span with a background). */
+    function isOnMark(node) {
+        var parent = node && node.parentNode;
+        var mark = parent && parent.closest ? parent.closest(".note-color") : null;
+        return !!(mark && el.noteEditor.contains(mark) && mark.getAttribute("data-bg"));
+    }
+
     function showFollowAt(t) {
         var model = follow.model;
         var pos = model && model.lines.length ? LazyAlign.followAt(model.lines, t) : { line: -1, word: -1 };
@@ -1945,6 +1952,7 @@
                 el.followWord.style.top = (wr.top - base.top - 1) + "px";
                 el.followWord.style.width = (wr.width + 4) + "px";
                 el.followWord.style.height = (wr.height + 2) + "px";
+                el.followWord.classList.toggle("on-mark", isOnMark(range.startContainer));
                 shown = true;
             }
         }
