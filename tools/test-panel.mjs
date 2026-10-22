@@ -1363,6 +1363,33 @@ try {
   eq("tidy: a colour span keeps its own colours only, a forged one is unwrapped", $("noteEditor").children[0].innerHTML,
     "<span class=\"note-color\" data-fg=\"000000\" data-bg=\"ffff00\" style=\"color:#000000;background-color:#ffff00\">marked</span> plain");
 
+  // Paste without formatting into a heading left empty (select all + delete keeps it): plain lines, not a heading.
+  setEditor([{ tag: "h2", kids: [] }]);
+  const leftHeading = $("noteEditor").children[0];
+  const usualSelection = context.window.getSelection;
+  context.window.getSelection = () => ({
+    rangeCount: 1, isCollapsed: true, anchorNode: leftHeading,
+    getRangeAt: () => ({ cloneRange: () => ({ startContainer: leftHeading }) }), removeAllRanges() {}, addRange() {},
+  });
+  $("noteEditor").dispatch("keydown", { key: "V", keyCode: 86, ctrlKey: true, shiftKey: true });
+  pasteInto("<h2>China Is Building a Dam</h2><p>High on the Tibetan Plateau.</p>", "China Is Building a Dam\nHigh on the Tibetan Plateau.");
+  await settle();
+  context.window.getSelection = usualSelection;
+  eq("plain paste: an empty heading at the caret becomes a plain line first", $("noteEditor").children.map((c) => c.tagName).join(","), "DIV");
+
+  // Lines Chromium split from a heading carry its size on a <span style>; plain text keeps the note's own style.
+  setEditor([]);
+  const splitLine = doc.createElement("div");
+  const sizeSpan = doc.createElement("span");
+  sizeSpan.setAttribute("style", "font-size: 21.875px;");
+  sizeSpan.appendChild(doc.createTextNode("High on the Tibetan Plateau."));
+  splitLine.appendChild(sizeSpan);
+  $("noteEditor").appendChild(splitLine);
+  $("noteEditor").dispatch("keydown", { key: "V", keyCode: 86, ctrlKey: true, shiftKey: true });
+  pasteInto("", "High on the Tibetan Plateau.");
+  await settle();
+  eq("plain paste: the size copied from a heading is removed", $("noteEditor").children[0].innerHTML, "High on the Tibetan Plateau.");
+
   // ---- The notes' right-click menu: Cut, Copy, Paste, Paste without formatting, Select all
   $("tabNotes").classList.add("active");
   const menuOpen = () => !$("noteMenu").classList.contains("hidden");
@@ -1502,7 +1529,32 @@ try {
   eq("text size: never above 24 px", $("noteEditor").style.fontSize, "24px");
   while (readJson(join(storage, "lazykick_settings.json")).notesFontSize > 14) $("btnTextSmaller").click();
 
-  // ---- Time to Audio skips headings and side notes, and keeps each word's time
+  // ---- 🔠 Titles, on at the start: a title the voiceover says is timed like any line
+  host.timeline = { ok: true, host: "ppro", name: "Seq 01", fps: 25, offset: 0, duration: total };
+  host.audioReply = (wavPath) => {
+    writeVoiceWav(wavPath);
+    return { ok: true, kind: "wav", path: wavPath, used: "all", name: "Seq 01", fps: 25, offset: 0, duration: total };
+  };
+  check("titles: the switch starts on", $("btnTimeTitles").classList.contains("is-on"));
+  setEditor([
+    { tag: "h2", kids: [script[0]] },
+    { tag: "p", cls: "note-muted", kids: ["Series: Nomolos | Target: 8-12 min"] },
+    { tag: "p", kids: [script[1]] },
+    { tag: "p", kids: [script[2]] },
+  ]);
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 3 lines/.test($("globalStatus").textContent), "title timed");
+  eq("titles on: the title gets a timecode, the grey side note does not", $("noteEditor").children.map((k) => (tagOf(k) ? "T" : "-")).join(""), "T-TT");
+  const titleTag = tagOf($("noteEditor").children[0]);
+  check("titles on: the title lands on its words", titleTag && Math.abs(parseFloat(titleTag.getAttribute("data-t")) - bursts[0].s) < 0.05,
+    titleTag && `${titleTag.getAttribute("data-t")} vs ${bursts[0].s}`);
+  eq("titles on: the title stays a heading", $("noteEditor").children[0].tagName, "H2");
+
+  $("btnTimeTitles").click();
+  check("titles: switched off", !$("btnTimeTitles").classList.contains("is-on"));
+  eq("titles: the choice is remembered", readJson(join(storage, "lazykick_settings.json")).timeTitles, false);
+
+  // ---- 🔠 Titles off: Time to Audio skips headings and side notes, and keeps each word's time
   setEditor([
     { tag: "h1", kids: ["#1 | Prohibition"] },
     { tag: "p", cls: "note-muted", kids: ["Series: Nomolos | Target: 8-12 min"] },
@@ -1512,11 +1564,6 @@ try {
     { tag: "h3", kids: ["THE PROBLEM"] },
     { tag: "p", kids: [script[2]] },
   ]);
-  host.timeline = { ok: true, host: "ppro", name: "Seq 01", fps: 25, offset: 0, duration: total };
-  host.audioReply = (wavPath) => {
-    writeVoiceWav(wavPath);
-    return { ok: true, kind: "wav", path: wavPath, used: "all", name: "Seq 01", fps: 25, offset: 0, duration: total };
-  };
   $("btnTimeToAudio").click();
   await waitFor(() => /Timed 3 lines/.test($("globalStatus").textContent), "headings skipped");
   const docKids = $("noteEditor").children;
@@ -1530,6 +1577,8 @@ try {
     check(`word times: line ${i + 1} starts at 0 and only goes forward`, w[0] === 0 && w.every((x, j) => j === 0 || x >= w[j - 1]), w.join(","));
     check(`word times: line ${i + 1} ends inside the line`, w[w.length - 1] < bursts[i].e - bursts[i].s, `${w[w.length - 1]} vs ${bursts[i].e - bursts[i].s}`);
   });
+  $("btnTimeTitles").click();
+  eq("titles: on again, remembered", readJson(join(storage, "lazykick_settings.json")).timeTitles, true);
 
   // ---- A long paragraph becomes several subtitles, each when its first word is said
   const longText = "In 1920, a country decided to delete a problem. Not reduce it. Not manage it. Delete it. " +

@@ -61,7 +61,8 @@ THE THREE TABS
     1. Put the voiceover on the timeline and keep that sequence
        or composition open.
     2. Write or paste the script into a note, in the order it
-       is spoken. Headings and grey notes are skipped.
+       is spoken. Grey notes are skipped; titles and headings
+       too when the "Titles" button is off.
     3. Music on the timeline too? Select the voiceover clip or
        layer first, so only it is heard.
     4. Click "Time to Audio": every line starts with the time

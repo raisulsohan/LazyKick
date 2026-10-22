@@ -355,7 +355,7 @@ body, html {
     text-overflow: ellipsis;
 }
 
-.btn-follow.is-on {
+.btn-follow.is-on, .btn-titles.is-on {
     background: rgba(60, 169, 255, 0.16);
     border-color: rgba(60, 169, 255, 0.55);
     color: var(--accent-cyan);

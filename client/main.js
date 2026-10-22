@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.7.1";
+    var PANEL_VERSION = "1.7.2";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -133,6 +133,7 @@
             targetFolder: DEFAULT_PASTE_FOLDER,
             notesFontSize: DEFAULT_NOTES_FONT_SIZE,
             follow: true,
+            timeTitles: true, // 🔠 Titles: headings are timed and subtitled like spoken lines
             subtitles: null   // the last Create subtitles choices (LazyAlign.cueOptions fills the gaps)
         },
         recentPastes: [],
@@ -193,6 +194,7 @@
         dialogOk:              document.getElementById("dialogOk"),
         btnTimeToAudio:        document.getElementById("btnTimeToAudio"),
         btnFollow:             document.getElementById("btnFollow"),
+        btnTimeTitles:         document.getElementById("btnTimeTitles"),
         btnTextSmaller:        document.getElementById("btnTextSmaller"),
         btnTextBigger:         document.getElementById("btnTextBigger"),
         tabNotes:              document.getElementById("tabNotes"),
@@ -524,6 +526,7 @@
             appState.settings.notesFontSize = s.notesFontSize;
         }
         if (s.follow !== undefined) appState.settings.follow = !!s.follow;
+        if (s.timeTitles !== undefined) appState.settings.timeTitles = !!s.timeTitles;
         if (s.subtitles && typeof s.subtitles === "object") appState.settings.subtitles = s.subtitles;
 
         el.optGuideLayer.checked = appState.settings.guideLayer;
@@ -532,6 +535,7 @@
         el.autoSyncToggle.checked = appState.autoSync;
         applyNotesFontSize();
         showFollowState();
+        showTitlesState();
     }
 
     function saveGeneralSettings() {
@@ -543,6 +547,7 @@
             lastPickerPath: appState.lastPickerPath,
             notesFontSize: appState.settings.notesFontSize,
             follow: appState.settings.follow,
+            timeTitles: appState.settings.timeTitles,
             subtitles: appState.settings.subtitles
         });
     }
@@ -1007,14 +1012,18 @@
         return node.nodeName === "BR" ? s + " " : s;
     }
 
-    /** A line that is part of the script's layout, not something said: a heading or a grey side note. */
+    /**
+     * A line that is part of the script's layout, not something said: a grey
+     * side note or a checklist item, and a heading while 🔠 Titles is off.
+     */
     function isUnspoken(node) {
-        return /^H[1-6]$/.test(node.nodeName) || node.classList.contains("note-muted") || node.classList.contains("todo-item");
+        return (/^H[1-6]$/.test(node.nodeName) && !appState.settings.timeTitles) ||
+               node.classList.contains("note-muted") || node.classList.contains("todo-item");
     }
 
     /**
-     * The note's spoken lines: [{ node, text }]. Headings, grey side notes,
-     * checklist items and lines like "---" are left out.
+     * The note's spoken lines: [{ node, text }]. Grey side notes, checklist
+     * items, lines like "---" and (with 🔠 Titles off) headings are left out.
      */
     function scriptLines() {
         normalizeEditorBlocks();
@@ -1494,6 +1503,7 @@
      * never inserted as it came. False when there was nothing to paste.
      */
     function insertClipboard(html, text, plain) {
+        demoteEmptyHeading();
         if (html && !plain && typeof DOMParser === "function") {
             // The paste was already stopped, so a failure here must not
             // lose it: fall through to the plain text.
@@ -1514,9 +1524,36 @@
         }
         if (!text) return false;
         document.execCommand("insertText", false, text);
+        // Lines split from a heading or a coloured run come with its size and
+        // look on a <span style>: plain text keeps the note's own style.
+        tidyEditor();
         rememberSelection();
+        noteChanged();
         debouncedSaveNote();
         return true;
+    }
+
+    /**
+     * A heading left with no text (select all and delete keeps the first
+     * line's heading) would make what is pasted into it a heading too, and
+     * every line split from it would take its size. It becomes a plain line
+     * first, with the caret in it.
+     */
+    function demoteEmptyHeading() {
+        var sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return;
+        var line = sel.anchorNode;
+        while (line && line.parentNode !== el.noteEditor) line = line.parentNode;
+        if (!line || line.nodeType !== 1 || !/^H[1-6]$/.test(line.nodeName)) return;
+        if (String(line.textContent).split(NBSP).join("").trim()) return;
+        var plainLine = document.createElement("div");
+        plainLine.appendChild(document.createElement("br"));
+        el.noteEditor.replaceChild(plainLine, line);
+        var range = document.createRange();
+        range.setStart(plainLine, 0);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
     }
 
     el.noteEditor.addEventListener("paste", function (e) {
@@ -1981,6 +2018,23 @@
         if (!appState.settings.follow) hideFollow();
         scheduleFollow(0);
         setStatus(appState.settings.follow ? "Following the playhead" : "Not following the playhead", 1500);
+    });
+
+    function showTitlesState() {
+        el.btnTimeTitles.classList.toggle("is-on", !!appState.settings.timeTitles);
+        el.btnTimeTitles.title = appState.settings.timeTitles
+            ? "Titles and headings are spoken: Time to Audio times them and Subtitles shows them, like any line. Click if they are not said in the voiceover."
+            : "Titles and headings are skipped by Time to Audio and Subtitles. Click if the voiceover says them.";
+    }
+
+    el.btnTimeTitles.addEventListener("click", function () {
+        appState.settings.timeTitles = !appState.settings.timeTitles;
+        saveGeneralSettings();
+        showTitlesState();
+        noteChanged(); // the followed lines change
+        setStatus(appState.settings.timeTitles
+            ? "Titles are timed too: click 🎙️ Time to Audio again to time them"
+            : "Titles are skipped: click 🎙️ Time to Audio again to time without them", 4000);
     });
 
     // Reading or typing in the note pauses the scrolling for a moment.

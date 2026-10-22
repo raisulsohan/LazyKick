@@ -248,8 +248,10 @@ it to Ctrl+V: the copied part with the page's `<style>` around it.
 
 ### Time to Audio
 
-`main.js` collects the spoken lines (skipping headings, `.note-muted`,
-checklist items and wordless lines), gets the audio from the host, and hands
+`main.js` collects the spoken lines (skipping `.note-muted`, checklist items,
+wordless lines, and headings while the 🔠 Titles setting `timeTitles` is
+off; `isUnspoken` decides for Time to Audio, Subtitles and Follow alike),
+gets the audio from the host, and hands
 the loudness envelope to `align.js`: `findSpeech` finds speech and pauses,
 `alignScript` aligns every sentence with dynamic programming (`alignLines`)
 and spreads the words (`wordTimes`). Each line then starts with a

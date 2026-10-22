@@ -130,10 +130,12 @@ In the real After Effects, lines landed within a frame of the truth.
 - **Keep music out of the measurement.** Select the voiceover clip or layer
   before clicking. A music bed fills the pauses, and the pauses are what the
   timing relies on.
-- **Headings and notes are fine.** Titles, headings, grey side notes and
-  checklists are skipped, so a pasted document works as it is. Keep
-  directions like *[pause]* or *(B-roll here)* in a grey note or a
-  heading, not in a spoken line.
+- **Headings and notes are fine.** Grey side notes and checklists are
+  skipped, so a pasted document works as it is. Titles and headings are
+  timed while **🔠 Titles** is on (the default), because a voiceover often
+  reads the title first; switch it off when the headings are section labels
+  nobody says. Keep directions like *[pause]* or *(B-roll here)* in a grey
+  note, not in a spoken line.
 - **Punctuate sentences.** The sentence ends are what the timing hangs on.
   A paragraph with no full stops is matched as one long sentence.
 - **Long numbers:** every digit counts about as much as a short word, so

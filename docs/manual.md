@@ -238,10 +238,16 @@ Each spoken line now starts with a timecode tag in the timeline's own
 timecode, like `[00:00:13:15]`. Clicking 🎙️ again re-times every line and
 replaces the tags; it never adds a second one.
 
-**What counts as a spoken line:** every paragraph or line with words in it.
-**Left out** are headings (and titles), grey side notes, checklist items and
-lines with no words, like `---`. So a pasted script with a title, a meta
-line and section headings such as *HOOK* times correctly as it is.
+**What counts as a spoken line:** every paragraph or line with words in it,
+titles and headings included while **🔠 Titles** is on (it is on by
+default). **Left out** are grey side notes, checklist items and lines with no
+words, like `---`.
+
+**🔠 Titles** decides about titles and headings. On: the voiceover says them,
+so they are timed and become subtitles like any line. Off: they are left out,
+so a pasted script with section headings such as *HOOK* that nobody reads
+aloud times correctly as it is. The choice is remembered; click 🎙️ again
+after a change.
 
 **Fixing a line:** edit the numbers in its tag. A tag you typed or changed
 (or one from **⏱️ Timecode**, including drop-frame `;` timecode) is read from
@@ -468,6 +474,7 @@ Every setting is remembered across restarts.
 | 🛠️ Paste & Tools | Shrink large images to fit the comp | Off | After Effects: scales images larger than the composition down to fit. Never enlarges. |
 | 🛠️ Paste & Tools | Save Folder / Bin Name | `Pasted Images` | The folder next to the project **and** the project bin the images go into. `/` makes nested folders; `..` and characters Windows forbids are removed. |
 | 📝 Notes | A− / A+ | 14 px | Note text size, 10 to 24 px. |
+| 📝 Notes | 🔠 Titles | On | Time titles and headings and make them subtitles, like spoken lines. Off: leave them out. |
 | 📝 Notes | 👁 Follow | On | Highlight the spoken line and word while the timeline plays. |
 | 📂 Watch Bins | Auto-Sync | Off | Import new media in the background every 6 seconds. |
 
@@ -505,7 +512,7 @@ older versions are still found.)
 | `proj_<number>.json` | The note tabs of one project |
 | `bins_proj_<number>.json` | The watch bins of one project, with the files synced and skipped |
 | `global_scratchpad.txt` | The 🌐 Global tab |
-| `lazykick_settings.json` | Paste options, text size, Follow, the last subtitle choices, Auto-Sync and the last folder picked |
+| `lazykick_settings.json` | Paste options, text size, Titles, Follow, the last subtitle choices, Auto-Sync and the last folder picked |
 | `recent_pastes.json` | The Recent Pastes list |
 | `paste_index.json` | Checksums of pasted images, to recognise a picture pasted again |
 

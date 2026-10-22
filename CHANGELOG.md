@@ -2,6 +2,15 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.7.2
+
+### 🔠 Titles: time the title the voiceover reads
+- **New 🔠 Titles switch** next to 🎙️ Time to Audio, **on by default** and remembered in `lazykick_settings.json`. On: titles and headings are spoken lines, so 🎙️ Time to Audio gives them a timecode, 💬 Subtitles makes them subtitles and 👁 Follow lights them up, while they keep looking like headings. Off: they are left out, as before 1.7.2, for section labels such as *HOOK* that nobody says. A voiceover often reads the video's title first; since 1.5 that title was skipped and every line after it could only be timed around it.
+- Grey side notes, checklist items and lines with no words are still always left out.
+
+### Fixed
+- **Paste without formatting into an emptied note made the text a heading.** Select all and Delete keeps the first line's heading (an empty `<h2>`), and Ctrl+Shift+V or the menu's Paste without formatting put the pasted text into it; Chromium then gave every line split from it the heading's size on a `<span style>` (`font-size: 21.875px`), so the whole script looked large. An empty heading at the caret now becomes a plain line before anything is pasted, and a plain paste is tidied like a rich one, so no size or style copied from a heading stays.
+
 ## 1.7.1
 
 ### Fixed
