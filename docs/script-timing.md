@@ -77,7 +77,39 @@ tries every arrangement and keeps the one with the lowest total cost.
   Ending on a breath costs.
 - **Pace:** by any point in the audio, about that much of the script should
   have been read. Drifting far ahead or behind costs.
-- Sentences stay in order and cover the speech exactly once.
+- Sentences stay in order. Every bit of speech belongs to a sentence, except
+  a **retake** (below).
+
+### Retakes in an unedited recording
+
+A reader who stumbles stops, waits, and says the passage again. In the
+recording the passage is there twice; in the script once. LazyKick takes
+**the later take**:
+
+- A stretch of speech that ends in a **long wait** can be left out. "Long"
+  means three times this reader's usual pause and at least 1.5 s; a knock or
+  a click in the middle of the wait does not break it.
+- Leaving speech out costs a little, so it only happens when the rest then
+  fits far better. Because the left-out stretch must end at the wait, it is
+  the earlier take that goes.
+- A retake starts with the same words as the take after the wait, so the
+  **rhythm of its loudness** in those first moments is alike. A stretch that
+  starts like the speech after the wait is left out more readily. This is
+  what tells a restart of the same sentence from a sentence that only
+  happens to end before a long pause.
+- Left-out speech does not count as script read when the pace is measured.
+
+The status bar tells how many retakes were left out.
+
+### Pinned lines
+
+When the timing still gets a line wrong, **pin** it: put the playhead where
+the line is really said, right-click the line and choose **📌 Start this
+line at the playhead**. The pinned line starts with the voice at or just
+after that point, and the script and the speech are cut there into sections
+that are timed on their own. A retake just before the pinned line can be
+left out of the section before it. Pins stay until you unpin them, also when
+🎙️ Time to Audio runs again.
 
 A line (or pasted paragraph) then **starts with its first sentence and ends
 with its last**.
@@ -122,11 +154,23 @@ them by more than half a second, up to 5 seconds.
 
 In the real After Effects, lines landed within a frame of the truth.
 
+**Retakes.** A test read with four retakes (a restart after the first
+words, a whole sentence twice with a knock in the wait, a restart from the
+sentence before, a restart after a shorter wait) lands **every line within
+0.1 s of its later take**; without leaving takes out, a line was off by more
+than 8 seconds. Pinning any one line at its true start keeps the others in
+place (21 of 22 pins). On a real unedited 19-minute recording with retakes
+(the speech recogniser as the reference again), sentences off by more than
+3 seconds fell from 8 to 2, and both of those were places where the
+recogniser itself picked the wrong take.
+
 ## Getting the best result
 
 - **The script must match the recording.** Same sentences, same order.
   Remove what the voiceover skips; add what was ad-libbed. A missing or extra
-  sentence shifts the lines around it until the next clear pause.
+  sentence shifts the lines around it until the next clear pause. Retakes
+  are fine when the reader waits before saying the passage again; for a
+  quick restart with no wait, pin the line.
 - **Keep music out of the measurement.** Select the voiceover clip or layer
   before clicking. A music bed fills the pauses, and the pauses are what the
   timing relies on.

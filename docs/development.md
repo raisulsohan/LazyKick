@@ -74,7 +74,7 @@ LazyKick/
 │   ├── test-panel.mjs        main.js in a VM with a fake DOM, fake host and real temp files (Node)
 │   ├── mini-html.mjs         Small HTML parser standing in for DOMParser in the Node tests
 │   ├── make-tts-fixture.mjs  Builds the real-speech fixtures with Windows' own voices
-│   ├── fixtures/             tts-voiceover.json: loudness and true times of those voiceovers
+│   ├── fixtures/             tts-voiceover.json, tts-retakes.json: loudness and true times of those voiceovers
 │   ├── ae-smoke-host.jsx     host.jsx inside the real After Effects
 │   ├── get-zxpsigncmd.mjs    Downloads Adobe's ZXPSignCmd into tools/vendor/
 │   ├── package-zxp.mjs       Signs the panel and builds the release zip
@@ -262,6 +262,33 @@ text no longer matches `data-t` was edited by hand and is read from its text
 (`parseTimecode`, drop-frame `;` included). [How script timing
 works](script-timing.md) explains the maths in plain words.
 
+**Retakes.** `alignLines` may leave a run of speech pieces out when the run
+ends at a wait of at least `retakeGap` (3 × the median pause, at least
+1.5 s; up to two sounds under 0.25 s inside the wait are stepped over) and
+starts at a pause. The skip costs `skip` (1) plus 0.05 per second, gets the
+wait's pause reward, and costs less by `like` (4) × (similarity − 0.5) when
+the run's first moments have the same loudness rhythm as the speech after
+the wait (`rhythmLike`: best correlation of the smoothed dB from
+`findSpeech`, over the run's length up to 1.5 s, ±0.25 s lag). Every DP
+cell keeps the speech its path left out, which the drift term does not
+count as script read. The outtakes are first found without the drift term
+(the pace still counts them as reading), then the timing runs with it at the
+pace of the speech that is left. `alignScript` returns `.outtakes`
+([{ s, e }]); the status bar counts them. Tuned on `tts-retakes.json` and on
+a real 19-minute unedited English recording scored against Windows' speech
+recogniser; `retakes: false` gives the old behaviour.
+
+**Pins.** A line's tag may carry `data-anchor` (seconds from the timeline
+start). `alignScript(texts, speech, { anchors: [{ line, t }] })` cuts the
+script and the speech at every pin (out-of-order pins are ignored) and times
+each section on its own: a pinned section starts with the first speech at
+or after its pin (`keepStart`, no leading skip), and the section before it
+may leave out a trailing retake, weighed against the pinned line's speech
+(`endGap`, `nextStart`). A section with no speech gets reading times. The
+menu's *Start this line at the playhead* writes the pin and re-times with
+the speech of the last listen when the timeline (project, name, fps, offset,
+duration) is the same (`heardAudio`), else it listens again.
+
 ### Subtitles
 
 💬 first opens the *Create subtitles* dialog (`askSubtitleOptions` in
@@ -339,7 +366,11 @@ Windows only, as two steps use Windows Script Host. In order:
    timing on real speech from
    `tools/fixtures/tts-voiceover.json`: three scripts read by Windows' voices
    with natural pauses, rushed pauses and a music bed. Every line must start
-   within 0.2 s; in the *paragraphs* fixture every sentence within 0.15 s.
+   within 0.2 s; in the *paragraphs* fixture every sentence within 0.15 s; no
+   normal read may leave any speech out. `tools/fixtures/tts-retakes.json` is
+   an unedited read with four retakes: every line within 0.1 s of its later
+   take (also inside paragraphs), every earlier take left out, and at least
+   10 of 11 single pinned lines keeping the others in place.
 4. **`test-paste.mjs`**: the HTML Google Docs, Word and web pages put on the
    clipboard. Structure survives; styles, links, images, scripts, hidden
    text and attributes (including injection attempts) do not.
@@ -347,14 +378,18 @@ Windows only, as two steps use Windows Script Host. In order:
    (with CEP's `module` on the page), a fake host and fake PowerShell, on
    real temp files. Notes, tabs, project switches, unsaved-to-saved moves,
    paste duplicates and names, watch-bin syncs, races and edits, Time to
-   Audio and Subtitles on both hosts, the Create subtitles dialog (defaults,
+   Audio and Subtitles on both hosts, pinned lines (re-timed from the audio
+   already heard, listened again after the timeline changed), the Create subtitles dialog (defaults,
    preview, greyed-out rows, Enter, Cancel, Esc, remembered choices, a project
    switch while it is open), document paste, text size, Follow, the in-panel
    dialog, and the CEP 9 syntax guard.
 
 `tools/make-tts-fixture.mjs` rebuilds the speech fixture with Windows'
 System.Speech voices: each sentence is spoken on its own and joined with
-known pauses, so the true times are exact to the sample.
+known pauses, so the true times are exact to the sample. With `--retakes` it
+builds only `tts-retakes.json`: every take cut to its voice (so the pauses
+are the reader's, not the synthesizer's padding), the waits 1.8–4.2 s, a
+knock in one of them.
 
 The mocks follow the documented host APIs, but they are not the real apps.
 `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close

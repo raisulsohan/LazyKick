@@ -6,8 +6,9 @@
  * The WAV reader against WAVs built here in every format Premiere can write,
  * the pause finder and line timing against real speech (Windows voices, with
  * true line times: tools/fixtures/tts-voiceover.json, made by
- * tools/make-tts-fixture.mjs), and the timecode and subtitle helpers. Also a
- * guard that align.js stays within CEP 9's Chromium 61 / Node 8.
+ * tools/make-tts-fixture.mjs), retakes in an unedited read and pinned lines
+ * (tools/fixtures/tts-retakes.json), and the timecode and subtitle helpers.
+ * Also a guard that align.js stays within CEP 9's Chromium 61 / Node 8.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +19,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = readFileSync(join(root, "client", "align.js"), "utf8");
 const A = createRequire(import.meta.url)(join(root, "client", "align.js"));
 const fixture = JSON.parse(readFileSync(join(root, "tools", "fixtures", "tts-voiceover.json"), "utf8"));
+const retakes = JSON.parse(readFileSync(join(root, "tools", "fixtures", "tts-retakes.json"), "utf8"));
 
 let passed = 0;
 const failures = [];
@@ -181,6 +183,7 @@ section("timing real speech", () => {
       check(`${name}, ${label}: every start within 0.2 s`, worst <= 0.2, worst.toFixed(3));
       check(`${name}, ${label}: every end within 0.25 s`, worstEnd <= 0.25, worstEnd.toFixed(3));
       check(`${name}, ${label}: in order, never overlapping`, spans.every((s, i) => s.end > s.start && (i === 0 || s.start >= spans[i - 1].end - 1e-9)));
+      eq(`${name}, ${label}: a read with no retakes leaves nothing out`, spans.outtakes.length, 0);
     }
   }
 
@@ -246,6 +249,68 @@ section("paragraphs of sentences", () => {
   check("script: a line without words still gets a time", blank.length === 2 && blank[0].start === 0 && blank[1].start > 0, JSON.stringify(blank));
   eq("script: no speech", A.alignScript(["Hello."], { segments: [], dips: [] }), null);
   eq("script: nothing heard at all", A.alignScript(["Hello."], null), null);
+});
+
+/* ------------------------------------------ an unedited read with retakes */
+section("retakes", () => {
+  // The reader stops, waits and says the passage again four times: after the
+  // first words, a whole sentence twice (a knock in the wait), from the
+  // sentence before, and after a shorter wait. The later take counts.
+  for (const [name, v] of Object.entries(retakes.variants)) {
+    const speech = A.findSpeech({ step: retakes.step, values: v.values });
+    const texts = v.lines.map((l) => l.text);
+    const worstStart = (timed) => Math.max(...timed.map((s, i) => Math.abs(s.start - v.lines[i].start)));
+
+    const every = A.alignScript(texts, speech, { retakes: false });
+    check(`${name}: the trap is real (without leaving takes out, a line is off by over 5 s)`, worstStart(every) > 5, worstStart(every).toFixed(2));
+
+    const timed = A.alignScript(texts, speech);
+    check(`${name}: every line starts within 0.1 s of its later take`, worstStart(timed) <= 0.1, worstStart(timed).toFixed(3));
+    check(`${name}: every earlier take is left out`, v.outtakes.every((o) => timed.outtakes.some((x) => x.s < o.end && x.e > o.start)),
+      JSON.stringify(timed.outtakes));
+    check(`${name}: no later take is left out`, v.lines.every((l) => !timed.outtakes.some((x) => x.s < l.end - 0.05 && x.e > l.start + 0.05)),
+      JSON.stringify(timed.outtakes));
+    check(`${name}: in order, never overlapping`, timed.every((s, i) => s.end > s.start && (i === 0 || s.start >= timed[i - 1].end - 1e-9)));
+
+    // Pasted as paragraphs: every sentence inside lands on its later take too.
+    const paras = [];
+    v.lines.forEach((l) => { (paras[l.paragraph] = paras[l.paragraph] || []).push(l); });
+    const byPara = A.alignScript(paras.map((p) => p.map((l) => l.text).join(" ")), speech);
+    let worstSentence = 0;
+    paras.forEach((p, i) => {
+      let w = 0;
+      for (const l of p) {
+        worstSentence = Math.max(worstSentence, Math.abs(byPara[i].start + byPara[i].words[w] - l.start));
+        w += A.splitWords(l.text).length;
+      }
+    });
+    check(`${name}: paragraphs, every sentence within 0.1 s of its later take`, worstSentence <= 0.1, worstSentence.toFixed(3));
+
+    // Pinning a line where it is really said keeps it there and times the rest around it.
+    let goodPins = 0;
+    for (let l = 1; l < texts.length; l++) {
+      const pinned = A.alignScript(texts, speech, { anchors: [{ line: l, t: v.lines[l].start - 0.1 }] });
+      if (Math.abs(pinned[l].start - v.lines[l].start) <= 0.1 && worstStart(pinned) <= 0.3) goodPins++;
+    }
+    check(`${name}: pinned at its true start, a line stays and the others still land (10 of the 11 pins at least)`, goodPins >= 10, goodPins);
+  }
+
+  // Pins on speech made by hand: each section is timed on its own.
+  const speech = { segments: [{ s: 1, e: 3 }, { s: 3.5, e: 5 }, { s: 9, e: 11 }, { s: 11.4, e: 13 }], dips: [] };
+  const lines = ["One two three four.", "Five six.", "Seven eight nine ten.", "Eleven."];
+  const free = A.alignScript(lines, speech, { retakes: false });
+  near("pins: without one, the long line takes the long piece", free[2].start, 9, 1e-9);
+  const pinned = A.alignScript(lines, speech, { anchors: [{ line: 1, t: 9 }] });
+  near("pins: the pinned line starts with the first speech at its time", pinned[1].start, 9, 1e-9);
+  check("pins: the lines before it stay before it", pinned[0].end <= 9 && pinned[0].start >= 1, JSON.stringify(pinned[0]));
+  check("pins: the lines after it come after it, in order", pinned[2].start >= pinned[1].end && pinned[3].start >= pinned[2].end, JSON.stringify(pinned));
+  const late = A.alignScript(lines, speech, { anchors: [{ line: 3, t: 20 }] });
+  check("pins: a pin past all speech still gives the line a time there", late[3].start === 20 && late[3].words.length === 1, JSON.stringify(late[3]));
+  const crossed = A.alignScript(lines, speech, { anchors: [{ line: 1, t: 9 }, { line: 2, t: 4 }, { line: 9, t: 1 }, { line: 3, t: NaN }] });
+  near("pins: out of order, out of range or not a time: ignored", crossed[1].start, 9, 1e-9);
+  check("pins: still a time for every line", crossed.length === 4 && crossed.every((s) => typeof s.start === "number"));
+  check("retake wait: three times the usual pause, at least 1.5 s", A.retakeGap({ segments: [{ s: 0, e: 1 }, { s: 1.2, e: 2 }, { s: 2.2, e: 3 }] }) === 1.5 &&
+    Math.abs(A.retakeGap({ segments: [{ s: 0, e: 1 }, { s: 1.8, e: 2 }, { s: 2.8, e: 3 }] }) - 2.4) < 1e-9);
 });
 
 /* --------------------------------------------------- words inside a line */

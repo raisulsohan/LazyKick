@@ -257,6 +257,23 @@ its text; LazyKick's own untouched tags keep their exact measured times.
 left out. Remove what the voiceover skips and add what was ad-libbed, or the
 lines after that point shift.
 
+**Unedited recordings with retakes** work too. When the reader stops, waits
+and says a passage again, the earlier take is left out and the later take
+counts. The status bar says how many retakes were left out, for example
+*Timed 32 lines … · 6 retakes left out*.
+
+**Pin a line** when a line still gets the wrong time (a quick restart with no
+wait, say):
+
+1. Put the playhead where the line is really said. **Ctrl+click** a nearby
+   word to get close, then scrub.
+2. Right-click the line and choose **📌 Start this line at the playhead**.
+3. The line starts there and its timecode turns amber with a 📌. Every other
+   line is timed again around it at once, from the audio already heard.
+
+Pins stay when 🎙️ Time to Audio runs again. Right-click a pinned line and
+choose **Unpin this line** to let it be timed freely again.
+
 What happens behind the button:
 
 - **Premiere Pro** exports the sequence's audio mix to a temporary WAV file

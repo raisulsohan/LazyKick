@@ -12,8 +12,11 @@
   from its loudness, and the lines are laid over the speech between them in
   proportion to how long each line takes to say. That works for any language
   (Bengali included) as long as the audio follows the script, which is what a
-  read voiceover does. Every function is pure, so tools/test-align.mjs runs
-  them in plain Node; the panel loads this file before main.js.
+  read voiceover does. An unedited recording also has retakes: a passage
+  said, a long wait, and the passage said again. The earlier take is left out
+  (alignLines), and lines the user pins to a time split the timing into
+  sections (alignScript). Every function is pure, so tools/test-align.mjs
+  runs them in plain Node; the panel loads this file before main.js.
 
   Same rules as main.js: plain ES5 for CEP 9's Chromium 61 / Node 8.
 */
@@ -224,7 +227,9 @@
         var minPause = opts.minPause || 0.12;
         var minSpeech = opts.minSpeech || 0.08;
         var db = toDb(envelope.values || [], step, opts.smooth || 0.05);
-        var result = { segments: [], dips: [], floor: 0, peak: 0 };
+        // The smoothed loudness itself goes along, so a retake can be told by
+        // its rhythm (see alignLines).
+        var result = { segments: [], dips: [], floor: 0, peak: 0, db: db, step: step, t0: t0 };
         if (!db.length) return result;
 
         var sorted = db.slice().sort(function (a, b) { return a - b; });
@@ -383,14 +388,83 @@
     }
 
     /**
+     * How alike the loudness rhythm is in the `seconds` (at most 1.5) after
+     * times a and b: the best normalized correlation of the smoothed dB,
+     * with a shifted up to 0.25 s either way. 1 is the same rhythm; 0 when
+     * the speech carries no loudness (speech made by hand, as in the tests).
+     */
+    function rhythmLike(speech, a, b, seconds) {
+        var db = speech.db;
+        var step = speech.step;
+        if (!db || !step) return 0;
+        var n = Math.round(Math.max(0.3, Math.min(1.5, seconds || 1.5)) / step);
+        var ia = Math.round((a - (speech.t0 || 0)) / step);
+        var ib = Math.round((b - (speech.t0 || 0)) / step);
+        var lagMax = Math.round(0.25 / step);
+        var best = 0;
+        for (var lag = -lagMax; lag <= lagMax; lag++) {
+            var x0 = ia + lag;
+            if (x0 < 0 || ib < 0 || x0 + n > db.length || ib + n > db.length) continue;
+            var mx = 0;
+            var my = 0;
+            for (var i = 0; i < n; i++) {
+                mx += db[x0 + i];
+                my += db[ib + i];
+            }
+            mx /= n;
+            my /= n;
+            var sxy = 0;
+            var sxx = 0;
+            var syy = 0;
+            for (var k = 0; k < n; k++) {
+                var dx = db[x0 + k] - mx;
+                var dy = db[ib + k] - my;
+                sxy += dx * dy;
+                sxx += dx * dx;
+                syy += dy * dy;
+            }
+            if (sxx > 0 && syy > 0) best = Math.max(best, sxy / Math.sqrt(sxx * syy));
+        }
+        return best;
+    }
+
+    function withOuttakes(spans, outtakes) {
+        spans.outtakes = outtakes;
+        return spans;
+    }
+
+    /**
+     * How long a wait must be to end a retake: three times this reader's
+     * usual pause (the median, which stays put however many waits there
+     * are), and at least 1.5 s. A reader who stumbles stops, waits, and
+     * starts again.
+     */
+    function retakeGap(speech) {
+        var gaps = [];
+        for (var i = 1; i < speech.segments.length; i++) gaps.push(speech.segments[i].s - speech.segments[i - 1].e);
+        gaps.sort(function (a, b) { return a - b; });
+        return Math.max(1.5, 3 * percentile(gaps, 0.5));
+    }
+
+    /**
      * Times for each line: [{ start, end }] in seconds from the envelope's
-     * start. weights: lineWeight() of each line, in reading order.
+     * start, with `.outtakes` ([{ s, e }]: speech no line got). weights:
+     * lineWeight() of each line, in reading order.
      *
      * Dynamic programming over the speech pieces picks where each line ends so
      * that every line's share of the speech matches its expected share (the
      * log of the ratio, squared), with a reward for ending on a long pause and
-     * a cost for ending on a breath. Lines stay in order and cover the speech
-     * exactly once.
+     * a cost for ending on a breath. Lines stay in order.
+     *
+     * Retakes: a reader who stumbles stops, waits and says the passage again,
+     * and the later take is the one that counts. So a stretch of speech that
+     * ends at a pause far longer than the reader's usual ones (retakeGap) may
+     * be left out, at a cost; the timing is then worked out again on the
+     * speech that is left. The earlier take is the one left out, because it
+     * is the one followed by the long pause. Options: retakes (false: every
+     * piece belongs to a line), retakeGap, keepStart (the first line starts
+     * with the speech: an anchored section), endGap (the silence after the
+     * speech before the section's end, when the next line is anchored).
      */
     function alignLines(weights, envelope, opts) {
         opts = opts || {};
@@ -403,7 +477,7 @@
         var K = pieces.length;
         var first = segs[0].s;
         var lastEnd = segs[segs.length - 1].e;
-        if (K < n) return proportional(weights, first, lastEnd);
+        if (K < n) return withOuttakes(proportional(weights, first, lastEnd), []);
 
         var cum = [0];
         for (var p = 0; p < K; p++) cum.push(cum[p] + (pieces[p].e - pieces[p].s));
@@ -420,57 +494,203 @@
         // should fall about where that much of the script has been read.
         var DRIFT = opts.drift !== undefined ? opts.drift : 2;
         var driftScale = Math.max(1, 0.05 * totalSpeech);
-        var readBefore = [0];
-        for (var rb = 0; rb < n; rb++) readBefore.push(readBefore[rb] + weights[rb] / totalWeight * totalSpeech);
+        // Leaving speech out: a fixed cost, so it only happens when it makes
+        // the rest fit far better, and a little more for every second.
+        var RETAKES = opts.retakes !== false;
+        var LONG = opts.retakeGap || retakeGap(speech);
+        var SKIP = opts.skip !== undefined ? opts.skip : 1;
+        var SKIP_PER_SECOND = 0.05;
+        // A retake starts with the same words as the take after the pause, so
+        // the loudness rhythm of their first moments is alike: leaving out a
+        // stretch whose start sounds like the speech after the pause costs less.
+        var LIKE = opts.like !== undefined ? opts.like : 4;
+        var likeCache = {};
+        /** Whether the stretch e..s-1 starts like the speech at piece s (s === K: the pinned line after the section). */
+        function soundsLike(e, s) {
+            var key = e + ":" + s;
+            if (likeCache[key] === undefined) {
+                // Only as long as the stretch lasts: a false start is short.
+                likeCache[key] = rhythmLike(speech, pieces[e].s, s < K ? pieces[s].s : opts.nextStart, pieces[s - 1].e - pieces[e].s);
+            }
+            return likeCache[key];
+        }
         function cutCost(piece) {
             var cut = piece.cutAfter;
             if (!cut) return 0;
             if (cut.dip) return BREATH;
             return -PAUSE * Math.log(1 + cut.gap / 0.25);
         }
-
-        // best[i][k]: lowest cost for lines 0..i-1 over pieces 0..k-1.
-        var INF = Infinity;
-        var best = [];
-        var from = [];
-        for (var i = 0; i <= n; i++) {
-            best.push(new Array(K + 1));
-            from.push(new Array(K + 1));
-            for (var z = 0; z <= K; z++) best[i][z] = INF;
+        /** The cut before piece k (0 < k < K) is a pause, not a breath. */
+        function pauseBefore(k) {
+            var cut = pieces[k - 1].cutAfter;
+            return !!(cut && !cut.dip);
         }
-        best[0][0] = 0;
-        for (var line = 1; line <= n; line++) {
-            var expected = totalSpeech * weights[line - 1] / totalWeight;
-            var maxK = K - (n - line);
-            for (var k = line; k <= maxK; k++) {
-                var tail = 0;
-                if (line < n) {
-                    var off = (cum[k] - readBefore[line]) / driftScale;
-                    tail = cutCost(pieces[k - 1]) + DRIFT * off * off;
+        /**
+         * A wait of at least LONG before piece k. A knock or a click inside
+         * the wait (a sound under 0.25 s) does not break it.
+         */
+        function longPauseBefore(k) {
+            var cut = k > 0 && k < K ? pieces[k - 1].cutAfter : null;
+            if (!cut || cut.dip) return false;
+            // Step back over up to two short sounds standing alone in the wait.
+            var q = k - 1;
+            for (var blips = 0; blips < 2 && q > 0 && pieces[q].e - pieces[q].s < 0.25; blips++) {
+                var before = pieces[q - 1].cutAfter;
+                if (!before || before.dip) break;
+                q--;
+            }
+            return pieces[k].s - pieces[q].e >= LONG;
+        }
+
+        var INF = Infinity;
+        function solve(spoken, drift) {
+            var readBefore = [0];
+            for (var rb = 0; rb < n; rb++) readBefore.push(readBefore[rb] + weights[rb] / totalWeight * spoken);
+            // best[i][k]: lowest cost for lines 0..i-1 ending at piece k-1.
+            // reach[i][s]: the same, with pieces left out before piece s.
+            // *Left: the speech the path to that cell left out, which does not
+            // count as script read when the drift is measured.
+            var best = [];
+            var bestLeft = [];
+            var from = [];
+            var reach = [];
+            var reachLeft = [];
+            var skipFrom = [];
+            for (var i = 0; i <= n; i++) {
+                best.push(new Array(K + 1));
+                bestLeft.push(new Array(K + 1));
+                from.push(new Array(K + 1));
+                for (var z = 0; z <= K; z++) {
+                    best[i][z] = INF;
+                    bestLeft[i][z] = 0;
                 }
-                for (var j = k - 1; j >= line - 1; j--) {
-                    var d = cum[k] - cum[j];
-                    if (d > expected * 6 && j < k - 1) break; // far too long already
-                    if (best[line - 1][j] === INF) continue;
-                    var r = Math.log(Math.max(d, 0.02) / Math.max(expected, 0.02));
-                    var cost = best[line - 1][j] + FIT * r * r + tail;
-                    if (cost < best[line][k]) {
-                        best[line][k] = cost;
-                        from[line][k] = j;
+            }
+            best[0][0] = 0;
+            function buildReach(row) {
+                var rr = best[row].slice();
+                var rl = bestLeft[row].slice();
+                var sf = new Array(K + 1);
+                if (RETAKES && row < n && !(row === 0 && opts.keepStart)) {
+                    var maxSkip = Math.min(45, Math.max(10, 3 * spoken * weights[row] / totalWeight));
+                    for (var s = 1; s < K; s++) {
+                        if (!longPauseBefore(s)) continue;
+                        // The long pause still counts as a place a line ends,
+                        // as it would if the take were kept.
+                        var pauseWorth = cutCost(pieces[s - 1]);
+                        for (var e = s - 1; e >= 0; e--) {
+                            var left = cum[s] - cum[e];
+                            if (left > maxSkip) break;
+                            if (best[row][e] === INF || (e > 0 && !pauseBefore(e))) continue;
+                            var c = best[row][e] + SKIP + SKIP_PER_SECOND * left + pauseWorth -
+                                    LIKE * Math.max(0, soundsLike(e, s) - 0.5);
+                            if (c < rr[s]) {
+                                rr[s] = c;
+                                rl[s] = bestLeft[row][e] + left;
+                                sf[s] = e;
+                            }
+                        }
+                    }
+                }
+                reach[row] = rr;
+                reachLeft[row] = rl;
+                skipFrom[row] = sf;
+            }
+            buildReach(0);
+            for (var line = 1; line <= n; line++) {
+                var expected = spoken * weights[line - 1] / totalWeight;
+                var maxK = K - (n - line);
+                for (var k = line; k <= maxK; k++) {
+                    var cutTail = line < n ? cutCost(pieces[k - 1]) : 0;
+                    for (var j = k - 1; j >= line - 1; j--) {
+                        var d = cum[k] - cum[j];
+                        if (d > expected * 6 && j < k - 1) break; // far too long already
+                        if (reach[line - 1][j] === INF) continue;
+                        var tail = cutTail;
+                        if (line < n && drift) {
+                            var off = (cum[k] - reachLeft[line - 1][j] - readBefore[line]) / driftScale;
+                            tail += drift * off * off;
+                        }
+                        var r = Math.log(Math.max(d, 0.02) / Math.max(expected, 0.02));
+                        var cost = reach[line - 1][j] + FIT * r * r + tail;
+                        if (cost < best[line][k]) {
+                            best[line][k] = cost;
+                            bestLeft[line][k] = reachLeft[line - 1][j];
+                            from[line][k] = j;
+                        }
+                    }
+                }
+                buildReach(line);
+            }
+            // Speech after the last line can be left out too: talk after a
+            // long pause at the very end, or a retake before an anchored line.
+            var endAt = K;
+            var endCost = best[n][K];
+            var beforePin = opts.endGap >= LONG && typeof opts.nextStart === "number";
+            if (RETAKES) {
+                for (var t = n; t < K; t++) {
+                    var ok = longPauseBefore(t) || (opts.endGap >= LONG && pauseBefore(t));
+                    var tc = best[n][t] + SKIP + SKIP_PER_SECOND * (cum[K] - cum[t]);
+                    // A retake just before a pinned line: weighed like one in
+                    // the middle, against the start of the pinned line.
+                    if (beforePin) tc += -PAUSE * Math.log(1 + opts.endGap / 0.25) - LIKE * Math.max(0, soundsLike(t, K) - 0.5);
+                    if (ok && tc < endCost) {
+                        endCost = tc;
+                        endAt = t;
                     }
                 }
             }
-        }
-        if (best[n][K] === INF) return proportional(weights, first, lastEnd);
+            if (endCost === INF) return null;
 
-        var spans = [];
-        var at = K;
-        for (var back = n; back >= 1; back--) {
-            var j0 = from[back][at];
-            spans.unshift({ start: pieces[j0].s, end: pieces[at - 1].e });
-            at = j0;
+            var spans = [];
+            var starts = [];
+            var outtakes = endAt < K ? [{ from: endAt, to: K }] : [];
+            var at = endAt;
+            for (var back = n; back >= 1; back--) {
+                var j0 = from[back][at];
+                spans.unshift({ start: pieces[j0].s, end: pieces[at - 1].e });
+                starts.unshift(j0);
+                var e0 = skipFrom[back - 1][j0];
+                if (e0 !== undefined) {
+                    outtakes.unshift({ from: e0, to: j0 });
+                    at = e0;
+                } else {
+                    at = j0;
+                }
+            }
+            return { spans: spans, starts: starts, outtakes: outtakes };
         }
-        return spans;
+
+        // The script's pace counts outtakes as reading until they are known,
+        // so they are found first without the pull of the pace; then the
+        // lines are timed with it, at the pace of the speech that is left,
+        // until the same speech is left out twice.
+        var canSkip = false;
+        for (var c0 = 1; RETAKES && !canSkip && c0 < K; c0++) canSkip = longPauseBefore(c0);
+        if (RETAKES && !canSkip) {
+            for (var c1 = n; !canSkip && c1 < K; c1++) canSkip = opts.endGap >= LONG && pauseBefore(c1);
+        }
+        function leftOut(res) {
+            var total = 0;
+            for (var o = 0; o < res.outtakes.length; o++) total += cum[res.outtakes[o].to] - cum[res.outtakes[o].from];
+            return total;
+        }
+        var result = solve(totalSpeech, DRIFT);
+        if (canSkip && DRIFT) {
+            var probe = solve(totalSpeech, 0);
+            var spoken = probe ? Math.max(totalSpeech - leftOut(probe), totalSpeech * 0.25) : totalSpeech;
+            for (var pass = 0; pass < 3 && spoken < totalSpeech - 1e-6; pass++) {
+                var next = solve(spoken, DRIFT);
+                if (!next) break;
+                result = next;
+                var nextSpoken = Math.max(totalSpeech - leftOut(next), totalSpeech * 0.25);
+                if (Math.abs(nextSpoken - spoken) < 1e-6) break;
+                spoken = nextSpoken;
+            }
+        }
+        if (!result) return withOuttakes(proportional(weights, first, lastEnd), []);
+        return withOuttakes(result.spans, result.outtakes.map(function (x) {
+            return { s: pieces[x.from].s, e: pieces[x.to - 1].e };
+        }));
     }
 
     // ============================================================
@@ -628,6 +848,103 @@
     function alignScript(texts, speech, opts) {
         if (!texts.length) return [];
         if (!speech || !speech.segments || !speech.segments.length) return null;
+        opts = opts || {};
+        var anchors = usableAnchors(opts.anchors, texts.length);
+        if (!anchors.length) return alignSection(texts, speech, opts);
+
+        // Pinned lines (anchors: [{ line, t }]) cut the script and the speech
+        // into sections, each timed on its own: a pinned line starts with the
+        // first speech at or after its time, and a retake just before it can
+        // be left out of the section before.
+        var gap = opts.retakeGap || retakeGap(speech);
+        var out = new Array(texts.length);
+        out.outtakes = [];
+        var bounds = [{ line: 0, t: -Infinity }].concat(anchors, [{ line: texts.length, t: Infinity }]);
+        for (var b = 0; b + 1 < bounds.length; b++) {
+            var from = bounds[b];
+            var to = bounds[b + 1];
+            if (to.line <= from.line) continue;
+            var part = speechBetween(speech, from.t, to.t);
+            var section = {};
+            for (var key in opts) if (opts.hasOwnProperty(key) && key !== "anchors") section[key] = opts[key];
+            section.retakeGap = gap;
+            section.keepStart = b > 0;
+            if (isFinite(to.t)) {
+                // The wait up to the pinned line's first speech, and where that speech starts.
+                var next = null;
+                for (var ns = 0; ns < speech.segments.length && next === null; ns++) {
+                    if (speech.segments[ns].e > to.t) next = Math.max(speech.segments[ns].s, to.t);
+                }
+                if (next !== null) {
+                    // A knock in the wait (a sound under 0.25 s, up to two) does not end it.
+                    var last = part.segments.length - 1;
+                    for (var blip = 0; blip < 2 && last > 0 && part.segments[last].e - part.segments[last].s < 0.25; blip++) last--;
+                    section.nextStart = next;
+                    section.endGap = next - (last >= 0 ? part.segments[last].e : from.t);
+                }
+            }
+            var lines = texts.slice(from.line, to.line);
+            var timed = part.segments.length ? alignSection(lines, part, section) : null;
+            if (!timed) timed = unheard(lines, isFinite(from.t) ? from.t : null, to.t);
+            for (var i = 0; i < timed.length; i++) out[from.line + i] = timed[i];
+            out.outtakes = out.outtakes.concat(timed.outtakes || []);
+        }
+        return out;
+    }
+
+    /** Anchors that can be used: one per line, in line order, each later than the one before. */
+    function usableAnchors(anchors, n) {
+        var list = [];
+        for (var i = 0; anchors && i < anchors.length; i++) {
+            var a = anchors[i];
+            if (a && a.line >= 0 && a.line < n && a.line === Math.floor(a.line) && typeof a.t === "number" && isFinite(a.t)) {
+                list.push({ line: a.line, t: Math.max(0, a.t) });
+            }
+        }
+        list.sort(function (x, y) { return x.line - y.line; });
+        var out = [];
+        for (var k = 0; k < list.length; k++) {
+            var last = out[out.length - 1];
+            if (last && (list[k].line === last.line || list[k].t <= last.t)) continue;
+            out.push(list[k]);
+        }
+        return out;
+    }
+
+    /** The speech between times a and b: segments cut to it and the breaths inside it, with the loudness. */
+    function speechBetween(speech, a, b) {
+        var out = { segments: [], dips: [], db: speech.db, step: speech.step, t0: speech.t0 };
+        for (var i = 0; i < speech.segments.length; i++) {
+            var s = Math.max(speech.segments[i].s, a);
+            var e = Math.min(speech.segments[i].e, b);
+            if (e - s > 0.03) out.segments.push({ s: s, e: e });
+        }
+        for (var d = 0; d < (speech.dips || []).length; d++) {
+            if (speech.dips[d] > a && speech.dips[d] < b) out.dips.push(speech.dips[d]);
+        }
+        return out;
+    }
+
+    /**
+     * Lines of a section with no speech in it: one after another by reading
+     * time, from `start`, or ending at `end` when the section has no start.
+     */
+    function unheard(lines, start, end) {
+        var times = lines.map(function (l) { return readingTime(l); });
+        var total = 0;
+        for (var i = 0; i < times.length; i++) total += times[i];
+        var t = start !== null ? start : Math.max(0, end - total);
+        var out = [];
+        for (var k = 0; k < lines.length; k++) {
+            var words = splitWords(lines[k]);
+            out.push({ start: t, end: t + times[k], words: proportionalWordTimes(words, 0, times[k]) });
+            t += times[k];
+        }
+        out.outtakes = [];
+        return out;
+    }
+
+    function alignSection(texts, speech, opts) {
         var sentences = [];
         var lines = [];
         for (var i = 0; i < texts.length; i++) {
@@ -646,6 +963,7 @@
         var spans = alignLines(units.map(function (u) { return lineWeight(u.text); }), speech, opts);
         if (!spans) return null;
         var out = [];
+        out.outtakes = spans.outtakes || [];
         for (var u = 0; u < units.length; u++) {
             var span = spans[u];
             var line = out[units[u].line];
@@ -904,6 +1222,7 @@
         isSpoken: isSpoken,
         alignLines: alignLines,
         alignScript: alignScript,
+        retakeGap: retakeGap,
         formatTimecode: formatTimecode,
         parseTimecode: parseTimecode,
         readingTime: readingTime,

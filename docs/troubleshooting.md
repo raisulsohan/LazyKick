@@ -153,7 +153,12 @@ You pasted an image file into the notes. Images are placed with
 
 - **The script must match the recording**: same sentences, same order,
   nothing left out. Remove what the voiceover skips, add what was
-  ad-libbed.
+  ad-libbed. Retakes in an unedited recording are left out by themselves
+  when the reader waited before starting again (the later take counts).
+- **Still wrong, for example after a quick restart?** Put the playhead where
+  the line is really said, right-click the line and choose **📌 Start this
+  line at the playhead**. The other lines are timed again around it, at
+  once. **Unpin this line** in the same menu undoes it.
 - **Music or effects under the voice** hide the pauses. Select the
   voiceover clip (Premiere) or layer (After Effects) first, so only it is
   heard.

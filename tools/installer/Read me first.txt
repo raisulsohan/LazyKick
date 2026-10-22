@@ -122,8 +122,11 @@ IF SOMETHING GOES WRONG
 
   Time to Audio put a line at the wrong time
       The script must match the recording: same sentences, same
-      order. Select only the voiceover if there is music, then
-      click Time to Audio again. You can also edit a timecode.
+      order. Retakes are left out when the reader waited before
+      saying the passage again. Select only the voiceover if there
+      is music, then click Time to Audio again. Still wrong? Put
+      the playhead where the line is said, right-click the line,
+      "Start this line at the playhead".
 
   More help: https://github.com/raisulsohan/LazyKick/tree/main/docs
 

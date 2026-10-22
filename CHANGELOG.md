@@ -2,6 +2,22 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.9.0
+
+### 🎙️ Retakes in an unedited recording
+- **Time to Audio leaves the earlier take of a retake out** and times the line to the later take. Before, every bit of speech had to belong to a line, so a passage said twice pushed the sentences after it onto the wrong takes, and 👁 Follow and 💬 Subtitles drifted from the voice for the rest of the paragraph.
+- A stretch of speech can be left out when it ends at a wait three times the reader's usual pause and at least 1.5 s long (a knock or a click inside the wait does not break it). Leaving speech out has a small cost, so it only happens when the rest fits far better; and because the stretch must end at the wait, it is the earlier take that goes.
+- A retake starts with the same words as the take after the wait, so the loudness rhythm of its first moments is alike: a stretch that starts like the speech after the wait is left out more readily. This tells a restart of the same sentence from a sentence that only happens to end before a long pause.
+- The pace of the script no longer counts left-out speech as reading.
+- The status bar says how many retakes were left out. A read without retakes leaves nothing out, and its timing is unchanged.
+- Measured on a new test read with four kinds of retake (`tools/fixtures/tts-retakes.json`, built by `tools/make-tts-fixture.mjs --retakes`): every line within 0.1 s of its later take, where it was off by more than 8 s. On a real unedited 19-minute recording, sentences off by more than 3 s fell from 8 to 2 (both where the reference itself picked the wrong take).
+
+### 📌 Pin a line to the playhead
+- **Right-click a line › 📌 Start this line at the playhead**: the line starts with the voice at or just after the playhead, and every other line is timed again around it. For a retake the timing could not tell by itself, such as a quick restart with no wait.
+- The script and the speech are cut at every pin and each section is timed on its own; a retake just before a pinned line can still be left out.
+- Re-timing after a pin uses the audio already heard from the same timeline, so Premiere Pro does not export it again; a timeline that changed (another length, another sequence) is listened to again.
+- A pinned timecode is amber with a 📌, and the pin (`data-anchor` on the tag) stays when 🎙️ Time to Audio runs again. **Unpin this line** in the same menu lets the line be timed freely again.
+
 ## 1.8.0
 
 ### 🎯 Jump to a word

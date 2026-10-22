@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.8.0";
+    var PANEL_VERSION = "1.9.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -184,6 +184,8 @@
         noteMenuPaste:         document.getElementById("noteMenuPaste"),
         noteMenuPastePlain:    document.getElementById("noteMenuPastePlain"),
         noteMenuSelectAll:     document.getElementById("noteMenuSelectAll"),
+        noteMenuPin:           document.getElementById("noteMenuPin"),
+        noteMenuUnpin:         document.getElementById("noteMenuUnpin"),
 
         // In-panel dialog
         dialogOverlay:         document.getElementById("dialogOverlay"),
@@ -1049,8 +1051,9 @@
      * Start the line with a tag for `span` (seconds from the timeline start),
      * replacing the one it had. `words`: each word's start, in seconds after
      * the line's (kept in data-w for following the playhead and subtitles).
+     * `pin`: the time the user pinned the line to (kept in data-anchor).
      */
-    function setLeadingTag(line, span, timeline, words) {
+    function setLeadingTag(line, span, timeline, words, pin) {
         var old = leadingTag(line);
         while (old) {
             var after = old.nextSibling;
@@ -1063,6 +1066,7 @@
         tag.setAttribute("data-t", span.start.toFixed(3));
         tag.setAttribute("data-e", span.end.toFixed(3));
         if (words && words.length) tag.setAttribute("data-w", words.map(function (w) { return String(Math.round(w * 100) / 100); }).join(","));
+        if (typeof pin === "number" && isFinite(pin)) tag.setAttribute("data-anchor", pin.toFixed(3));
         tag.textContent = "[" + LazyAlign.formatTimecode(timeline.offset + span.start, timeline.fps) + "]";
         line.insertBefore(document.createTextNode(NBSP), line.firstChild);
         line.insertBefore(tag, line.firstChild);
@@ -1117,19 +1121,26 @@
         });
     }
 
-    function timeToAudio() {
-        if (scriptBusy) return Promise.resolve();
-        var lines = scriptLines();
-        if (!lines.length) {
-            setStatus("Write or paste the script first: lines or whole paragraphs, in the order they are spoken", 5000);
-            return Promise.resolve();
-        }
-        var projectBefore = appState.projectId;
-        var tabBefore = appState.notesData.activeTabId;
-        var wavPath = path.join(os.tmpdir(), "lazykick-voice-" + Date.now() + ".wav");
-        setScriptBusy(true);
-        setStatus("Listening to the timeline audio...");
+    // The speech of the last timeline listened to, so pinning a line re-times
+    // the others at once instead of exporting the audio again.
+    var heardAudio = null;
 
+    function timelineKey(t) {
+        return [appState.projectId, t.name, t.fps, t.offset, t.duration].join("|");
+    }
+
+    /** The open timeline's speech as last heard, or null when it was not heard or has changed shape. */
+    function reusableAudio() {
+        if (!heardAudio) return Promise.resolve(null);
+        return evalScriptP("getTimelineInfo()").then(function (t) {
+            return t && t.ok && timelineKey(t) === heardAudio.key ? heardAudio : null;
+        });
+    }
+
+    /** Asks the host for the timeline audio: { key, speech, heard, timeline } or null (the status says why). */
+    function listenToTimeline() {
+        var wavPath = path.join(os.tmpdir(), "lazykick-voice-" + Date.now() + ".wav");
+        setStatus("Listening to the timeline audio...");
         return evalScriptP("getTimelineAudio(" + JSON.stringify(normPath(wavPath)) + ")").then(function (r) {
             if (!r || !r.ok) {
                 setStatus((r && r.msg) || "Could not read the timeline audio", 5000);
@@ -1144,26 +1155,73 @@
                     setStatus("Could not read the audio: " + env.error, 5000);
                     return null;
                 }
-                var speech = LazyAlign.findSpeech(env);
-                var spans = LazyAlign.alignScript(lines.map(function (l) { return l.text; }), speech);
-                var heard = r.used === "selected" ? "the selected audio" : "the timeline audio";
-                if (!spans) {
-                    setStatus("No speech found in " + heard + " of '" + r.name + "'", 5000);
-                    return null;
-                }
-                if (appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore ||
-                    !lines.every(function (l) { return l.node.parentNode === el.noteEditor; })) {
-                    setStatus("The note changed while listening; nothing was changed", 4000);
-                    return null;
-                }
-                spans.forEach(function (span, i) {
-                    setLeadingTag(lines[i].node, span, r, span.words);
-                });
-                noteChanged();
-                saveCurrentNote();
-                setStatus("Timed " + lines.length + " line" + (lines.length === 1 ? "" : "s") + " to " + heard + " of '" + r.name + "'", 4000);
-                return spans;
+                heardAudio = {
+                    key: timelineKey(r),
+                    speech: LazyAlign.findSpeech(env),
+                    heard: r.used === "selected" ? "the selected audio" : "the timeline audio",
+                    timeline: r
+                };
+                return heardAudio;
             });
+        });
+    }
+
+    /** The pinned lines among `lines` ([{ node }]): [{ line: index, t: seconds }]. */
+    function pinsOf(lines) {
+        var pins = [];
+        for (var i = 0; i < lines.length; i++) {
+            var tag = leadingTag(lines[i].node);
+            var t = tag ? parseFloat(tag.getAttribute("data-anchor")) : NaN;
+            if (isFinite(t)) pins.push({ line: i, t: t });
+        }
+        return pins;
+    }
+
+    /**
+     * Times every spoken line to the voiceover, keeping pinned lines where
+     * they were pinned. options.reuse: use the audio already heard from this
+     * timeline, if any (after pinning a line), instead of listening again.
+     */
+    function timeToAudio(options) {
+        options = options || {};
+        if (scriptBusy) return Promise.resolve();
+        var lines = scriptLines();
+        if (!lines.length) {
+            setStatus("Write or paste the script first: lines or whole paragraphs, in the order they are spoken", 5000);
+            return Promise.resolve();
+        }
+        var projectBefore = appState.projectId;
+        var tabBefore = appState.notesData.activeTabId;
+        setScriptBusy(true);
+
+        return (options.reuse ? reusableAudio() : Promise.resolve(null)).then(function (known) {
+            return known || listenToTimeline();
+        }).then(function (audio) {
+            if (!audio) return null;
+            var r = audio.timeline;
+            var pins = pinsOf(lines);
+            var spans = LazyAlign.alignScript(lines.map(function (l) { return l.text; }), audio.speech, { anchors: pins });
+            if (!spans) {
+                setStatus("No speech found in " + audio.heard + " of '" + r.name + "'", 5000);
+                return null;
+            }
+            if (appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore ||
+                !lines.every(function (l) { return l.node.parentNode === el.noteEditor; })) {
+                setStatus("The note changed while listening; nothing was changed", 4000);
+                return null;
+            }
+            var pinOf = {};
+            pins.forEach(function (p) { pinOf[p.line] = p.t; });
+            spans.forEach(function (span, i) {
+                setLeadingTag(lines[i].node, span, r, span.words, pinOf[i]);
+            });
+            noteChanged();
+            saveCurrentNote();
+            var retakes = (spans.outtakes || []).length;
+            setStatus("Timed " + lines.length + " line" + (lines.length === 1 ? "" : "s") + " to " + audio.heard + " of '" + r.name + "'" +
+                      (retakes ? " · " + retakes + " retake" + (retakes === 1 ? "" : "s") + " left out" : "") +
+                      (pins.length ? " · " + pins.length + " pinned" : ""), 5000);
+            return spans;
         }).catch(function (err) {
             setStatus("Time to Audio failed: " + (err && err.message ? err.message : err), 5000);
             return null;
@@ -1594,12 +1652,24 @@
         return !!(sel && sel.rangeCount > 0 && !sel.isCollapsed && el.noteEditor.contains(sel.anchorNode));
     }
 
+    var menuLine = null; // the note line the menu was opened on
+
+    /** Whether a note line is timed when Time to Audio runs (so it can be pinned). */
+    function isScriptLine(line) {
+        return !!(line && line.nodeType === 1 && line.parentNode === el.noteEditor && !isUnspoken(line) &&
+                  LazyAlign.isSpoken(textWithoutTags(line).split(NBSP).join(" ")));
+    }
+
     el.noteEditor.addEventListener("contextmenu", function (e) {
         e.preventDefault();
         rememberSelection();
         var selected = selectionInEditor();
         el.noteMenuCut.disabled = !selected;
         el.noteMenuCopy.disabled = !selected;
+        menuLine = lineOf(e.target);
+        var tag = isScriptLine(menuLine) ? leadingTag(menuLine) : null;
+        el.noteMenuPin.disabled = !isScriptLine(menuLine) || scriptBusy;
+        el.noteMenuUnpin.classList.toggle("hidden", !(tag && tag.hasAttribute("data-anchor")));
         el.noteMenu.classList.remove("hidden");
         // At the pointer, but inside the panel near its right and bottom edges.
         var width = window.innerWidth || document.body.clientWidth || 0;
@@ -1649,6 +1719,44 @@
     el.noteMenuSelectAll.addEventListener("click", function () { runEditCommand("selectAll"); });
     el.noteMenuPaste.addEventListener("click", function () { pasteFromMenu(false); });
     el.noteMenuPastePlain.addEventListener("click", function () { pasteFromMenu(true); });
+    el.noteMenuPin.addEventListener("click", function () {
+        if (!el.noteMenuPin.disabled) pinLineAtPlayhead(menuLine);
+    });
+    el.noteMenuUnpin.addEventListener("click", function () { unpinLine(menuLine); });
+
+    /**
+     * Pins a line to the playhead: the line starts there (with the voice
+     * just after it), and every other line is timed again around it. For a
+     * retake or a wrong line the timing could not tell by itself: put the
+     * playhead where the line is really said, then pin it.
+     */
+    function pinLineAtPlayhead(line) {
+        hideNoteMenu();
+        if (!isScriptLine(line) || scriptBusy) return Promise.resolve();
+        var projectBefore = appState.projectId;
+        return evalScriptP("getPlayhead()").then(function (p) {
+            if (!p || !p.ok) {
+                setStatus((p && p.msg ? p.msg + ": " : "") + "open the sequence or composition first", 3000);
+                return null;
+            }
+            if (appState.projectId !== projectBefore || !isScriptLine(line)) return null;
+            setLeadingTag(line, { start: p.t, end: p.t }, p, null, p.t);
+            noteChanged();
+            saveCurrentNote();
+            return timeToAudio({ reuse: true });
+        });
+    }
+
+    /** Lets a pinned line be timed freely again, and re-times the note. */
+    function unpinLine(line) {
+        hideNoteMenu();
+        var tag = isScriptLine(line) ? leadingTag(line) : null;
+        if (!tag || scriptBusy) return Promise.resolve();
+        tag.removeAttribute("data-anchor");
+        noteChanged();
+        saveCurrentNote();
+        return timeToAudio({ reuse: true });
+    }
 
     /** Paste at the caret the menu was opened at; `plain` pastes without formatting. */
     function pasteFromMenu(plain) {

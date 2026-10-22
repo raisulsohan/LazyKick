@@ -37,6 +37,9 @@ function check(name, condition, detail) {
 function eq(name, actual, expected) {
   check(name, actual === expected, `got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
 }
+function near(name, actual, expected, tolerance) {
+  check(name, Math.abs(actual - expected) <= tolerance, `got ${actual}, expected ${expected} ± ${tolerance}`);
+}
 
 const realTimeout = (ms) => new Promise((r) => setTimeout(r, ms));
 async function settle(rounds = 8) {
@@ -445,7 +448,7 @@ doc.getElementById("fbOverlay").classList.add("hidden");
 doc.getElementById("dialogOverlay").classList.add("hidden");
 doc.getElementById("subModalOverlay").classList.add("hidden");
 doc.getElementById("noteMenu").classList.add("hidden");
-for (const id of ["noteMenuCut", "noteMenuCopy", "noteMenuPaste", "noteMenuPastePlain", "noteMenuSelectAll"]) doc.getElementById("noteMenu").appendChild(doc.getElementById(id));
+for (const id of ["noteMenuCut", "noteMenuCopy", "noteMenuPaste", "noteMenuPastePlain", "noteMenuSelectAll", "noteMenuPin", "noteMenuUnpin"]) doc.getElementById("noteMenu").appendChild(doc.getElementById(id));
 doc.getElementById("optTargetFolder").value = "Pasted Images";
 
 const nativePopups = [];
@@ -1586,6 +1589,53 @@ try {
   });
   $("btnTimeTitles").click();
   eq("titles: on again, remembered", readJson(join(storage, "lazykick_settings.json")).timeTitles, true);
+
+  // ---- Pin a line to the playhead: the timing keeps it there and times the rest around it
+  setEditor([{ tag: "p", kids: [script[0]] }, { tag: "p", kids: [script[1]] }, { tag: "p", cls: "note-muted", kids: ["A side note"] }, { tag: "p", kids: [script[2]] }]);
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 3 lines/.test($("globalStatus").textContent), "timed before pinning");
+  const pinLine = $("noteEditor").children[1];
+  const pinAt = bursts[1].s + 0.5;                    // the playhead, half a second into the line
+  const openMenuOn = (node) => $("noteEditor").dispatch("contextmenu", { target: node, clientX: 20, clientY: 20 });
+  openMenuOn(pinLine);
+  eq("pin: offered on a spoken line", $("noteMenuPin").disabled, false);
+  check("pin: no Unpin on a line that is not pinned", $("noteMenuUnpin").classList.contains("hidden"));
+  const listensBefore = host.audioCalls.length;
+  host.playhead = pinAt;
+  $("noteMenuPin").click();
+  await waitFor(() => /1 pinned/.test($("globalStatus").textContent), "pinned and timed");
+  eq("pin: the audio already heard is used again, not exported again", host.audioCalls.length, listensBefore);
+  eq("pin: the tag keeps the pinned time", tagOf(pinLine).getAttribute("data-anchor"), pinAt.toFixed(3));
+  near("pin: the line starts at the playhead", parseFloat(tagOf(pinLine).getAttribute("data-t")), pinAt, 0.02);
+  check("pin: the others are still timed, in order", parseFloat(tagOf($("noteEditor").children[0]).getAttribute("data-t")) < pinAt &&
+    parseFloat(tagOf($("noteEditor").children[3]).getAttribute("data-t")) > pinAt);
+  check("pin: says it", /Timed 3 lines .* · 1 pinned/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  openMenuOn(pinLine);
+  check("pin: Unpin offered on a pinned line", !$("noteMenuUnpin").classList.contains("hidden"));
+  $("noteMenu").classList.add("hidden");
+
+  $("btnTimeToAudio").click();
+  await waitFor(() => host.audioCalls.length === listensBefore + 1 && /Timed 3 lines/.test($("globalStatus").textContent), "timed again with the pin");
+  eq("pin: Time to Audio listens again and keeps the pin", tagOf(pinLine).getAttribute("data-anchor"), pinAt.toFixed(3));
+  near("pin: ... and the pinned start", parseFloat(tagOf(pinLine).getAttribute("data-t")), pinAt, 0.02);
+
+  openMenuOn(pinLine);
+  $("noteMenuUnpin").click();
+  await waitFor(() => !/pinned/.test($("globalStatus").textContent) && /Timed 3 lines/.test($("globalStatus").textContent), "unpinned");
+  eq("unpin: the pin is gone", tagOf(pinLine).hasAttribute("data-anchor"), false);
+  near("unpin: the line is timed freely again, at its words", parseFloat(tagOf(pinLine).getAttribute("data-t")), bursts[1].s, 0.06);
+
+  openMenuOn($("noteEditor").children[2]);
+  eq("pin: not offered on a grey side note (it is not timed)", $("noteMenuPin").disabled, true);
+  $("noteMenu").classList.add("hidden");
+
+  host.timeline = { ...host.timeline, duration: total + 5 };   // the sequence got longer
+  const listensThen = host.audioCalls.length;
+  openMenuOn(pinLine);
+  $("noteMenuPin").click();
+  await waitFor(() => /1 pinned/.test($("globalStatus").textContent), "pinned after a change");
+  eq("pin: a timeline that changed is listened to again", host.audioCalls.length, listensThen + 1);
+  host.timeline = { ...host.timeline, duration: total };
 
   // ---- A long paragraph becomes several subtitles, each when its first word is said
   const longText = "In 1920, a country decided to delete a problem. Not reduce it. Not manage it. Delete it. " +

@@ -496,6 +496,18 @@ body, html {
     color: var(--text-muted);
 }
 
+/* A line pinned to a time (right-click > Start this line at the playhead). */
+.timecode-tag[data-anchor] {
+    background: rgba(245, 166, 35, 0.14);
+    border-color: rgba(245, 166, 35, 0.6);
+    color: #f5b041;
+}
+.timecode-tag[data-anchor]::before {
+    content: "\1F4CC";
+    font-size: 9px;
+    margin-right: 3px;
+}
+
 /* A click on a timecode, or Ctrl/Cmd+click on a word, moves the playhead there. */
 .rich-editor .timecode-tag,
 .rich-editor.jump-keys { cursor: pointer; }
@@ -1163,6 +1175,8 @@ input:checked + .slider:before { transform: translateX(12px); }
 }
 .context-item:hover:not(:disabled) kbd { color: #fff; }
 .context-item:disabled kbd { color: var(--text-muted); }
+
+.context-item.hidden { display: none; }
 
 .context-sep {
     height: 1px;

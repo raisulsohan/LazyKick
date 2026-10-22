@@ -2,6 +2,7 @@
  * LazyKick — builds tools/fixtures/tts-voiceover.json (developer tool, Windows).
  *
  *   node tools/make-tts-fixture.mjs
+ *   node tools/make-tts-fixture.mjs --retakes    (tools/fixtures/tts-retakes.json only)
  *
  * Makes real voiceovers with Windows' own speech voices (System.Speech):
  * each line is spoken on its own, then the lines are joined with pauses of
@@ -20,6 +21,12 @@
  *   paragraphs held out: a script pasted from a document, several sentences
  *              per paragraph, with longer pauses inside the paragraphs
  *              than between them
+ *
+ * --retakes: an unedited recording. The reader stumbles four times, waits
+ * (1.8–4.2 s, once with a knock in the pause) and says the passage again:
+ * a restart after the first words, a whole sentence twice, a restart from
+ * the sentence before, and a short restart after a shorter wait. The truth
+ * is the later take of every line, and the earlier takes are the outtakes.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, createReadStream, rmSync, mkdtempSync } from "node:fs";
@@ -105,6 +112,38 @@ const SCRIPTS = {
     voices: [DAVID],
     variants: { natural: {}, music: { music: true } },
   },
+};
+
+// The retake read: [line, words said (0: all)] in order, with the pause after each take in ms.
+const RETAKES = {
+  lines: [
+    "High on a cold plateau, a river runs east for a thousand kilometres.",
+    "Then it meets a mountain and turns back on itself.",
+    "In a few miles it drops further than most rivers fall in their whole length.",
+    "Engineers have looked at that drop for almost a century.",
+    "Now a plan is finally moving.",
+    "It is not one wall of concrete across the valley.",
+    "Instead, the water would run through tunnels cut deep into the rock.",
+    "Five power stations would sit along the way.",
+    "Each would take its share of the fall before the river leaves the gorge.",
+    "The scale is hard to picture.",
+    "It would make more power than any dam on Earth.",
+    "And almost nobody outside the project has seen the full design.",
+  ],
+  paragraph: [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3],
+  takes: [
+    [0, 0, 520], [1, 0, 640],
+    [2, 4, 2600], [2, 0, 700],          // a restart after the first words
+    [3, 0, 450], [4, 0, 900],
+    [5, 0, 3200, true], [5, 0, 560],    // the whole sentence twice, a knock in the wait
+    [6, 0, 480],
+    [7, 0, 600], [8, 5, 4200], [7, 0, 380], [8, 0, 750], // a restart from the sentence before
+    [9, 0, 520],
+    [10, 3, 1800], [10, 0, 600],        // a short restart after a shorter wait
+    [11, 0, 0],
+  ],
+  voice: ZIRA,
+  variants: { natural: {}, music: { music: true } },
 };
 
 function synthesize(dir, name, script) {
@@ -201,6 +240,62 @@ function joinLines(script, pcms, { tight = false, music = false } = {}) {
   return { samples: out, truth };
 }
 
+/** Adds room noise and, with `music`, a music bed (as joinLines does). */
+function finishMix(out, music) {
+  for (let i = 0; i < out.length; i++) {
+    let v = out[i] + (((i * 7919) % 997) / 997 - 0.5) * 40;
+    if (music) {
+      const t = i / RATE_HZ;
+      const chord = Math.sin(2 * Math.PI * 220 * t) + 0.7 * Math.sin(2 * Math.PI * 277.2 * t) + 0.5 * Math.sin(2 * Math.PI * 329.6 * t);
+      v += chord * (0.75 + 0.25 * Math.sin(2 * Math.PI * 0.5 * t)) * 700;
+    }
+    out[i] = Math.max(-32768, Math.min(32767, Math.round(v)));
+  }
+}
+
+/**
+ * The retake read: every take spoken in order with its pause after it. The
+ * truth of a line is its last whole take; every earlier take is an outtake.
+ */
+function joinTakes(takeTexts, pcmByText, { music = false } = {}) {
+  const lead = new Int16Array(Math.round(RATE_HZ * 1.2));
+  const parts = [lead];
+  let at = lead.length;
+  const said = [];
+  for (const [line, words, pauseMs, knock] of RETAKES.takes) {
+    const text = takeTexts(line, words);
+    const pcm = pcmByText[text];
+    // Cut to the voice, so the pauses are the reader's, not the synthesizer's padding.
+    const full = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2);
+    const [a, b] = voiced(full);
+    const samples = full.slice(a, b);
+    said.push({ line, whole: !words, start: +(at / RATE_HZ).toFixed(3), end: +((at + samples.length) / RATE_HZ).toFixed(3) });
+    parts.push(samples);
+    at += samples.length;
+    if (pauseMs) {
+      const pause = new Int16Array(Math.round(RATE_HZ * pauseMs / 1000));
+      if (knock) {
+        // A knock on the desk in the middle of the wait: 0.15 s of fading noise.
+        const from = Math.round(pause.length * 0.45);
+        for (let i = 0; i < RATE_HZ * 0.15; i++) pause[from + i] = Math.round((((i * 48271) % 2003) / 2003 - 0.5) * 12000 * Math.exp(-i / (RATE_HZ * 0.04)));
+      }
+      parts.push(pause);
+      at += pause.length;
+    }
+  }
+  parts.push(new Int16Array(RATE_HZ));
+  const out = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  finishMix(out, music);
+  const truth = RETAKES.lines.map((text, line) => {
+    const last = said.filter((s) => s.line === line && s.whole).pop();
+    return { text, paragraph: RETAKES.paragraph[line], start: last.start, end: last.end };
+  });
+  const outtakes = said.filter((s) => !truth.some((t) => t.start === s.start)).map((s) => ({ line: s.line, start: s.start, end: s.end }));
+  return { samples: out, truth, outtakes };
+}
+
 async function envelopeOf(samples, dir, name) {
   const data = Buffer.from(samples.buffer, samples.byteOffset, samples.length * 2);
   const wav = join(dir, `${name}.wav`);
@@ -219,6 +314,32 @@ async function envelopeOf(samples, dir, name) {
 
 const work = mkdtempSync(join(tmpdir(), "lazykick-tts-"));
 try {
+  if (process.argv.includes("--retakes")) {
+    const takeTexts = (line, words) => (words ? RETAKES.lines[line].split(" ").slice(0, words).join(" ") : RETAKES.lines[line]);
+    const texts = [...new Set(RETAKES.takes.map(([line, words]) => takeTexts(line, words)))];
+    const pcms = synthesize(work, "retakes", { lines: texts, voices: [RETAKES.voice], rates: texts.map(() => 0) });
+    const pcmByText = Object.fromEntries(texts.map((t, i) => [t, pcms[i]]));
+    const variants = {};
+    for (const [variant, opts] of Object.entries(RETAKES.variants)) {
+      const { samples, truth, outtakes } = joinTakes(takeTexts, pcmByText, opts);
+      const envelope = await envelopeOf(samples, work, `retakes-${variant}`);
+      variants[`retakes-${variant}`] = {
+        duration: +envelope.duration.toFixed(3),
+        values: envelope.values.map((v) => +v.toPrecision(3)),
+        lines: truth,
+        outtakes,
+      };
+      console.log(`retakes-${variant}: ${envelope.values.length} values, ${envelope.duration.toFixed(1)} s, ${outtakes.length} outtakes`);
+    }
+    const out = join(root, "tools", "fixtures", "tts-retakes.json");
+    writeFileSync(out, JSON.stringify({
+      about: "An unedited Windows System.Speech read with four retakes; lines: the true later take of every line; outtakes: the earlier takes. Built by tools/make-tts-fixture.mjs --retakes.",
+      step: 0.01,
+      variants,
+    }) + "\n");
+    console.log(`wrote ${out}`);
+    process.exit(0);
+  }
   const variants = {};
   for (const [name, script] of Object.entries(SCRIPTS)) {
     const pcms = synthesize(work, name, script);
