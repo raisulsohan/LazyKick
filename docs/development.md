@@ -136,8 +136,11 @@ come back unnoticed.
 **Nothing from disk or the clipboard is parsed as HTML** in a panel that can
 run Node. Folder and file names are set with `textContent`; clipboard HTML is
 parsed by `DOMParser` (which runs nothing) and rebuilt from a whitelist
-(`h1`–`h3`, `p`, `b`, `i`, `u`, LazyKick's own classes and numeric timecode
-attributes).
+(`h1`–`h3`, `p`, `b`, `i`, `u`, `s`, LazyKick's own classes, numeric timecode
+attributes, and `span.note-color` whose `data-fg` / `data-bg` and `style`
+hold only six-digit hex colours that paste.js parsed into numbers). After
+every paste `tidyEditor()` rebuilds each colour span's style from its own
+data attributes, whatever the browser wrote there.
 
 **No shell.** Explorer and Finder are started with `spawn` and an argument
 list. PowerShell gets its script as `-EncodedCommand` (with `-STA`, which the
@@ -146,7 +149,10 @@ Arguments to `evalScript` are always built with `JSON.stringify`.
 
 **A handler that stops the browser's default must not fail silently.** The
 notes paste handler calls `preventDefault()` first; if the clean-up throws,
-it pastes the plain text instead.
+it pastes the plain text instead. Paste in the notes' right-click menu tries
+Chromium's own paste first; where CEP refuses it, the clipboard is read
+through PowerShell (HTML Format and text, returned as base64) or AppleScript,
+and nothing is inserted if another note came up while it was read.
 
 **The project is re-checked before any change.** Watch-bin syncs carry the
 project ID they were scanned for, and the host refuses to import into another
@@ -213,6 +219,26 @@ heading, a short all-bold line without an end stop a small heading, grey or
 0.85× and smaller a side note. The result is rebuilt from the whitelist and
 inserted with `execCommand("insertHTML")`, and `main.js` tidies what the
 browser adds while pasting.
+
+Highlights come from an inline element's `background-color`, `background`
+or Word's `mso-highlight`, and from `<mark>`; a page's own background (near
+white or near black, as Chromium writes on every span copied from a web page)
+and table or block backgrounds are not highlights. `noteColours` fits each
+run to the dark note (`#151517`, the `.rich-editor` background): a highlight
+keeps its colour, with the run's own text colour on it when the contrast is
+3:1 or more, else `#111111` or white; without one, neutral (black, white,
+grey) text takes the note's colour and other colours are mixed with white
+until they reach 4.5:1. The colour span is the innermost wrapper, so the
+note's white `<b>` does not cover it.
+
+The right-click menu's Paste first tries `execCommand("paste")`; when CEP
+refuses it (no paste event arrives), the clipboard is read through
+PowerShell. That script reads "HTML Format" through WPF, which decodes it as
+UTF-8; Windows Forms on .NET Framework decodes it in the ANSI code page
+(garbled Bengali and curly quotes, byte offsets that no longer fit), so it is
+only the fallback, turned back into bytes with `Encoding.Default`.
+`htmlFromCfHtml` cuts the copied part out by the StartFragment / EndFragment
+byte offsets.
 
 ### Time to Audio
 

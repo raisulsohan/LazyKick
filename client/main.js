@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.6.0";
+    var PANEL_VERSION = "1.7.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -175,6 +175,14 @@
         btnCopyNote:           document.getElementById("btnCopyNote"),
         btnExportNote:         document.getElementById("btnExportNote"),
         btnDeleteNoteTab:      document.getElementById("btnDeleteNoteTab"),
+
+        // Notes right-click menu
+        noteMenu:              document.getElementById("noteMenu"),
+        noteMenuCut:           document.getElementById("noteMenuCut"),
+        noteMenuCopy:          document.getElementById("noteMenuCopy"),
+        noteMenuPaste:         document.getElementById("noteMenuPaste"),
+        noteMenuPastePlain:    document.getElementById("noteMenuPastePlain"),
+        noteMenuSelectAll:     document.getElementById("noteMenuSelectAll"),
 
         // In-panel dialog
         dialogOverlay:         document.getElementById("dialogOverlay"),
@@ -1441,7 +1449,9 @@
     /**
      * After a paste: no inline styles and no <span>/<font> wrappers the
      * browser adds while pasting (LazyKick's own spans have a class), and
-     * one block per line at the top, as the timing expects.
+     * one block per line at the top, as the timing expects. A colour span
+     * gets its style back from its own data-fg / data-bg, never from what
+     * the browser wrote.
      */
     function tidyEditor() {
         var editor = el.noteEditor;
@@ -1449,8 +1459,17 @@
         for (var s = 0; s < styled.length; s++) styled[s].removeAttribute("style");
         var wrappers = editor.querySelectorAll("span, font");
         for (var w = 0; w < wrappers.length; w++) {
-            if (wrappers[w].nodeName === "SPAN" && wrappers[w].className) continue;
-            unwrap(wrappers[w]);
+            var span = wrappers[w];
+            if (span.nodeName === "SPAN" && span.classList.contains("note-color")) {
+                var look = LazyPaste.colourStyle(span.getAttribute("data-fg"), span.getAttribute("data-bg"));
+                if (look) {
+                    span.setAttribute("style", look);
+                    continue;
+                }
+            } else if (span.nodeName === "SPAN" && span.className) {
+                continue;
+            }
+            unwrap(span);
         }
         for (var node = editor.firstChild; node; ) {
             var next = node.nextSibling;
@@ -1462,26 +1481,22 @@
 
     // Ctrl/Cmd+Shift+V pastes plain text, as in most apps.
     var plainPasteUntil = 0;
+    var pasteSeen = false;
     el.noteEditor.addEventListener("keydown", function (e) {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.keyCode === 86 || e.key === "v" || e.key === "V")) plainPasteUntil = Date.now() + 1500;
     });
 
     /**
-     * Pasting keeps the look of a Google Doc or Word file (headings, bold,
-     * italic, underline, paragraphs, lists) in the panel's own colours; the
-     * clipboard's HTML is rebuilt by client/paste.js, never inserted as is.
+     * Puts clipboard content at the caret: the HTML rebuilt by
+     * client/paste.js, so it looks like the source (headings, bold, italic,
+     * underline, strikethrough, lists, highlights and coloured text), or the
+     * plain text when `plain` is set or the HTML gives nothing. The HTML is
+     * never inserted as it came. False when there was nothing to paste.
      */
-    el.noteEditor.addEventListener("paste", function (e) {
-        var data = e.clipboardData;
-        if (!data) return;
-        e.preventDefault();
-        var html = data.getData("text/html");
-        var text = data.getData("text/plain");
-        var plain = Date.now() < plainPasteUntil;
-        plainPasteUntil = 0;
+    function insertClipboard(html, text, plain) {
         if (html && !plain && typeof DOMParser === "function") {
-            // The paste was already stopped above, so a failure here must
-            // not lose it: fall through to the plain text.
+            // The paste was already stopped, so a failure here must not
+            // lose it: fall through to the plain text.
             var clean = null;
             try {
                 clean = LazyPaste.toNoteHtml(new DOMParser().parseFromString(html, "text/html"));
@@ -1494,15 +1509,260 @@
                 rememberSelection();
                 noteChanged();
                 debouncedSaveNote();
-                return;
+                return true;
             }
         }
-        if (text) {
-            document.execCommand("insertText", false, text);
-        } else if (data.types && Array.prototype.indexOf.call(data.types, "Files") !== -1) {
+        if (!text) return false;
+        document.execCommand("insertText", false, text);
+        rememberSelection();
+        debouncedSaveNote();
+        return true;
+    }
+
+    el.noteEditor.addEventListener("paste", function (e) {
+        var data = e.clipboardData;
+        if (!data) return;
+        e.preventDefault();
+        pasteSeen = true;
+        var plain = Date.now() < plainPasteUntil;
+        plainPasteUntil = 0;
+        if (insertClipboard(data.getData("text/html"), data.getData("text/plain"), plain)) return;
+        if (data.types && Array.prototype.indexOf.call(data.types, "Files") !== -1) {
             setStatus("Images go to the timeline: click Paste Image, or press Ctrl/Cmd+V outside the notes", 4000);
         }
     });
+
+    // ============================================================
+    // NOTES RIGHT-CLICK MENU (Cut, Copy, Paste, Paste without formatting)
+    // ============================================================
+    //
+    // CEP shows no menu of its own on a right-click. Paste from the menu
+    // uses Chromium's own paste when CEP allows it (it then goes through
+    // the paste handler above); otherwise the clipboard is read through
+    // PowerShell (Windows) or AppleScript (macOS) and goes through the
+    // same clean-up as Ctrl+V.
+
+    var menuPasteBusy = false;
+
+    function noteMenuOpen() {
+        return !el.noteMenu.classList.contains("hidden");
+    }
+
+    function hideNoteMenu() {
+        el.noteMenu.classList.add("hidden");
+    }
+
+    function selectionInEditor() {
+        var sel = window.getSelection();
+        return !!(sel && sel.rangeCount > 0 && !sel.isCollapsed && el.noteEditor.contains(sel.anchorNode));
+    }
+
+    el.noteEditor.addEventListener("contextmenu", function (e) {
+        e.preventDefault();
+        rememberSelection();
+        var selected = selectionInEditor();
+        el.noteMenuCut.disabled = !selected;
+        el.noteMenuCopy.disabled = !selected;
+        el.noteMenu.classList.remove("hidden");
+        // At the pointer, but inside the panel near its right and bottom edges.
+        var width = window.innerWidth || document.body.clientWidth || 0;
+        var height = window.innerHeight || document.body.clientHeight || 0;
+        var x = Math.max(4, Math.min(e.clientX || 0, width - (el.noteMenu.offsetWidth || 0) - 4));
+        var y = Math.max(4, Math.min(e.clientY || 0, height - (el.noteMenu.offsetHeight || 0) - 4));
+        el.noteMenu.style.left = x + "px";
+        el.noteMenu.style.top = y + "px";
+    });
+
+    // A click on the menu keeps the caret and the selection in the note.
+    el.noteMenu.addEventListener("mousedown", function (e) { e.preventDefault(); });
+    document.addEventListener("mousedown", function (e) {
+        if (noteMenuOpen() && !el.noteMenu.contains(e.target)) hideNoteMenu();
+    });
+    document.addEventListener("keydown", function (e) {
+        if (!noteMenuOpen()) return;
+        if (e.key === "Escape") e.preventDefault();
+        hideNoteMenu();
+    });
+    el.noteEditor.addEventListener("scroll", hideNoteMenu);
+    window.addEventListener("blur", hideNoteMenu);
+    window.addEventListener("resize", hideNoteMenu);
+
+    if (process.platform === "darwin") {
+        var menuKeys = el.noteMenu.querySelectorAll("kbd");
+        for (var mk = 0; mk < menuKeys.length; mk++) {
+            menuKeys[mk].textContent = menuKeys[mk].textContent.replace("Ctrl+Shift+", "⇧⌘").replace("Ctrl+", "⌘");
+        }
+    }
+
+    function runEditCommand(command) {
+        hideNoteMenu();
+        focusEditor();
+        try { document.execCommand(command); } catch (e) {}
+        rememberSelection();
+    }
+
+    el.noteMenuCut.addEventListener("click", function () {
+        if (el.noteMenuCut.disabled) return;
+        runEditCommand("cut");
+        debouncedSaveNote();
+    });
+    el.noteMenuCopy.addEventListener("click", function () {
+        if (!el.noteMenuCopy.disabled) runEditCommand("copy");
+    });
+    el.noteMenuSelectAll.addEventListener("click", function () { runEditCommand("selectAll"); });
+    el.noteMenuPaste.addEventListener("click", function () { pasteFromMenu(false); });
+    el.noteMenuPastePlain.addEventListener("click", function () { pasteFromMenu(true); });
+
+    /** Paste at the caret the menu was opened at; `plain` pastes without formatting. */
+    function pasteFromMenu(plain) {
+        hideNoteMenu();
+        if (menuPasteBusy) return Promise.resolve();
+        focusEditor();
+        pasteSeen = false;
+        if (plain) plainPasteUntil = Date.now() + 1500;
+        var handled = false;
+        try { handled = document.execCommand("paste") && pasteSeen; } catch (e) { handled = false; }
+        plainPasteUntil = 0;
+        if (handled) return Promise.resolve();
+
+        var projectBefore = appState.projectId;
+        var tabBefore = appState.notesData.activeTabId;
+        menuPasteBusy = true;
+        setStatus("Reading the clipboard...");
+        return readClipboardContent(!plain).then(function (clip) {
+            menuPasteBusy = false;
+            if (appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore || !notesShowing()) {
+                setStatus("Nothing pasted: another note came up while the clipboard was read", 4000);
+                return;
+            }
+            if (clip.error) {
+                setStatus("Could not read the clipboard: " + clip.error, 5000);
+                return;
+            }
+            focusEditor();
+            if (insertClipboard(clip.html, clip.text, plain)) setStatus(plain ? "Pasted without formatting" : "Pasted", 1500);
+            else setStatus("Nothing to paste: the clipboard holds no text", 3000);
+        });
+    }
+
+    /**
+     * Windows' "HTML Format" (CF_HTML) is a header with byte offsets, then
+     * the page; the copied part lies between StartFragment and EndFragment.
+     */
+    function htmlFromCfHtml(bytes) {
+        var head = bytes.slice(0, Math.min(bytes.length, 512)).toString("latin1");
+        function offset(name) {
+            var m = new RegExp(name + ":\\s*(\\d+)").exec(head);
+            return m ? parseInt(m[1], 10) : -1;
+        }
+        var start = offset("StartFragment");
+        var end = offset("EndFragment");
+        if (start >= 0 && end > start && end <= bytes.length) return bytes.slice(start, end).toString("utf8");
+        var page = offset("StartHTML");
+        if (page >= 0 && page < bytes.length) return bytes.slice(page).toString("utf8");
+        var text = bytes.toString("utf8");
+        var at = text.indexOf("<");
+        return at >= 0 ? text.substr(at) : "";
+    }
+
+    /**
+     * The clipboard's HTML and text as base64 lines, so no character is lost
+     * on the way. WPF reads "HTML Format" as the UTF-8 it is; Windows Forms
+     * on .NET Framework reads it in the ANSI code page (Bengali and curly
+     * quotes come out garbled, and the byte offsets no longer fit), so its
+     * text is turned back into those bytes when WPF is not there.
+     */
+    function clipboardTextScriptWindows(withHtml) {
+        var lines = [
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+            "$ErrorActionPreference = 'Stop'",
+            "try {",
+            "  $utf8 = New-Object System.Text.UTF8Encoding($false)",
+            "  try {",
+            "    Add-Type -AssemblyName PresentationCore",
+            "    $data = [System.Windows.Clipboard]::GetDataObject()",
+            "    $ansi = $false",
+            "  } catch {",
+            "    Add-Type -AssemblyName System.Windows.Forms",
+            "    $data = [System.Windows.Forms.Clipboard]::GetDataObject()",
+            "    $ansi = $true",
+            "  }",
+            "  if ($data -eq $null) { 'DONE'; return }"
+        ];
+        if (withHtml) {
+            lines.push(
+                "  if ($data.GetDataPresent('HTML Format')) {",
+                "    $h = $data.GetData('HTML Format')",
+                "    if ($h -is [System.IO.MemoryStream]) { $b = $h.ToArray() }",
+                "    elseif ($ansi) { $b = [System.Text.Encoding]::Default.GetBytes([string]$h) }",
+                "    else { $b = $utf8.GetBytes([string]$h) }",
+                "    'HTML:' + [System.Convert]::ToBase64String($b)",
+                "  }"
+            );
+        }
+        lines.push(
+            "  if ($data.GetDataPresent('UnicodeText')) {",
+            "    'TEXT:' + [System.Convert]::ToBase64String($utf8.GetBytes([string]$data.GetData('UnicodeText')))",
+            "  }",
+            "  'DONE'",
+            "} catch { 'ERROR:' + $_.Exception.Message }"
+        );
+        return lines.join("\n");
+    }
+
+    function runOsascript(script) {
+        return new Promise(function (resolve) {
+            childProcess.execFile("osascript", ["-e", script], { timeout: 20000, maxBuffer: 64 * 1024 * 1024 }, function (err, stdout) {
+                resolve({ err: err, out: String(stdout || "") });
+            });
+        });
+    }
+
+    /** Resolves { html, text } (either may be ""), or { error }. */
+    function readClipboardContent(withHtml) {
+        if (process.platform === "win32") {
+            return new Promise(function (resolve) {
+                var encoded = Buffer.from(clipboardTextScriptWindows(withHtml), "utf16le").toString("base64");
+                childProcess.execFile("powershell.exe",
+                    ["-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                    { windowsHide: true, timeout: 20000, maxBuffer: 64 * 1024 * 1024 }, function (err, stdout) {
+                        var clip = { html: "", text: "" };
+                        var done = false;
+                        var lines = String(stdout || "").split(/\r?\n/);
+                        for (var i = 0; i < lines.length; i++) {
+                            var line = lines[i].trim();
+                            if (line.indexOf("HTML:") === 0) clip.html = htmlFromCfHtml(Buffer.from(line.substring(5), "base64"));
+                            else if (line.indexOf("TEXT:") === 0) clip.text = Buffer.from(line.substring(5), "base64").toString("utf8");
+                            else if (line.indexOf("ERROR:") === 0) return resolve({ error: line.substring(6) });
+                            else if (line === "DONE") done = true;
+                        }
+                        if (!done) return resolve({ error: err ? err.message : "PowerShell gave no answer" });
+                        clip.text = clip.text.replace(/\r\n?/g, "\n");
+                        resolve(clip);
+                    });
+            });
+        }
+        if (process.platform === "darwin") {
+            var clip = { html: "", text: "" };
+            var html = withHtml
+                ? runOsascript("try\n  return (the clipboard as «class HTML»)\non error\n  return \"\"\nend try")
+                : Promise.resolve({ out: "" });
+            return html.then(function (r) {
+                // Printed as «data HTML3C6D657461...»: the page's bytes in hex.
+                var m = /data HTML([0-9A-Fa-f]+)/.exec(r.out);
+                if (m) {
+                    var bytes = Buffer.from(m[1], "hex");
+                    clip.html = bytes[0] === 0xFF && bytes[1] === 0xFE ? bytes.slice(2).toString("utf16le") : bytes.toString("utf8");
+                }
+                return runOsascript("try\n  return (the clipboard as text)\non error\n  return \"\"\nend try");
+            }).then(function (r) {
+                if (r.err && !clip.html) return { error: r.err.message };
+                clip.text = r.out.replace(/\n$/, "").replace(/\r\n?/g, "\n");
+                return clip;
+            });
+        }
+        return Promise.resolve({ error: "the notes read the clipboard on Windows and macOS only" });
+    }
 
     // ============================================================
     // FOLLOW THE PLAYHEAD (the line and word being said light up)
@@ -2015,10 +2275,11 @@
     });
 
     function registerPasteShortcut() {
-        // Ask the host to hand Ctrl/Cmd+V to the panel while it has focus.
+        // Ask the host to hand Ctrl/Cmd+V (and +Shift, paste without
+        // formatting in the notes) to the panel while it has focus.
         var keys = process.platform === "darwin"
-            ? [{ keyCode: 9, metaKey: true }]
-            : [{ keyCode: 86, ctrlKey: true }];
+            ? [{ keyCode: 9, metaKey: true }, { keyCode: 9, metaKey: true, shiftKey: true }]
+            : [{ keyCode: 86, ctrlKey: true }, { keyCode: 86, ctrlKey: true, shiftKey: true }];
         try { cs.registerKeyEventsInterest(JSON.stringify(keys)); } catch (e) {}
     }
 

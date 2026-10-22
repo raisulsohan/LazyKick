@@ -23,7 +23,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.6** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.7** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
 
@@ -34,7 +34,8 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.6** · F
 ## 📑 Contents
 
 - [📖 Documentation](docs/README.md)
-- [What's New in 1.6](#-whats-new-in-16)
+- [What's New in 1.7](#-whats-new-in-17)
+- [What's New in 1.6](#whats-new-in-16)
 - [What's New in 1.5](#whats-new-in-15)
 - [What's New in 1.4](#whats-new-in-14)
 - [What's New in 1.3](#whats-new-in-13)
@@ -58,7 +59,18 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.6** · F
 
 ---
 
-## 🆕 What's New in 1.6
+## 🆕 What's New in 1.7
+
+**🖍️ Paste keeps the highlights and colours**
+- Text you marked in Google Docs or Word keeps its **highlight colour** in **📝 Notes**, and **coloured text** keeps its colour. Strikethrough comes along too.
+- The note is dark, so black text takes the note's own light colour, and a colour too dark to read (dark blue, dark red) is made a little lighter. A web page's white or dark background is not taken for a highlight.
+
+**📋 Paste or Paste without formatting**
+- **Right-click the note** for **Cut**, **Copy**, **Paste**, **Paste without formatting** and **Select all**.
+- **Paste** (Ctrl+V) keeps the look of the source; **Paste without formatting** (Ctrl+Shift+V) puts in the text only.
+- Bengali and curly quotes come through the menu's Paste as they are.
+
+## What's New in 1.6
 
 **💬 Choose how the subtitles look, like Premiere Pro's Create captions**
 - Click **💬 Subtitles** and a *Create subtitles* window opens first, with the same choices as Premiere Pro:
@@ -213,7 +225,8 @@ Always available in the panel header.
 - **☑️ Checklists:** insert a task, tick it to strike it through.
 - **⏱️ Timecode stamps:** inserts the playhead time as `[00:01:24:12]` at the caret, formatted the way the app displays time.
 - **📋 Copy / 📥 Export** as plain text (checklists as `[ ]` / `[x]`). Export writes `Note_<project>_<tab>.txt` next to the project and never overwrites.
-- **Paste keeps the document's look:** headings, paragraphs, bold, italic, underline, lists and grey side notes from Google Docs, Word or the web; fonts, colours, links, images and hidden text are dropped. `Ctrl+Shift+V` pastes plain text.
+- **Paste keeps the document's look:** headings, paragraphs, bold, italic, underline, strikethrough, lists, grey side notes, highlights and coloured text from Google Docs, Word or the web (colours too dark for the note are lightened); fonts, links, images and hidden text are dropped. `Ctrl+Shift+V`, or **Paste without formatting** in the right-click menu, pastes the text only.
+- **Right-click menu** in the note: Cut, Copy, Paste, Paste without formatting, Select all.
 - **A− / A+ text size** (10–24 px, remembered).
 - **🎙️ Time to Audio:** times every line of the note to the voiceover on the open timeline and starts each line with its timecode. Language-independent (pauses and speaking length, no speech recognition), fully offline.
 - **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project. Choose Single Line, Double Line or Single Word, the line length, minimum duration, gap and punctuation first, with a live preview. Headings and grey notes are skipped; long paragraphs are split into several subtitles.
@@ -242,7 +255,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.6.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.7.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -325,8 +338,9 @@ Don't keep a source copy and the signed install side by side: they share one ext
 | Shortcut | Where | Action |
 | :--- | :--- | :--- |
 | `Ctrl+V` / `Cmd+V` | Panel focused, outside text fields | LazyPaste |
-| `Ctrl+V` / `Cmd+V` | Notes editor | Paste, keeping headings, bold, italic and lists |
-| `Ctrl+Shift+V` / `Cmd+Shift+V` | Notes editor | Paste plain text |
+| `Ctrl+V` / `Cmd+V` | Notes editor | Paste, keeping headings, bold, italic, lists, highlights and colours |
+| `Ctrl+Shift+V` / `Cmd+Shift+V` | Notes editor | Paste without formatting (text only) |
+| Right-click | Notes editor | Cut, Copy, Paste, Paste without formatting, Select all |
 | Double-click | Note tab | Rename (Enter saves, Esc cancels) |
 | `Enter` | Folder browser path box | Go to that path |
 
@@ -486,8 +500,8 @@ Runs, in order (Windows, as two steps use Windows Script Host):
 1. `tools/check-extendscript.js`: `host.jsx` compiles as ES3 and avoids names and constructs real ExtendScript rejects.
 2. `tools/test-host.js`: `host.jsx` against mocked After Effects and Premiere Pro. Covers track choice, no ripple edits, nested bins, duplicate reuse, media already in the project, timecode formatting, partial import failures and the project-changed guard.
 3. `tools/test-align.mjs`: `align.js`'s WAV reader on every PCM/float layout (split at any byte), the pause finder, Bengali/English line lengths, timecodes, SRT, and line timing on real speech: three scripts read by Windows' voices, with natural pauses, rushed pauses and a music bed. One script was used to tune the weights and the others were held out; all must land every line within 0.2 s (they land within a few frames). The third reads whole paragraphs with longer pauses inside them than between them, and every sentence must land within 0.15 s. Also word timing inside a line, the playhead follower, the splitting of long paragraphs into subtitles and every subtitle layout (single line, double line, single word, line length, minimum duration, gap, punctuation).
-4. `tools/test-paste.mjs`: `paste.js` on the HTML that Google Docs, Word and web pages put on the clipboard: headings, side notes, bold/italic/underline and lists survive; styles, links, images, scripts, hidden text and attributes (including injection attempts) do not.
-5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, skipped headings, word times) and Subtitles (edited tags, the SRT file, long paragraphs, the Create subtitles window: layouts, preview, Enter, Cancel, Esc, remembered choices, a project switch while it is open), document paste and plain paste, text size, the follow highlight (position, pause while you scroll, off, hidden tab), the in-panel dialog, and the CEP 9 syntax guard.
+4. `tools/test-paste.mjs`: `paste.js` on the HTML that Google Docs, Word and web pages put on the clipboard: headings, side notes, bold/italic/underline/strikethrough, lists, highlights and text colours survive (dark colours lightened for the note, a page's own white or dark background ignored); fonts, links, images, scripts, hidden text and attributes (including injection attempts) do not.
+5. `tools/test-panel.mjs`: the real `main.js` in a Node VM with a fake DOM, fake host and fake PowerShell, on real temp files. Covers note-tab deletion, project switches, unsaved→saved migration, watch-bin skipping, copy-in-progress waiting, sync races, media already in the project, bin Edit and Reset, queued syncs across a project switch, paste duplicates, name collisions, folder setting, Ctrl+V, PowerShell quoting, Time to Audio (both hosts, re-timing, a note changed mid-listen, skipped headings, word times) and Subtitles (edited tags, the SRT file, long paragraphs, the Create subtitles window: layouts, preview, Enter, Cancel, Esc, remembered choices, a project switch while it is open), document paste and plain paste, colour spans after a paste, the notes' right-click menu (Cut, Copy, Paste and Paste without formatting through Chromium or the PowerShell clipboard, a note changed while reading), text size, the follow highlight (position, pause while you scroll, off, hidden tab), the in-panel dialog, and the CEP 9 syntax guard.
 
 The mocks follow the documented host APIs, but they are not the real apps. `tools/ae-smoke-host.jsx` runs `host.jsx` inside After Effects itself (close After Effects first; results in `%TEMP%\lazykick-ae-smoke-results.txt`):
 

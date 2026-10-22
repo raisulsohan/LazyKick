@@ -385,8 +385,20 @@ async function advance(ms) {
   await settle();
 }
 
-/* Fake PowerShell clipboard. */
-const clipboard = { mode: "none", bytes: null, file: null, lastScript: "", lastArgs: [] };
+/* Windows' "HTML Format": a header with byte offsets, then the page around the copied fragment. */
+function cfHtml(fragment) {
+  const pad = (n) => String(n).padStart(10, "0");
+  const header = (sh, eh, sf, ef) => `Version:0.9\r\nStartHTML:${pad(sh)}\r\nEndHTML:${pad(eh)}\r\nStartFragment:${pad(sf)}\r\nEndFragment:${pad(ef)}\r\n`;
+  const pre = "<html><body>\r\n<!--StartFragment-->";
+  const post = "<!--EndFragment-->\r\n</body></html>";
+  const sh = Buffer.byteLength(header(0, 0, 0, 0));
+  const sf = sh + Buffer.byteLength(pre);
+  const ef = sf + Buffer.byteLength(fragment);
+  return header(sh, ef + Buffer.byteLength(post), sf, ef) + pre + fragment + post;
+}
+
+/* Fake PowerShell clipboard: images for LazyPaste, HTML (CF_HTML) and text for the notes menu. */
+const clipboard = { mode: "none", bytes: null, file: null, html: null, text: null, textError: null, textReads: 0, lastScript: "", lastArgs: [] };
 const spawned = [];
 const fakeChildProcess = {
   execFile(cmd, args, opts, cb) {
@@ -394,6 +406,18 @@ const fakeChildProcess = {
     const encoded = args[args.indexOf("-EncodedCommand") + 1];
     const script = Buffer.from(encoded, "base64").toString("utf16le");
     clipboard.lastScript = script;
+    if (script.includes("'UnicodeText'")) {
+      clipboard.textReads++;
+      setImmediate(() => {
+        if (clipboard.textError) return cb(null, `ERROR:${clipboard.textError}\r\n`, "");
+        const out = [];
+        if (clipboard.html !== null && script.includes("'HTML Format'")) out.push(`HTML:${Buffer.from(clipboard.html, "utf8").toString("base64")}`);
+        if (clipboard.text !== null) out.push(`TEXT:${Buffer.from(clipboard.text, "utf8").toString("base64")}`);
+        out.push("DONE");
+        cb(null, `${out.join("\r\n")}\r\n`, "");
+      });
+      return;
+    }
     const target = /\$target = '((?:[^']|'')*)'/.exec(script)[1].replace(/''/g, "'");
     setImmediate(() => {
       if (clipboard.mode === "image") { writeFileSync(target, clipboard.bytes); cb(null, "OK\r\n", ""); }
@@ -413,6 +437,8 @@ doc.getElementById("binModalOverlay").classList.add("hidden");
 doc.getElementById("fbOverlay").classList.add("hidden");
 doc.getElementById("dialogOverlay").classList.add("hidden");
 doc.getElementById("subModalOverlay").classList.add("hidden");
+doc.getElementById("noteMenu").classList.add("hidden");
+for (const id of ["noteMenuCut", "noteMenuCopy", "noteMenuPaste", "noteMenuPastePlain", "noteMenuSelectAll"]) doc.getElementById("noteMenu").appendChild(doc.getElementById(id));
 doc.getElementById("optTargetFolder").value = "Pasted Images";
 
 const nativePopups = [];
@@ -530,6 +556,7 @@ try {
   const panelVersion = /var PANEL_VERSION = "([\d.]+)"/.exec(MAIN_SRC)[1];
   eq("startup: version in footer", $("brandTag").textContent, `LazyKick v${panelVersion.replace(/\.0$/, "")}`);
   check("startup: Ctrl+V handed to the panel", /"keyCode":86/.test(host.keys || ""), host.keys);
+  check("startup: Ctrl+Shift+V (paste without formatting) handed to the panel", /"keyCode":86,"ctrlKey":true,"shiftKey":true/.test(host.keys || ""), host.keys);
 
   // ---- notes: deleting a tab never overwrites another tab
   await type("<p>first</p>");
@@ -1281,6 +1308,13 @@ try {
   context.LazyPaste.toNoteHtml = realToNoteHtml;
   eq("a failed clean-up still pastes the plain text", `${doc.execCommands[pasteExecBefore]?.cmd}|${doc.execCommands[pasteExecBefore]?.value}`,
     "insertText|the words anyway");
+  pasteExecBefore = doc.execCommands.length;
+  pasteInto('<b style="font-weight:normal;" id="docs-internal-guid-3"><p><span style="color:#000000;background-color:#ffff00;">Marked</span><span style="color:#000000;"> and </span>' +
+    '<span style="color:#ff0000;">red</span></p><p><span style="color:#000000;">Next line</span></p></b>', "Marked and red\nNext line");
+  await settle();
+  eq("Ctrl+V: the highlight and the coloured word come along", doc.execCommands[pasteExecBefore]?.value,
+    "<p><span class=\"note-color\" data-fg=\"000000\" data-bg=\"ffff00\" style=\"color:#000000;background-color:#ffff00\">Marked</span> and " +
+    "<span class=\"note-color\" data-fg=\"ff0000\" style=\"color:#ff0000\">red</span></p><p>Next line</p>");
 
   // What the browser leaves after pasting is tidied: no styles, no stray wrappers, one block per line.
   setEditor([]);
@@ -1306,6 +1340,141 @@ try {
   eq("tidy: nested blocks lifted to lines, wrappers and styles gone",
     $("noteEditor").children.map((c) => `${c.tagName}:${c.textContent}:${c.children.some((k) => k.tagName === "SPAN") || !!c.attributes.style}`).join(" "),
     "DIV:Intro :false H2:Section:false P:Body:false P:Plain:false");
+
+  // A colour span keeps only the colours in its own data attributes; a forged one is unwrapped.
+  setEditor([]);
+  const markedLine = doc.createElement("p");
+  const markSpan = doc.createElement("span");
+  markSpan.className = "note-color";
+  markSpan.setAttribute("data-fg", "000000");
+  markSpan.setAttribute("data-bg", "ffff00");
+  markSpan.setAttribute("style", "color: rgb(0, 0, 0); background-color: rgb(255, 255, 0); font-size: 30px; background-image: url(x)");
+  markSpan.appendChild(doc.createTextNode("marked"));
+  const forged = doc.createElement("span");
+  forged.className = "note-color";
+  forged.setAttribute("data-fg", "red;x:1");
+  forged.setAttribute("style", "color:red");
+  forged.appendChild(doc.createTextNode(" plain"));
+  markedLine.appendChild(markSpan);
+  markedLine.appendChild(forged);
+  $("noteEditor").appendChild(markedLine);
+  pasteInto("<p>x</p><p>y</p>", "x");
+  await settle();
+  eq("tidy: a colour span keeps its own colours only, a forged one is unwrapped", $("noteEditor").children[0].innerHTML,
+    "<span class=\"note-color\" data-fg=\"000000\" data-bg=\"ffff00\" style=\"color:#000000;background-color:#ffff00\">marked</span> plain");
+
+  // ---- The notes' right-click menu: Cut, Copy, Paste, Paste without formatting, Select all
+  $("tabNotes").classList.add("active");
+  const menuOpen = () => !$("noteMenu").classList.contains("hidden");
+  const rightClick = (x = 40, y = 60) => $("noteEditor").dispatch("contextmenu", { clientX: x, clientY: y });
+  const commandsSince = (n) => doc.execCommands.slice(n);
+  setEditor([{ tag: "p", kids: ["Select me"] }]);
+  let menuEvent = rightClick(40, 60);
+  check("menu: a right-click opens LazyKick's menu", menuEvent.defaultPrevented && menuOpen());
+  eq("menu: at the pointer", `${$("noteMenu").style.left}|${$("noteMenu").style.top}`, "40px|60px");
+  eq("menu: Cut and Copy greyed without a selection", `${$("noteMenuCut").disabled}|${$("noteMenuCopy").disabled}`, "true|true");
+  let menuExecBefore = doc.execCommands.length;
+  $("noteMenuCopy").click();
+  eq("menu: a greyed Copy does nothing", commandsSince(menuExecBefore).length, 0);
+  doc.dispatch("keydown", { key: "Escape" });
+  check("menu: Esc closes it", !menuOpen());
+  rightClick(5000, 5000);
+  eq("menu: kept inside the panel near its edges", `${$("noteMenu").style.left}|${$("noteMenu").style.top}`, "296px|396px");
+  doc.dispatch("mousedown", { target: $("noteMenuPaste") });
+  check("menu: a press on the menu keeps it open", menuOpen());
+  doc.dispatch("mousedown", { target: $("noteEditor") });
+  check("menu: a click elsewhere closes it", !menuOpen());
+
+  const selectedText = editor.children[0].children[0];
+  const plainSelection = context.window.getSelection;
+  context.window.getSelection = () => ({
+    rangeCount: 1, isCollapsed: false, anchorNode: selectedText,
+    getRangeAt: () => ({ cloneRange: () => ({ startContainer: selectedText }) }), removeAllRanges() {}, addRange() {},
+  });
+  rightClick();
+  eq("menu: Cut and Copy usable with a selection", `${$("noteMenuCut").disabled}|${$("noteMenuCopy").disabled}`, "false|false");
+  menuExecBefore = doc.execCommands.length;
+  $("noteMenuCopy").click();
+  rightClick();
+  $("noteMenuCut").click();
+  rightClick();
+  $("noteMenuSelectAll").click();
+  eq("menu: Copy, Cut and Select all run the editor's own commands", commandsSince(menuExecBefore).map((c) => c.cmd).join(","), "copy,cut,selectAll");
+  check("menu: closed after a command", !menuOpen());
+  context.window.getSelection = plainSelection;
+
+  // Paste from the menu: CEP refuses Chromium's own paste here, so the clipboard is read through PowerShell.
+  setEditor([]);
+  clipboard.html = cfHtml('<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-4"><p dir="ltr"><span style="color:#000000;background-color:#ffff00;">আমি</span>' +
+    '<span style="color:#000000;"> marked it</span></p><p dir="ltr"><span style="color:#000000;">Second line</span></p></b>');
+  clipboard.text = "আমি marked it\r\nSecond line";
+  menuExecBefore = doc.execCommands.length;
+  rightClick();
+  $("noteMenuPaste").click();
+  await waitFor(() => commandsSince(menuExecBefore).some((c) => c.cmd === "insertHTML"), "menu paste");
+  let menuCmds = commandsSince(menuExecBefore);
+  eq("menu Paste: Chromium's own paste tried first", menuCmds[0] && menuCmds[0].cmd, "paste");
+  check("menu Paste: the clipboard read with STA and an encoded command", clipboard.lastArgs.includes("-STA") && clipboard.lastArgs.includes("-EncodedCommand") &&
+    clipboard.lastScript.includes("'HTML Format'"), clipboard.lastArgs.join(" "));
+  check("menu Paste: HTML read through WPF (UTF-8); Windows Forms (ANSI) only as a fallback, turned back into bytes",
+    clipboard.lastScript.indexOf("PresentationCore") !== -1 && clipboard.lastScript.indexOf("PresentationCore") < clipboard.lastScript.indexOf("System.Windows.Forms") &&
+    clipboard.lastScript.includes("[System.Text.Encoding]::Default.GetBytes"), clipboard.lastScript);
+  eq("menu Paste: the copied part of the page, highlight and Bengali intact", (menuCmds.find((c) => c.cmd === "insertHTML") || {}).value,
+    "<p><span class=\"note-color\" data-fg=\"000000\" data-bg=\"ffff00\" style=\"color:#000000;background-color:#ffff00\">আমি</span> marked it</p><p>Second line</p>");
+  eq("menu Paste: says so", $("globalStatus").textContent, "Pasted");
+  check("menu Paste: closed", !menuOpen());
+
+  menuExecBefore = doc.execCommands.length;
+  rightClick();
+  $("noteMenuPastePlain").click();
+  await waitFor(() => commandsSince(menuExecBefore).some((c) => c.cmd === "insertText"), "menu plain paste");
+  eq("menu Paste without formatting: the text only, with plain line breaks", (commandsSince(menuExecBefore).find((c) => c.cmd === "insertText") || {}).value,
+    "আমি marked it\nSecond line");
+  check("menu Paste without formatting: the HTML is not even read", !clipboard.lastScript.includes("'HTML Format'"));
+  check("menu Paste without formatting: no rich insert", !commandsSince(menuExecBefore).some((c) => c.cmd === "insertHTML"));
+
+  menuExecBefore = doc.execCommands.length;
+  rightClick();
+  $("noteMenuPaste").click();
+  $("tabNotes").classList.remove("active");
+  await settle();
+  eq("menu Paste: nothing lands when the note went out of view meanwhile", commandsSince(menuExecBefore).filter((c) => /^insert/.test(c.cmd)).length, 0);
+  check("menu Paste: ... and says why", /Nothing pasted/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  $("tabNotes").classList.add("active");
+
+  clipboard.textError = "Clipboard is in use";
+  rightClick();
+  $("noteMenuPaste").click();
+  await settle();
+  check("menu Paste: a clipboard error is reported", /Could not read the clipboard: Clipboard is in use/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  clipboard.textError = null;
+  clipboard.html = null;
+  clipboard.text = null;
+  rightClick();
+  $("noteMenuPaste").click();
+  await settle();
+  check("menu Paste: an empty clipboard says so", /Nothing to paste/.test($("globalStatus").textContent), $("globalStatus").textContent);
+
+  // Where CEP allows Chromium's own paste, it goes through the paste handler and PowerShell is not started.
+  const realExecCommand = doc.execCommand;
+  doc.execCommand = (cmd, ui, value) => {
+    if (cmd !== "paste") return realExecCommand(cmd, ui, value);
+    doc.execCommands.push({ cmd });
+    $("noteEditor").dispatch("paste", { clipboardData: { getData: (t) => (t === "text/html" ? "<p><mark>mine</mark></p>" : "mine"), types: ["text/html", "text/plain"] } });
+    return true;
+  };
+  const readsBefore = clipboard.textReads;
+  menuExecBefore = doc.execCommands.length;
+  rightClick();
+  $("noteMenuPaste").click();
+  rightClick();
+  $("noteMenuPastePlain").click();
+  await settle();
+  doc.execCommand = realExecCommand;
+  eq("menu Paste: Chromium's own paste when allowed, no PowerShell", clipboard.textReads, readsBefore);
+  eq("menu Paste: ... with the look, and without it", commandsSince(menuExecBefore).filter((c) => /^insert/.test(c.cmd)).map((c) => `${c.cmd}|${c.value}`).join(" + "),
+    "insertHTML|<span class=\"note-color\" data-fg=\"111111\" data-bg=\"ffff00\" style=\"color:#111111;background-color:#ffff00\">mine</span> + insertText|mine");
+  $("tabNotes").classList.remove("active");
 
   // ---- Note text size
   const sizeBefore = readJson(join(storage, "lazykick_settings.json")).notesFontSize || 14;

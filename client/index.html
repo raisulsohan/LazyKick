@@ -163,7 +163,7 @@
                 <span id="globalStatus" class="status-text">Ready</span>
             </div>
             <div class="footer-credits">
-                <span id="brandTag" class="brand-tag">LazyKick v1.6</span>
+                <span id="brandTag" class="brand-tag">LazyKick v1.7</span>
                 <span class="sep">•</span>
                 <a id="devLink" href="https://raisulsohan.com" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
             </div>
@@ -298,6 +298,17 @@
                 <button id="btnSubCreate" class="btn-primary-sm">Create subtitles</button>
             </div>
         </div>
+    </div>
+
+    <!-- ================= NOTES RIGHT-CLICK MENU ================= -->
+    <div id="noteMenu" class="context-menu hidden" role="menu" aria-label="Edit">
+        <button id="noteMenuCut" class="context-item" role="menuitem"><span>Cut</span><kbd>Ctrl+X</kbd></button>
+        <button id="noteMenuCopy" class="context-item" role="menuitem"><span>Copy</span><kbd>Ctrl+C</kbd></button>
+        <div class="context-sep" role="separator"></div>
+        <button id="noteMenuPaste" class="context-item" role="menuitem" title="Keeps the look of the source: highlights, colours, bold, headings and lists"><span>Paste</span><kbd>Ctrl+V</kbd></button>
+        <button id="noteMenuPastePlain" class="context-item" role="menuitem" title="Only the text, in the note's own style"><span>Paste without formatting</span><kbd>Ctrl+Shift+V</kbd></button>
+        <div class="context-sep" role="separator"></div>
+        <button id="noteMenuSelectAll" class="context-item" role="menuitem"><span>Select all</span><kbd>Ctrl+A</kbd></button>
     </div>
 
     <!-- ================= IN-PANEL DIALOG (instead of the browser's white alert/confirm) ================= -->

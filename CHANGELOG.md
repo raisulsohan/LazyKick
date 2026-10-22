@@ -2,6 +2,22 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.7.0
+
+### 🖍️ Pasted notes keep their highlights and colours
+- **Highlighted (marked) text keeps its highlight colour** when pasted into 📝 Notes from Google Docs (*Highlight colour*), Word (highlights and shading, `background` / `mso-highlight`) or a web page (`<mark>`, inline backgrounds). The text on a highlight keeps its own colour when it reads there, else it is dark (or white on a dark highlight).
+- **Coloured text keeps its colour.** The note is dark, so black text takes the note's own light colour, and a colour too dark to read on it (dark blue, dark red) is mixed with white until it reaches a 4.5:1 contrast, keeping its hue.
+- **Strikethrough** (`<s>`, `<del>`, `text-decoration: line-through`) is kept too.
+- A web page's own white or dark background, which Chromium writes on every span copied from a page, is not taken for a highlight; nor are table cell and block backgrounds.
+- Colours are read as numbers and written back as `#rrggbb` on LazyKick's own `span.note-color`; after every paste the panel rebuilds each colour span's style from its own `data-fg` / `data-bg`, so nothing else from the clipboard reaches a style attribute. Fonts, sizes, links, images and scripts are still left behind.
+- 🎙️ Time to Audio, 💬 Subtitles and 👁 Follow read through the colour spans; subtitles carry no colour.
+
+### Paste or Paste without formatting
+- **Right-click the note** for a menu like Google Docs': **Cut**, **Copy**, **Paste**, **Paste without formatting** and **Select all** (Cut and Copy are greyed without a selection). CEP showed no menu at all on a right-click before.
+- **Paste** keeps the source's look, as Ctrl+V does. **Paste without formatting** puts in the text only, as Ctrl+Shift+V does.
+- Menu Paste uses Chromium's own paste where CEP allows it; otherwise it reads the clipboard through PowerShell (Windows) or AppleScript (macOS). On Windows the HTML is read through WPF, which decodes it as UTF-8: Windows Forms on .NET Framework reads it in the ANSI code page, which garbled Bengali and curly quotes. Nothing is pasted if another note came up while the clipboard was read.
+- **Ctrl+Shift+V** (Cmd+Shift+V) is now registered with After Effects and Premiere Pro as well, so the host hands it to the panel.
+
 ## 1.6.0
 
 ### 💬 Choose how the subtitles look

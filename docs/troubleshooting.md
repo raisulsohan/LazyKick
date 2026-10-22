@@ -122,10 +122,17 @@ That is by design: notes belong to the project file, and an `.aep` and a
 
 ### Pasted text lost its formatting, or kept too much
 
-- **Ctrl+Shift+V** pastes plain text on purpose; use **Ctrl+V** to keep the
-  headings and bold.
-- Colours, fonts, sizes and links are dropped deliberately; see
-  [Pasting text](manual.md#pasting-text) for what is kept.
+- **Ctrl+Shift+V** and **Paste without formatting** (right-click) paste the
+  text only, on purpose; use **Ctrl+V** or **Paste** to keep the headings,
+  bold, highlights and colours.
+- Fonts, sizes and links are dropped deliberately, and black text takes the
+  note's own light colour; see [Pasting text](manual.md#pasting-text) for
+  what is kept.
+- A colour looks lighter than in the document: dark colours are made lighter
+  until they can be read on the dark note. Highlights keep their colour.
+- **Paste** in the right-click menu says *Could not read the clipboard*: the
+  menu reads the clipboard through PowerShell (Windows) or AppleScript
+  (macOS). Use **Ctrl+V** instead, which does not need them.
 - Something pasted as one heading that should be a paragraph: a short line
   (up to five words) that is entirely bold with no full stop is read as a
   heading, as documents write them. Add a full stop or un-bold it.

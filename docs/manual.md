@@ -177,26 +177,36 @@ Only 🌐 Global is shared by both.
 
 ### Pasting text
 
-Paste a script from **Google Docs, Word or a web page** and it keeps its
-shape, in the panel's own dark style:
+Paste a script from **Google Docs, Word or a web page** and it looks like the
+source, on the panel's dark note:
 
 | In the document | In the notes |
 | --- | --- |
 | Title, large text | Big heading |
 | Heading, bold short line (no full stop) | Heading |
 | Paragraph | Paragraph |
-| **Bold**, *italic*, underline | Kept |
+| **Bold**, *italic*, underline, strikethrough | Kept |
+| Highlighted (marked) text | Kept, in the same highlight colour |
+| Coloured text | Kept; a colour too dark to read on the note is made lighter |
+| Black text | The note's own light text |
 | Bullet or numbered list | Lines starting with `•` or `1.` |
 | Small or grey text (a meta line) | Grey side note |
 | Table | One line per row, cells joined with `\|` |
 
-Fonts, colours, sizes, links, images, hidden text and scripts are left
-behind: the pasted document is read and rebuilt from these few parts, never
-inserted as it came. A short phrase pastes into the current line.
+Fonts, sizes, links, images, hidden text and scripts are left behind, and so
+is the page's own white or dark background: the pasted document is read and
+rebuilt from these few parts, never inserted as it came. A short phrase
+pastes into the current line.
 
-**Ctrl+Shift+V** (**Cmd+Shift+V**) pastes plain text. Copying an image file
-into the notes does nothing; the status bar reminds you that images go to the
-timeline with **📋 Paste Image**.
+**Paste without formatting** puts in the text only, in the note's own style:
+press **Ctrl+Shift+V** (**Cmd+Shift+V**), or right-click the note.
+
+**Right-click** the note for a menu: **Cut**, **Copy**, **Paste**, **Paste
+without formatting** and **Select all**. Paste from the menu reads the
+clipboard the same way as Ctrl+V.
+
+Copying an image file into the notes does nothing; the status bar reminds
+you that images go to the timeline with **📋 Paste Image**.
 
 **A− / A+** make the note text smaller or bigger, from 10 to 24 pixels
 (14 by default). The size is remembered; headings scale with it.
@@ -470,8 +480,9 @@ The folder browser also remembers the last folder you picked.
 | Shortcut | Where | Does |
 | :--- | :--- | :--- |
 | `Ctrl+V` / `Cmd+V` | Panel focused, outside text fields | Paste Image |
-| `Ctrl+V` / `Cmd+V` | Notes | Paste, keeping headings, bold, italic and lists |
-| `Ctrl+Shift+V` / `Cmd+Shift+V` | Notes | Paste plain text |
+| `Ctrl+V` / `Cmd+V` | Notes | Paste, keeping headings, bold, italic, lists, highlights and colours |
+| `Ctrl+Shift+V` / `Cmd+Shift+V` | Notes | Paste without formatting (text only) |
+| Right-click | Notes | Cut, Copy, Paste, Paste without formatting, Select all |
 | Double-click | Note tab | Rename (Enter saves, Esc cancels) |
 | `Enter` / `Esc` | Dialog | OK / Cancel (Cancel is focused on red dialogs) |
 | `Enter` | Folder browser path box | Go to that path |

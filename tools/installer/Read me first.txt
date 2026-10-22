@@ -53,8 +53,9 @@ THE THREE TABS
       Export     saves a .txt next to the project
       A- / A+    smaller or bigger note text
     Paste a script from Google Docs or Word and its headings,
-    bold, italic and lists come along. Ctrl+Shift+V pastes
-    plain text.
+    bold, italic, lists, highlights and colours come along.
+    Ctrl+Shift+V pastes the text only. Right-click the note
+    for Cut, Copy, Paste and Paste without formatting.
 
   SCRIPT TO SUBTITLES (in Notes & Tasks)
     1. Put the voiceover on the timeline and keep that sequence

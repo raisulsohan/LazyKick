@@ -1115,6 +1115,51 @@ input:checked + .slider:before { transform: translateX(12px); }
     color: var(--text-muted);
 }
 
+/* ================= NOTES RIGHT-CLICK MENU ================= */
+.context-menu {
+    position: fixed;
+    z-index: 150;
+    min-width: 210px;
+    padding: 4px 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+.context-menu.hidden { display: none; }
+
+.context-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    width: 100%;
+    padding: 5px 12px;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+.context-item:hover:not(:disabled) { background: var(--accent-blue); color: #fff; }
+.context-item:disabled { color: var(--text-muted); cursor: default; }
+
+.context-item kbd {
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+.context-item:hover:not(:disabled) kbd { color: #fff; }
+.context-item:disabled kbd { color: var(--text-muted); }
+
+.context-sep {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--border-color);
+}
+
 /* ================= IN-PANEL DIALOG ================= */
 /* CEP shows window.alert/confirm as white system windows; this one matches the panel. */
 .dialog-overlay { z-index: 200; }

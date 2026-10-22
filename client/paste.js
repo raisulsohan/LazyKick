@@ -4,17 +4,22 @@
   Developed By: RaisulSohan
   Website: https://raisulsohan.com
   Description: Turns HTML from the clipboard (Google Docs, Word, web pages)
-               into tidy note markup: headings, paragraphs, bold, italic,
-               underline and list items, in the panel's own colours.
+               into note markup that looks like the source: headings,
+               paragraphs, bold, italic, underline, strikethrough, list
+               items, highlights and coloured text.
   Copyright (c) 2026 Raisul Sohan. Free and open source under the MIT License.
 ========================================================================
 
   Nothing from the clipboard is inserted as it came: the HTML is read into
   blocks of plain text runs, and new markup is written from a short list of
-  tags with no attributes (the only class names are LazyKick's own). Colours,
-  fonts, sizes, links, images and scripts never reach the panel, which runs
-  with Node. Styles are read the way Docs and Word write them: a bold span,
-  a 20pt title, grey 10pt notes.
+  tags with no attributes of their own (the only class names are LazyKick's
+  own). Highlight and text colours are read as numbers and written back as
+  #rrggbb, fitted to the dark note: black text takes the note's colour, a
+  colour too dark to read is lightened, and highlighted text is dark or
+  light so it reads on its highlight. Fonts, sizes, links, images and
+  scripts never reach the panel, which runs with Node. Styles are read the
+  way Docs and Word write them: a bold span, a 20pt title, grey 10pt notes,
+  a yellow background-color or mso-highlight.
 
   Works on any DOM-like tree (nodeType, nodeName, childNodes, getAttribute,
   nodeValue), so tools/test-paste.mjs can feed it without a browser.
@@ -45,6 +50,25 @@
         try { return node.getAttribute ? (node.getAttribute(name) || "") : ""; } catch (e) { return ""; }
     }
 
+    // Table parts and the page itself: a background there is the page's, not a highlight.
+    var BOXES = { TD: true, TH: true, TBODY: true, THEAD: true, TFOOT: true, BODY: true, HTML: true };
+
+    // CSS names Word and web pages use for text colours and highlights
+    // (Word writes highlights as background:yellow;mso-highlight:yellow).
+    var NAMED = {
+        black: [0, 0, 0], white: [255, 255, 255], gray: [128, 128, 128], grey: [128, 128, 128],
+        darkgray: [169, 169, 169], darkgrey: [169, 169, 169], dimgray: [105, 105, 105], dimgrey: [105, 105, 105],
+        silver: [192, 192, 192], lightgray: [211, 211, 211], lightgrey: [211, 211, 211],
+        red: [255, 0, 0], darkred: [139, 0, 0], maroon: [128, 0, 0], brown: [165, 42, 42], orange: [255, 165, 0],
+        gold: [255, 215, 0], yellow: [255, 255, 0], olive: [128, 128, 0], lime: [0, 255, 0], green: [0, 128, 0],
+        darkgreen: [0, 100, 0], lightgreen: [144, 238, 144], aqua: [0, 255, 255], cyan: [0, 255, 255],
+        teal: [0, 128, 128], darkcyan: [0, 139, 139], blue: [0, 0, 255], navy: [0, 0, 128], darkblue: [0, 0, 139],
+        lightblue: [173, 216, 230], fuchsia: [255, 0, 255], magenta: [255, 0, 255], darkmagenta: [139, 0, 139],
+        purple: [128, 0, 128], pink: [255, 192, 203]
+    };
+    var MARK_YELLOW = [255, 255, 0];
+
+    /** [r, g, b] for a CSS colour, or null (unknown, or fully transparent). */
     function parseColor(value) {
         var v = String(value || "").replace(/\s+/g, "").toLowerCase();
         var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(v);
@@ -52,21 +76,50 @@
             var h = m[1].length === 3 ? m[1].replace(/(.)/g, "$1$1") : m[1];
             return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)];
         }
-        m = /^rgba?\((\d+),(\d+),(\d+)/.exec(v);
-        if (m) return [+m[1], +m[2], +m[3]];
-        var named = { black: [0, 0, 0], white: [255, 255, 255], gray: [128, 128, 128], grey: [128, 128, 128],
-                      darkgray: [169, 169, 169], darkgrey: [169, 169, 169], dimgray: [105, 105, 105], dimgrey: [105, 105, 105],
-                      silver: [192, 192, 192], lightgray: [211, 211, 211], lightgrey: [211, 211, 211] };
-        return named.hasOwnProperty(v) ? named[v] : null;
+        // Chromium writes "no colour" as rgba(0, 0, 0, 0).
+        m = /^rgba?\((\d+(?:\.\d+)?),(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)(?:[,\/](\d*\.?\d+)(%?))?\)?/.exec(v);
+        if (m) {
+            if (m[4] !== undefined && parseFloat(m[4]) / (m[5] ? 100 : 1) < 0.1) return null;
+            return [Math.min(255, Math.round(+m[1])), Math.min(255, Math.round(+m[2])), Math.min(255, Math.round(+m[3]))];
+        }
+        return NAMED.hasOwnProperty(v) ? NAMED[v].slice() : null;
+    }
+
+    function isNeutral(c) {
+        return Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]) <= 24;
+    }
+
+    /**
+     * A background's colour: [r, g, b]; null for none (a page's own white or
+     * near-black, which every span copied from a web page carries); undefined
+     * when it names no colour (transparent), so the one behind it shows.
+     */
+    function readBackground(value) {
+        var parts = String(value).replace(/url\([^)]*\)/g, "").match(/rgba?\([^)]*\)|#[0-9a-f]+|[a-z]+/g) || [];
+        for (var i = 0; i < parts.length; i++) {
+            var c = parseColor(parts[i]);
+            if (!c) continue;
+            var max = Math.max(c[0], c[1], c[2]);
+            var min = Math.min(c[0], c[1], c[2]);
+            return isNeutral(c) && (min >= 0xF0 || max <= 0x40) ? null : c;
+        }
+        return undefined;
     }
 
     /** The parts of an inline style that matter here, on top of `base`. */
     function readStyle(node, base) {
-        var s = { b: base.b, i: base.i, u: base.u, size: base.size, color: base.color, pre: base.pre, hidden: false };
+        var s = { b: base.b, i: base.i, u: base.u, s: base.s, size: base.size, color: base.color, bg: base.bg, pre: base.pre, hidden: false };
         var tag = node.nodeName;
+        var inline = !BLOCKS[tag] && !BOXES[tag];
         if (tag === "B" || tag === "STRONG") s.b = true;
         if (tag === "I" || tag === "EM" || tag === "CITE") s.i = true;
         if (tag === "U" || tag === "INS") s.u = true;
+        if (tag === "S" || tag === "STRIKE" || tag === "DEL") s.s = true;
+        if (tag === "MARK") s.bg = MARK_YELLOW;
+        if (tag === "FONT") {
+            var fontColor = parseColor(attr(node, "color"));
+            if (fontColor) s.color = fontColor;
+        }
         if (tag === "PRE" || tag === "CODE") s.pre = tag === "PRE" || s.pre;
         var style = attr(node, "style").split(";");
         for (var k = 0; k < style.length; k++) {
@@ -76,8 +129,13 @@
             var val = style[k].substr(colon + 1).replace(/^\s+|\s+$/g, "").toLowerCase().replace(/\s*!important$/, "");
             if (prop === "font-weight") s.b = val === "bold" || val === "bolder" || parseInt(val, 10) >= 600;
             else if (prop === "font-style") s.i = val === "italic" || val === "oblique";
-            else if (prop === "text-decoration" || prop === "text-decoration-line") s.u = val.indexOf("underline") !== -1;
-            else if (prop === "font-size") {
+            else if (prop === "text-decoration" || prop === "text-decoration-line") {
+                s.u = val.indexOf("underline") !== -1;
+                s.s = val.indexOf("line-through") !== -1;
+            } else if ((prop === "background-color" || prop === "background" || prop === "mso-highlight") && inline) {
+                var bg = readBackground(val);
+                if (bg !== undefined) s.bg = bg;
+            } else if (prop === "font-size") {
                 var num = parseFloat(val);
                 if (/pt$/.test(val) && num > 0) s.size = num;
                 else if (/px$/.test(val) && num > 0) s.size = num * 0.75;
@@ -93,7 +151,7 @@
 
     /**
      * The clipboard tree as blocks:
-     * [{ kind: "h1".."h6" | "p", list: "" | "ul" | "ol", n, runs: [{ text, b, i, u, size, color }],
+     * [{ kind: "h1".."h6" | "p", list: "" | "ul" | "ol", n, runs: [{ text, b, i, u, s, size, color, bg }],
      *    tag: { t, e, w } for a LazyKick timecode tag at its start }]
      */
     function readBlocks(rootNode) {
@@ -113,7 +171,7 @@
             // note, a run of spaces reads as one either way.
             text = text.replace(/[\s\u00A0]+/g, " ");
             if (!current) open("p");
-            current.runs.push({ text: text, b: !!style.b, i: !!style.i, u: !!style.u, size: style.size, color: style.color });
+            current.runs.push({ text: text, b: !!style.b, i: !!style.i, u: !!style.u, s: !!style.s, size: style.size, color: style.color, bg: style.bg });
         }
 
         function walk(node, style) {
@@ -176,7 +234,7 @@
             for (var i = 0; i < kids.length; i++) walk(kids[i], style);
         }
 
-        walk(rootNode, { b: false, i: false, u: false, size: 0, color: null, pre: false });
+        walk(rootNode, { b: false, i: false, u: false, s: false, size: 0, color: null, bg: null, pre: false });
 
         // Trim, and drop blocks with nothing to show (Docs spacing paragraphs).
         // Whether a block began or ended with a space is kept: a phrase pasted
@@ -262,23 +320,101 @@
         return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
+    var NOTE_BACKGROUND = [0x15, 0x15, 0x17]; // .rich-editor in style.css
+    var DARK_TEXT = [0x11, 0x11, 0x11];
+    var LIGHT_TEXT = [0xFF, 0xFF, 0xFF];
+
+    /** WCAG contrast ratio of two [r, g, b] colours (1 to 21). */
+    function contrast(a, b) {
+        function lum(c) {
+            var l = [];
+            for (var i = 0; i < 3; i++) {
+                var v = c[i] / 255;
+                l.push(v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+            }
+            return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+        }
+        var x = lum(a);
+        var y = lum(b);
+        return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+    }
+
+    function hex(c) {
+        var out = "";
+        for (var i = 0; i < 3; i++) {
+            var h = Math.round(Math.max(0, Math.min(255, c[i]))).toString(16);
+            out += h.length < 2 ? "0" + h : h;
+        }
+        return out;
+    }
+
+    /**
+     * How a run shows on the dark note: { fg, bg } as "rrggbb", or "" for
+     * the note's own. A highlight keeps its colour, with the text's own
+     * colour on it when that reads, else black or white. Without one, black,
+     * white and grey text take the note's colour, and a colour too dark to
+     * read on the note is mixed with white until it reads.
+     */
+    function noteColours(run) {
+        if (run.bg) {
+            var on = run.color && contrast(run.color, run.bg) >= 3 ? run.color
+                   : contrast(DARK_TEXT, run.bg) >= contrast(LIGHT_TEXT, run.bg) ? DARK_TEXT : LIGHT_TEXT;
+            return { fg: hex(on), bg: hex(run.bg) };
+        }
+        if (!run.color || isNeutral(run.color)) return { fg: "", bg: "" };
+        var c = run.color;
+        for (var k = 1; k <= 20 && contrast(c, NOTE_BACKGROUND) < 4.5; k++) {
+            var t = k / 20;
+            c = [run.color[0] + (255 - run.color[0]) * t, run.color[1] + (255 - run.color[1]) * t, run.color[2] + (255 - run.color[2]) * t];
+        }
+        return { fg: hex(c), bg: "" };
+    }
+
+    /** The inline style of a colour span, from "rrggbb" values only (main.js rebuilds pasted spans with it). */
+    function colourStyle(fg, bg) {
+        var parts = [];
+        if (/^[0-9a-f]{6}$/.test(fg || "")) parts.push("color:#" + fg);
+        if (/^[0-9a-f]{6}$/.test(bg || "")) parts.push("background-color:#" + bg);
+        return parts.join(";");
+    }
+
     function runsHtml(runs, plainBold) {
-        var html = "";
+        // Neighbouring runs with the same look become one.
+        var looks = [];
         for (var i = 0; i < runs.length; i++) {
             var r = runs[i];
             if (r.tag) {
-                html += "<span class=\"timecode-tag\"" + (r.tag.t ? " data-t=\"" + r.tag.t + "\"" : "") + (r.tag.e ? " data-e=\"" + r.tag.e + "\"" : "") +
-                        (r.tag.w ? " data-w=\"" + r.tag.w + "\"" : "") + ">" + escapeHtml(r.text) + "</span>";
+                looks.push(r);
                 continue;
             }
-            var t = escapeHtml(r.text);
-            if (r.u) t = "<u>" + t + "</u>";
-            if (r.i) t = "<i>" + t + "</i>";
-            if (r.b && !plainBold) t = "<b>" + t + "</b>";
+            var c = noteColours(r);
+            var look = { text: r.text, b: r.b && !plainBold, i: r.i, u: r.u, s: r.s, fg: c.fg, bg: c.bg };
+            var last = looks.length ? looks[looks.length - 1] : null;
+            if (last && !last.tag && last.b === look.b && last.i === look.i && last.u === look.u && last.s === look.s &&
+                last.fg === look.fg && last.bg === look.bg) last.text += look.text;
+            else looks.push(look);
+        }
+        var html = "";
+        for (var k = 0; k < looks.length; k++) {
+            var l = looks[k];
+            if (l.tag) {
+                html += "<span class=\"timecode-tag\"" + (l.tag.t ? " data-t=\"" + l.tag.t + "\"" : "") + (l.tag.e ? " data-e=\"" + l.tag.e + "\"" : "") +
+                        (l.tag.w ? " data-w=\"" + l.tag.w + "\"" : "") + ">" + escapeHtml(l.text) + "</span>";
+                continue;
+            }
+            var t = escapeHtml(l.text);
+            // The colour sits innermost, so the note's white bold does not cover it.
+            if (l.fg || l.bg) {
+                t = "<span class=\"note-color\"" + (l.fg ? " data-fg=\"" + l.fg + "\"" : "") + (l.bg ? " data-bg=\"" + l.bg + "\"" : "") +
+                    " style=\"" + colourStyle(l.fg, l.bg) + "\">" + t + "</span>";
+            }
+            if (l.s) t = "<s>" + t + "</s>";
+            if (l.u) t = "<u>" + t + "</u>";
+            if (l.i) t = "<i>" + t + "</i>";
+            if (l.b) t = "<b>" + t + "</b>";
             html += t;
         }
-        // Neighbouring runs with the same look become one.
-        return html.replace(/<\/b><b>/g, "").replace(/<\/i><i>/g, "").replace(/<\/u><u>/g, "");
+        return html.replace(/<\/b><b>/g, "").replace(/<\/i><i>/g, "").replace(/<\/u><u>/g, "").replace(/<\/s><s>/g, "");
     }
 
     /**
@@ -312,6 +448,8 @@
         readBlocks: readBlocks,
         classify: classify,
         toNoteHtml: toNoteHtml,
-        parseColor: parseColor
+        parseColor: parseColor,
+        contrast: contrast,
+        colourStyle: colourStyle
     };
 });
