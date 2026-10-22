@@ -69,7 +69,7 @@
             <!-- Script to Audio -->
             <div class="script-bar">
                 <button id="btnTimeToAudio" class="btn-tool btn-accent" title="Listen to the timeline audio and put the time each line or paragraph is spoken at its start; every sentence is matched on its own. Select the voiceover clip or layer to use only it.">🎙️ Time to Audio</button>
-                <button id="btnRetakes" class="btn-tool btn-retakes hidden" title="Take the retakes Time to Audio left out off the timeline: every unlocked track, each from the middle of the pause before it to just before the take that counts, and close the gaps. Asks first.">✂️ Retakes</button>
+                <button id="btnRetakes" class="btn-tool btn-retakes hidden" title="Take the retakes Time to Audio left out off the timeline: every unlocked track, each from the middle of the pause before it to just before the take that counts, and close the gaps. Their audio is saved as WAV in 'LazyKick Cuts' next to the project, each with a word-by-word SRT. Asks first.">✂️ Retakes</button>
                 <button id="btnTimeTitles" class="btn-tool btn-titles is-on" title="Titles and headings are spoken: Time to Audio times them and Subtitles shows them, like any line.">🔠 Titles</button>
                 <button id="btnSubtitles" class="btn-tool" title="Put the timed lines on the timeline as subtitles: choose Single Line, Double Line or Single Word first (Premiere Pro: a caption track; After Effects: text layers). An .srt file is saved next to the project too.">💬 Subtitles</button>
                 <button id="btnFollow" class="btn-tool btn-follow" title="Follow the playhead">👁 Follow</button>
@@ -165,7 +165,7 @@
                 <span id="globalStatus" class="status-text">Ready</span>
             </div>
             <div class="footer-credits">
-                <span id="brandTag" class="brand-tag">LazyKick v1.10</span>
+                <span id="brandTag" class="brand-tag">LazyKick v1.11</span>
                 <span class="sep">•</span>
                 <a id="devLink" href="https://raisulsohan.com" class="dev-link" title="Visit Developer Website">Developed By RaisulSohan</a>
             </div>
@@ -316,7 +316,8 @@
         <button id="noteMenuUnpin" class="context-item hidden" role="menuitem" title="Remove every pin in this line and let Time to Audio time it freely again"><span>Unpin this line</span></button>
         <div class="context-sep" role="separator"></div>
         <button id="noteMenuCutTimeline" class="context-item" role="menuitem" title="Select timed words first. Every unlocked track is cut where they start and where they end, in the pauses next to them."><span>✂️ Cut the timeline here</span></button>
-        <button id="noteMenuRemoveTimeline" class="context-item" role="menuitem" title="Select timed words first. They are taken out of every unlocked track and the gap is closed; in the note they are struck through and the later times move to match."><span>✂️ Remove from the timeline</span></button>
+        <button id="noteMenuRemoveTimeline" class="context-item" role="menuitem" title="Select timed words first. They are taken out of every unlocked track and the gap is closed; their audio is saved as WAV in 'LazyKick Cuts' next to the project with a word-by-word SRT, and in the note they are struck through and the later times move to match."><span>✂️ Remove from the timeline</span></button>
+        <button id="noteMenuSaveAudio" class="context-item" role="menuitem" title="Select timed words first. Their audio, as Time to Audio hears it, is saved as a WAV file in 'LazyKick Cuts' next to the project, with a word-by-word SRT timed to it. Nothing on the timeline changes."><span>💾 Save this audio as WAV</span></button>
         <button id="noteMenuUnstrike" class="context-item hidden" role="menuitem" title="The struck-through words of this line count again for Time to Audio and subtitles (after you undo the cut in the timeline)"><span>Bring back the struck words</span></button>
     </div>
 

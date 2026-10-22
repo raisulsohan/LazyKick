@@ -302,9 +302,63 @@ const host = {
   jumps: [],                 // times the panel moved the playhead to (setPlayhead)
   cuts: [],                  // what the panel asked to cut (cutTimeline)
   removals: [],              // what the panel asked to take out (removeTimeline)
+  audioSaves: [],            // what the panel asked to render (saveTimelineAudio)
+  saveFails: false,          // the render fails
+  saveWhole: false,          // Premiere renders the whole sequence, not the stretch
   refuseProject: false,
   timecode: { ok: true, timecode: "00:00:05:00" },
 };
+/**
+ * A mono 8 kHz 16-bit file from `from` to `to` seconds of the timeline;
+ * every sample is the time it is at, in hundredths of a second. AIFF
+ * (big-endian, as After Effects renders it) or WAV.
+ */
+const TEST_RATE = 8000;
+function writeTestAudio(file, from, to, aiff) {
+  const n = Math.round((to - from) * TEST_RATE);
+  const data = Buffer.alloc(n * 2);
+  for (let i = 0; i < n; i++) {
+    const v = Math.round((from + i / TEST_RATE) * 100);
+    if (aiff) data.writeInt16BE(v, i * 2); else data.writeInt16LE(v, i * 2);
+  }
+  let head;
+  if (aiff) {
+    head = Buffer.alloc(54);
+    head.write("FORM", 0); head.writeUInt32BE(46 + data.length, 4); head.write("AIFF", 8);
+    head.write("COMM", 12); head.writeUInt32BE(18, 16); head.writeUInt16BE(1, 20); head.writeUInt32BE(n, 22); head.writeUInt16BE(16, 26);
+    head.writeUInt16BE(16383 + 12, 28); head.writeUInt32BE(0xFA000000, 30); head.writeUInt32BE(0, 34);   // 8000 as an 80-bit number
+    head.write("SSND", 38); head.writeUInt32BE(8 + data.length, 42); head.writeUInt32BE(0, 46); head.writeUInt32BE(0, 50);
+  } else {
+    head = Buffer.alloc(44);
+    head.write("RIFF", 0); head.writeUInt32BE(0, 4); head.writeUInt32LE(36 + data.length, 4); head.write("WAVE", 8);
+    head.write("fmt ", 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+    head.writeUInt32LE(TEST_RATE, 24); head.writeUInt32LE(TEST_RATE * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+    head.write("data", 36); head.writeUInt32LE(data.length, 40);
+  }
+  writeFileSync(file, Buffer.concat([head, data]));
+}
+/** A WAV the panel saved: { rate, seconds, first, last } with first/last the times its first and last samples come from. */
+/** The cues of an SRT the panel saved: [{ start, end, text }], or null when it is not there. */
+function readSavedSrt(file) {
+  if (!existsSync(file)) return null;
+  const text = readFileSync(file, "utf8");
+  if (text.charCodeAt(0) !== 0xfeff) return null;
+  const seconds = (t) => { const m = /(\d+):(\d+):(\d+),(\d+)/.exec(t); return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000; };
+  return text.slice(1).split("\r\n\r\n").filter((b) => b.trim()).map((b) => {
+    const rows = b.split("\r\n");
+    const [a, z] = rows[1].split(" --> ");
+    return { start: seconds(a), end: seconds(z), text: rows.slice(2).filter(Boolean).join(" ") };
+  });
+}
+
+function readSavedWav(file) {
+  const b = readFileSync(file);
+  if (b.toString("ascii", 0, 4) !== "RIFF" || b.toString("ascii", 8, 12) !== "WAVE" || b.toString("ascii", 36, 40) !== "data") return null;
+  const rate = b.readUInt32LE(24);
+  const bytes = b.readUInt32LE(40);
+  return { rate, seconds: bytes / (rate * 2), first: b.readInt16LE(44) / 100, last: b.readInt16LE(44 + bytes - 2) / 100, format: b.readUInt16LE(20) };
+}
+
 function setProject(kind, file) {
   if (kind === "none") {
     host.info = { ok: false, msg: "No project open", host: "ae" };
@@ -376,6 +430,22 @@ function answer(script) {
       const payload = JSON.parse(args[0]);
       host.cuts.push(payload);
       return JSON.stringify({ ok: true, msg: `Cut 2 clips at ${payload.times.length} points`, times: payload.times, split: 2, relinked: 0, lockedSkipped: 0, failures: [] });
+    }
+    case "saveTimelineAudio": {
+      const payload = JSON.parse(args[0]);
+      host.audioSaves.push(payload);
+      if (host.saveFails) return JSON.stringify({ ok: false, msg: "Premiere did not export the audio at 00:00:01:00", files: [], failures: ["Premiere did not export the audio at 00:00:01:00"] });
+      const ae = host.timeline.host === "ae";
+      const fps = host.timeline.fps || 25;
+      const files = payload.items.map((it) => {
+        const from = Math.round(it.s * fps) / fps;
+        const to = Math.round(it.e * fps) / fps;
+        const file = it.path + (ae ? ".aif" : ".wav");
+        if (host.saveWhole) writeTestAudio(file, 0, host.timeline.duration, ae);
+        else writeTestAudio(file, from, to, ae);
+        return { path: file, s: from, e: to, whole: host.saveWhole };
+      });
+      return JSON.stringify({ ok: true, msg: `Saved ${files.length} audio files`, files, used: "all", failures: [] });
     }
     case "removeTimeline": {
       // As host.jsx: whole frames of the timeline, back in the reply.
@@ -468,7 +538,7 @@ doc.getElementById("fbOverlay").classList.add("hidden");
 doc.getElementById("dialogOverlay").classList.add("hidden");
 doc.getElementById("subModalOverlay").classList.add("hidden");
 doc.getElementById("noteMenu").classList.add("hidden");
-for (const id of ["noteMenuCut", "noteMenuCopy", "noteMenuPaste", "noteMenuPastePlain", "noteMenuSelectAll", "noteMenuPin", "noteMenuUnpin", "noteMenuCutTimeline", "noteMenuRemoveTimeline", "noteMenuUnstrike"]) doc.getElementById("noteMenu").appendChild(doc.getElementById(id));
+for (const id of ["noteMenuCut", "noteMenuCopy", "noteMenuPaste", "noteMenuPastePlain", "noteMenuSelectAll", "noteMenuPin", "noteMenuUnpin", "noteMenuCutTimeline", "noteMenuRemoveTimeline", "noteMenuSaveAudio", "noteMenuUnstrike"]) doc.getElementById("noteMenu").appendChild(doc.getElementById(id));
 doc.getElementById("optTargetFolder").value = "Pasted Images";
 
 const nativePopups = [];
@@ -1737,6 +1807,25 @@ try {
   near("remove: a later line moves earlier by the stretch taken out", startOf(cutC), cStart - goneSeconds, 0.002);
   eq("remove: ... with its word times", tagOf(cutC).getAttribute("data-w"), cWords);
   eq("remove: an earlier line stays", startOf(cutA), aStart);
+  check("remove: the project has a folder for the saved audio", host.folder && host.folder !== "NO_PROJECT", host.folder);
+  const cutsDir = join(host.folder, "LazyKick Cuts");
+  const savedNames = existsSync(cutsDir) ? readdirSync(cutsDir) : [];
+  const removedTc = LazyAlign.formatTimecode(Math.round(asked[0].s * 25) / 25, 25).replace(/:/g, "-");
+  eq("remove: the audio taken out is saved first, with its SRT, named by the sequence and its timecode", `${host.audioSaves.length}:${savedNames.sort().join("|")}`,
+    `1:Seq 01 removed ${removedTc}.srt|Seq 01 removed ${removedTc}.wav`);
+  const removedWav = readSavedWav(join(cutsDir, `Seq 01 removed ${removedTc}.wav`));
+  const removedSrt = readSavedSrt(join(cutsDir, `Seq 01 removed ${removedTc}.srt`));
+  // The SRT follows the subtitle choices: punctuation stays or goes as chosen last.
+  const punctuationOff = (readJson(join(storage, "lazykick_settings.json")).subtitles || {}).removePunctuation === true;
+  const saidWords = punctuationOff ? script[1].replace(/[.,!?]/g, "") : script[1];
+  eq("remove: the SRT has the words taken out, one a subtitle, in order", removedSrt && removedSrt.map((c) => c.text).join(" "), saidWords);
+  eq("remove: one word a subtitle", removedSrt && removedSrt.length, script[1].split(" ").length);
+  check("remove: the SRT is timed from the start of the saved audio, each word in turn", removedSrt && removedSrt[0].start > 0 && removedSrt[0].start < 0.4 &&
+    removedSrt.every((c, i) => c.end > c.start && c.end <= goneSeconds + 0.001 && (i === 0 || c.start >= removedSrt[i - 1].end - 0.001)), JSON.stringify(removedSrt));
+  check("remove: the saved audio is the stretch taken out", removedWav && removedWav.format === 1 && Math.abs(removedWav.seconds - goneSeconds) < 0.002 &&
+    Math.abs(removedWav.first - Math.round(asked[0].s * 25) / 25) < 0.011, JSON.stringify(removedWav));
+  check("remove: the host's own file is cleaned away", !existsSync(host.audioSaves[0].items[0].path + ".wav"));
+  check("remove: the dialog and the status say so", /saved as WAV in 'LazyKick Cuts'/.test(askedRemove.message) && /audio and SRT saved in LazyKick Cuts/.test($("globalStatus").textContent), $("globalStatus").textContent);
   $("btnTimeToAudio").click();
   await waitFor(() => /Timed 2 lines/.test($("globalStatus").textContent), "timed without the struck line");
   eq("remove: the timeline is listened to again, and the struck line is not timed", `${host.audioCalls.length - listensBeforeRemove}:${tagOf(cutB)}`, "1:undefined");
@@ -1747,6 +1836,45 @@ try {
   eq("bring back: the strike is gone, the text as it was", `${struck(cutB)}|${cutB.textContent.trim()}`, `|${script[1]}`);
   $("btnTimeToAudio").click();
   await waitFor(() => /Timed 3 lines/.test($("globalStatus").textContent), "timed with the line back");
+
+  // 💾 Save this audio as WAV: nothing on the timeline changes.
+  const removalsBeforeSave = host.removals.length;
+  selectText(textIn(cutB, "Today"), 0, script[1].length);
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  eq("save: offered for timed words", $("noteMenuSaveAudio").disabled, false);
+  $("noteMenuSaveAudio").click();
+  const savedShown = await answerDialog(true, "audio saved");
+  const shownWav = savedShown.message.split(", with the words")[0];
+  check("save: the dialog names the SRT too", /, with the words one by one in Seq 01 [\d-]+(_\d+)?\.srt$/.test(savedShown.message), savedShown.message);
+  const plainSrt = readSavedSrt(shownWav.replace(/\.wav$/, ".srt"));
+  eq("save: the SRT beside the WAV, word by word", plainSrt && plainSrt.map((c) => c.text).join(" "), saidWords);
+  check("save: says where the file is", savedShown.title === "Audio saved" && shownWav.startsWith(cutsDir) && savedShown.ok === "Show in folder", savedShown.message);
+  check("save: Show in folder opens it", spawned.some((c) => c.args.includes(cutsDir) || c.args.some((a) => String(a).toLowerCase() === cutsDir.toLowerCase())), JSON.stringify(spawned.slice(-1)));
+  eq("save: nothing is taken out", host.removals.length, removalsBeforeSave);
+  const plainSaved = readSavedWav(shownWav);
+  check("save: the words' stretch, from the pause before them", plainSaved && Math.abs(plainSaved.first - (bursts[0].e + bursts[1].s) / 2) < 0.1 &&
+    Math.abs(plainSaved.first + plainSaved.seconds - (bursts[1].e + bursts[2].s) / 2) < 0.1, JSON.stringify(plainSaved));
+  check("save: no label in the name", /^Seq 01 \d\d-\d\d-\d\d-\d\d(_\d+)?\.wav$/.test(shownWav.split(/[\\/]/).pop()), shownWav);
+
+  host.saveWhole = true;   // a Premiere Pro that rendered the whole sequence
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  $("noteMenuSaveAudio").click();
+  const wholeShown = await answerDialog(false, "audio saved from the whole sequence");
+  const wholeSaved = readSavedWav(wholeShown.message.split(", with the words")[0]);
+  check("save: from a render of the whole sequence, only the stretch is kept", wholeSaved && Math.abs(wholeSaved.seconds - plainSaved.seconds) < 0.002 &&
+    Math.abs(wholeSaved.first - plainSaved.first) < 0.002 && Math.abs(wholeSaved.last - plainSaved.last) < 0.002, JSON.stringify(wholeSaved));
+  host.saveWhole = false;
+
+  host.saveFails = true;
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  $("noteMenuRemoveTimeline").click();
+  await answerDialog(true, "remove, with the save failing");
+  const notSaved = await answerDialog(false, "remove anyway?");
+  check("save failed: asks before removing", notSaved.title === "The audio was not saved" && /did not export/.test(notSaved.message) && notSaved.ok === "Remove anyway", notSaved.message);
+  await waitFor(() => /Nothing was removed/.test($("globalStatus").textContent), "nothing removed");
+  eq("save failed: Cancel removes nothing", host.removals.length, removalsBeforeSave);
+  host.saveFails = false;
+  context.window.getSelection = plainGetSelection;
 
   // Words inside a paragraph: only the words the selection touches go.
   setEditor([{ tag: "p", kids: [`${script[0]} ${script[1]}`] }, { tag: "p", kids: [script[2]] }]);
@@ -1806,6 +1934,19 @@ try {
   const snapped = retakeCuts.map((c) => ({ s: Math.round(c.s * 25) / 25, e: Math.round(c.e * 25) / 25 }));
   check("retakes: every line moves earlier by the stretches before it",
     readLines.every((div, i) => Math.abs(startOf(div) - LazyAlign.timeAfterCuts(readStarts[i], snapped)) < 0.002), readLines.map(startOf).join(","));
+  const retakeFiles = readdirSync(cutsDir).filter((n) => n.startsWith("Read retake ") && n.endsWith(".wav"));
+  eq("retakes: one WAV a stretch taken out", retakeFiles.length, retakeCuts.length);
+  check("retakes: After Effects' AIFF renders become WAV files of each stretch", retakeFiles.sort().every((n, i) => {
+    const w = readSavedWav(join(cutsDir, n));
+    const c = snapped[i];
+    return w && w.format === 1 && Math.abs(w.seconds - (c.e - c.s)) < 0.002 && Math.abs(w.first - c.s) < 0.011;
+  }), retakeFiles.join("|"));
+  // A retake is not in the note: its SRT guesses the words of the take that counts, which starts right after it.
+  check("retakes: each WAV has an SRT that starts with the words of the take that counts", retakeFiles.every((n, i) => {
+    const cues = readSavedSrt(join(cutsDir, n.replace(/\.wav$/, ".srt")));
+    const later = retakeRead.lines.find((l) => l.start >= snapped[i].e - 0.1);
+    return cues && cues.length > 0 && later && cues[0].text === later.text.split(/\s+/)[0] && cues.every((c) => c.end <= snapped[i].e - snapped[i].s + 0.001);
+  }), retakeFiles.join("|"));
   check("retakes: the button goes, and nothing is struck", $("btnRetakes").classList.contains("hidden") && $("noteEditor").querySelectorAll(".note-cut").length === 0);
   host.timeline = { ok: true, host: "ppro", name: "Seq 01", fps: 25, offset: 0, duration: total };
   host.audioReply = (wavPath) => {

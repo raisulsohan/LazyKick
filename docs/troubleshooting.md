@@ -243,6 +243,37 @@ It shows only while the timeline is as 🎙️ Time to Audio heard it. After a
 removal, an edit that changed the timeline's length, or another tab, click
 🎙️ Time to Audio again.
 
+### Where is the audio that was taken out?
+
+In the **LazyKick Cuts** folder next to the project (in your home folder when
+the project is not saved), as WAV files named by the timeline and the
+timecode, for example `Rough Cut removed 00-01-12-04.wav`, each with a
+word-by-word `.srt` of the same name.
+
+### The SRT of a retake has the wrong words
+
+A retake is not in the note, so LazyKick guesses: the words of the take that
+counts, at its pace. When the reader changed words in the retake, edit the
+SRT in any text editor.
+
+### A saved WAV has no SRT
+
+The stretch had no timed words of the note in it (a pause, or words with no
+timecode yet). Click 🎙️ Time to Audio first. Use **💾 Save this
+audio as WAV** and **Show in folder** to open it.
+
+### "The audio was not saved … Remove it anyway?"
+
+The host could not render the audio. Premiere Pro: its WAV preset is missing,
+or the export failed. After Effects: the composition has no audible layer, or
+there is no audio-only output template (WAV or AIFF) in *Edit › Templates ›
+Output Module*. Click **Cancel** to keep the timeline as it is.
+
+### After Effects: the render queue showed up while saving
+
+After Effects renders the saved audio through its render queue. LazyKick
+removes its own items afterwards and keeps yours queued.
+
 ### I undid a removal in Premiere Pro or After Effects, and the note still shows it
 
 The note does not follow an undo. Right-click each struck line, choose

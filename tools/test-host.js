@@ -1575,6 +1575,150 @@ section("After Effects: cut and remove", function () {
     eq("ae cut: no comp", parse(cutTimeline(JSON.stringify({ times: [1] }))).msg, "Open a composition first");
 });
 
+section("Premiere Pro: save the audio of a stretch", function () {
+    existingFiles = {};
+    existingFolders = {};
+    addFolderChain(PRESET_DIR);
+    existingFiles[norm(PRESET)] = {};
+    ppro.exportFails = false;
+    var a1 = new PAudioTrack("A1", false, [true]);     // the voiceover clip is selected
+    var a2 = new PAudioTrack("A2", false, [false]);
+    var seq = setupPremiereAudio([a1, a2]);
+    Time = function () { this.ticks = "0"; };
+    // The work area, hidden by default: an in point after the out point (or the
+    // other way round) does not take, as in Premiere Pro.
+    var area = { a: 10 * TICKS, b: 40 * TICKS };
+    var areaDuringExport = [];
+    function asTime(ticks) { var t = new Time(); t.ticks = String(ticks); return t; }
+    seq.getWorkAreaInPointAsTime = function () { return asTime(area.a); };
+    seq.getWorkAreaOutPointAsTime = function () { return asTime(area.b); };
+    seq.setWorkAreaInPoint = function (t) { var v = Number(t.ticks); if (v < area.b) area.a = v; return true; };
+    seq.setWorkAreaOutPoint = function (t) { var v = Number(t.ticks); if (v > area.a) area.b = v; return true; };
+    var plainExport = seq.exportAsMediaDirect;
+    seq.exportAsMediaDirect = function (out, preset, range) {
+        areaDuringExport.push(area.a / TICKS + "-" + area.b / TICKS);
+        return plainExport(out, preset, range);
+    };
+
+    var r = parse(saveTimelineAudio(JSON.stringify({ name: "Seq 01", items: [{ s: 50.01, e: 52.5, path: "C:/Temp/cut-1" }, { s: 4, e: 6, path: "C:/Temp/cut-2" }] })));
+    check("ppro save: ok", r.ok === true, r.msg);
+    eq("ppro save: one WAV a stretch, with Premiere's own preset", r.files.length + ":" + r.files[0].path + ":" + r.files[1].path + ":" + ppro.exports[0].preset, "2:C:\\Temp\\cut-1.wav:C:\\Temp\\cut-2.wav:" + PRESET);
+    eq("ppro save: only the work area is rendered", ppro.exports[0].range + ":" + ppro.exports[1].range + ":" + r.files[0].whole, "2:2:false");
+    eq("ppro save: the work area is the stretch, in whole frames", areaDuringExport.join(" "), "50-52.52 4-6");
+    eq("ppro save: the stretches as saved", r.files[0].s + "-" + r.files[0].e + " " + r.files[1].s + "-" + r.files[1].e, "50-52.52 4-6");
+    eq("ppro save: the work area put back", area.a / TICKS + "-" + area.b / TICKS, "10-40");
+    eq("ppro save: only the selected clip's track heard, then as it was", ppro.exports[0].mutes + ":" + (a1.muted ? "M" : "-") + (a2.muted ? "M" : "-") + ":" + r.used, "-M:--:selected");
+
+    // A Premiere Pro without the work-area calls renders the whole sequence; the panel takes the stretch out.
+    seq.setWorkAreaInPoint = undefined;
+    r = parse(saveTimelineAudio(JSON.stringify({ name: "Seq 01", items: [{ s: 4, e: 6, path: "C:/Temp/cut-3" }] })));
+    eq("ppro save: no work area, the whole sequence, said so", r.ok + ":" + ppro.exports[ppro.exports.length - 1].range + ":" + r.files[0].whole, "true:0:true");
+
+    ppro.exportFails = true;
+    r = parse(saveTimelineAudio(JSON.stringify({ name: "Seq 01", items: [{ s: 4, e: 6, path: "C:/Temp/cut-4" }] })));
+    check("ppro save: export failed, said so", r.ok === false && /did not export/.test(r.msg), r.msg);
+    ppro.exportFails = false;
+    eq("ppro save: another sequence open, refused", parse(saveTimelineAudio(JSON.stringify({ name: "Other", items: [{ s: 4, e: 6, path: "C:/Temp/x" }] }))).wrongTimeline, true);
+    delete existingFiles[norm(PRESET)];
+    check("ppro save: no WAV preset, clear message", /preset/.test(parse(saveTimelineAudio(JSON.stringify({ name: "Seq 01", items: [{ s: 4, e: 6, path: "C:/Temp/x" }] }))).msg));
+});
+
+section("After Effects: save the audio of a stretch", function () {
+    var comp;
+    var rendered = [];
+    function Layer(name, audio, selected) {
+        this.name = name;
+        this.hasAudio = audio;
+        this.audioEnabled = audio;
+        this.selected = selected;
+    }
+    function RQItem(source) {
+        var item = this;
+        this.comp = source;
+        this.render = true;
+        this.timeSpanStart = 0;
+        this.timeSpanDuration = source.duration;
+        this.om = { templates: rq.templates.slice(0), applied: "", file: null, applyTemplate: function (n) { this.applied = n; } };
+        this.outputModule = function () { return item.om; };
+        this.remove = function () {
+            for (var i = 0; i < rq.list.length; i++) if (rq.list[i] === item) rq.list.splice(i, 1);
+            rq.numItems = rq.list.length;
+        };
+    }
+    var rq = {
+        list: [],
+        numItems: 0,
+        templates: ["Lossless", "AIFF 48kHz", "High Quality"],
+        item: function (i) { return this.list[i - 1]; },
+        render: function () {
+            var heard = [];
+            for (var l = 0; l < comp.list.length; l++) if (comp.list[l].audioEnabled) heard.push(comp.list[l].name);
+            for (var i = 0; i < this.list.length; i++) {
+                var it = this.list[i];
+                if (!it.render) continue;
+                rendered.push({ name: it.om.file ? it.om.file.fsName : it.comp.name, span: it.timeSpanStart + "+" + it.timeSpanDuration, template: it.om.applied, heard: heard.join(",") });
+                if (it.om.file) existingFiles[norm(it.om.file.fsName)] = {};
+            }
+        }
+    };
+    rq.items = { add: function (c) { var it = new RQItem(c); rq.list.push(it); rq.numItems = rq.list.length; return it; } };
+    function setup() {
+        CompItem = function () {};
+        FolderItem = function () {};
+        comp = new CompItem();
+        comp.name = "Explainer";
+        comp.frameRate = 25;
+        comp.frameDuration = 0.04;
+        comp.duration = 30;
+        comp.displayStartTime = 0;
+        comp.list = [new Layer("Title", false, false), new Layer("Voice", true, true), new Layer("Music", true, false)];
+        comp.numLayers = 3;
+        comp.layer = function (i) { var l = this.list[i - 1]; l.index = i; return l; };
+        comp.selectedLayers = [comp.layer(2)];
+        app = {
+            project: { activeItem: comp, importFile: function () {}, renderQueue: rq },
+            beginUndoGroup: function () { undoDepth++; undoGroups++; },
+            endUndoGroup: function () { undoDepth--; },
+            beginSuppressDialogs: function () {},
+            endSuppressDialogs: function () {}
+        };
+        rq.list = [];
+        rq.numItems = 0;
+        rq.items.add({ name: "User's own render", duration: 10 });   // already queued by the user
+        rendered = [];
+        existingFiles = {};
+    }
+
+    setup();
+    var groupsBefore = undoGroups;
+    var r = parse(saveTimelineAudio(JSON.stringify({ name: "Explainer", items: [{ s: 4.01, e: 6, path: "C:/Temp/cut-1" }, { s: 12, e: 13, path: "C:/Temp/cut-2" }] })));
+    check("ae save: ok", r.ok === true, r.msg);
+    eq("ae save: one audio-only render a stretch, the user's own queue held back", rendered.length + ":" + rendered[0].template + ":" + rendered[0].span + ":" + rendered[1].span, "2:AIFF 48kHz:4+2:12+1");
+    eq("ae save: AIFF files where asked", r.files[0].path + ":" + r.files[1].path, "C:\\Temp\\cut-1.aif:C:\\Temp\\cut-2.aif");
+    eq("ae save: only the selected audio layer heard, then as it was", rendered[0].heard + ":" + comp.list[2].audioEnabled + ":" + r.used, "Voice:true:selected");
+    eq("ae save: the render queue as it was: own items gone, the user's still queued", rq.numItems + ":" + rq.item(1).render, "1:true");
+    eq("ae save: one undo step, balanced", (undoGroups - groupsBefore) + ":" + undoDepth, "1:0");
+
+    setup();
+    rq.templates = ["Lossless", "WAV 48kHz", "AIFF 48kHz"];
+    r = parse(saveTimelineAudio(JSON.stringify({ name: "Explainer", items: [{ s: 4, e: 6, path: "C:/Temp/cut-3" }] })));
+    eq("ae save: a WAV template when there is one", rendered[0].template + ":" + r.files[0].path, "WAV 48kHz:C:\\Temp\\cut-3.wav");
+
+    setup();
+    rq.templates = ["Lossless", "High Quality"];
+    r = parse(saveTimelineAudio(JSON.stringify({ name: "Explainer", items: [{ s: 4, e: 6, path: "C:/Temp/cut-4" }] })));
+    check("ae save: no audio template, said so, nothing rendered", r.ok === false && /template/.test(r.msg) && rendered.length === 0 && rq.numItems === 1, r.msg);
+    rq.templates = ["AIFF 48kHz"];
+
+    setup();
+    comp.list[1].audioEnabled = false;
+    comp.list[2].audioEnabled = false;
+    eq("ae save: no audio", parse(saveTimelineAudio(JSON.stringify({ name: "Explainer", items: [{ s: 4, e: 6, path: "C:/Temp/x" }] }))).msg, "This composition has no audio to save");
+    eq("ae save: another composition open, refused", parse(saveTimelineAudio(JSON.stringify({ name: "Other", items: [{ s: 4, e: 6, path: "C:/Temp/x" }] }))).wrongTimeline, true);
+    app.project.activeItem = null;
+    eq("ae save: no comp", parse(saveTimelineAudio(JSON.stringify({ items: [] }))).msg, "Open a composition first");
+});
+
 // ------------------------------------------------------------------ report
 WScript.Echo("LazyKick - host.jsx tests");
 WScript.Echo("");

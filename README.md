@@ -23,7 +23,7 @@
   <a href="#-troubleshooting--faq">Troubleshooting</a>
 </p>
 
-Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.10** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
+Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.11** · Free & open source ([MIT](LICENSE)) · [Changelog](CHANGELOG.md)
 
 ![LazyKick in Premiere Pro: a script timed to the voiceover with the spoken word highlighted, watch bins linked to folders, and the paste options](docs/images/overview.png)
 
@@ -34,7 +34,8 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.10** · 
 ## 📑 Contents
 
 - [📖 Documentation](docs/README.md)
-- [What's New in 1.10](#-whats-new-in-110)
+- [What's New in 1.11](#-whats-new-in-111)
+- [What's New in 1.10](#whats-new-in-110)
 - [What's New in 1.9](#whats-new-in-19)
 - [What's New in 1.8](#whats-new-in-18)
 - [What's New in 1.7](#whats-new-in-17)
@@ -62,7 +63,15 @@ Developed by **[Raisul Sohan](https://raisulsohan.com)** · **Version 1.10** · 
 
 ---
 
-## 🆕 What's New in 1.10
+## 🆕 What's New in 1.11
+
+**💾 The audio you cut is kept, with its words**
+- Before **✂️ Remove from the timeline** or **✂️ Retakes** takes anything out, its audio is saved as a WAV file in a `LazyKick Cuts` folder next to the project, named by the timeline and the timecode.
+- Each WAV comes with a **word-by-word SRT** of the same name, timed from the start of that WAV, so the two line up when you place them together. A retake's SRT is a guess from the take that counts.
+- **💾 Save this audio as WAV** in the right-click menu saves the selected words' audio and SRT without cutting anything.
+- Small labels in the panel (badges, hints, footer, subtitle preview) are now at least 11 px, easier to read.
+
+## What's New in 1.10
 
 **✂️ Cut the timeline from the script**
 - Select words in the note and right-click. **✂️ Cut the timeline here** cuts every unlocked track where they start and end; **✂️ Remove from the timeline** takes them out and closes the gap.
@@ -267,7 +276,7 @@ Always available in the panel header.
 - **A− / A+ text size** (10–24 px, remembered).
 - **🎙️ Time to Audio:** times every line of the note to the voiceover on the open timeline and starts each line with its timecode. Language-independent (pauses and speaking length, no speech recognition), fully offline. Unedited recordings work too: when the reader waits and says a passage again, the earlier take is left out.
 - **📌 Pin a word:** right-click the first word of a sentence (also inside a paragraph) and choose *Start this word at the playhead*; it stays there and everything else is timed again around it.
-- **✂️ Cut from the script:** select words and right-click. *Cut the timeline here* cuts every unlocked track where they start and end; *Remove from the timeline* takes them out and closes the gap, strikes them through in the note and moves the later timecodes to match. **✂️ Retakes** takes every earlier take Time to Audio left out off the timeline at once. Cuts fall in the pauses, linked picture and sound stay linked, locked tracks are left alone.
+- **✂️ Cut from the script:** select words and right-click. *Cut the timeline here* cuts every unlocked track where they start and end; *Remove from the timeline* takes them out and closes the gap, strikes them through in the note and moves the later timecodes to match. **✂️ Retakes** takes every earlier take Time to Audio left out off the timeline at once. Cuts fall in the pauses, linked picture and sound stay linked, locked tracks are left alone. The audio taken out is saved first as WAV in `LazyKick Cuts` next to the project, each with a word-by-word `.srt` timed to it; *💾 Save this audio as WAV* saves the selected words' audio and SRT without cutting.
 - **💬 Subtitles:** turns the timed lines into a Premiere Pro caption track or After Effects text layers, plus an `.srt` in `LazyKick Subtitles` next to the project. Choose Single Line, Double Line or Single Word, the line length, minimum duration, gap and punctuation first, with a live preview. Grey notes are skipped, and titles and headings too when **🔠 Titles** is off; long paragraphs are split into several subtitles.
 - **👁 Follow:** while the timeline plays, the spoken line and word light up and the note scrolls along.
 - **Jump to a word:** click a timecode to move the playhead to its line, or Ctrl+click (Cmd+click) a word to move it to the moment the word is said.
@@ -295,7 +304,7 @@ Always available in the panel header.
 
 ### Option A: Signed installer (recommended)
 
-1. Download **`LazyKick-v1.10.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
+1. Download **`LazyKick-v1.11.zip`** from the [latest release](https://github.com/raisulsohan/LazyKick/releases/latest) and unzip it anywhere.
 2. Close After Effects and Premiere Pro.
 3. Run the installer:
    - **Windows:** double-click **`Install LazyKick.bat`**
@@ -363,7 +372,7 @@ Don't keep a source copy and the signed install side by side: they share one ext
 5. Check a few lines; to fix one, edit its timecode (click Time to Audio again to redo them all).
 6. Click **💬 Subtitles** and choose the look: **Single Line**, **Double Line** or **Single Word**, the maximum line length, minimum duration, gap and whether to remove punctuation (the preview shows the result). Click **Create subtitles**. Premiere Pro: a new caption track with the lines. After Effects: one text layer per subtitle. The `.srt` is in `LazyKick Subtitles` next to the project.
 7. Press play: with **👁 Follow** on, the spoken line and word light up in the note as the voiceover plays.
-8. To cut the voiceover from the script, select words and right-click: **✂️ Cut the timeline here** or **✂️ Remove from the timeline**. After an unedited read, **✂️ Retakes** next to 🎙️ takes every earlier take out at once. Do this before step 6: a caption track does not move with a removal.
+8. To cut the voiceover from the script, select words and right-click: **✂️ Cut the timeline here** or **✂️ Remove from the timeline**. After an unedited read, **✂️ Retakes** next to 🎙️ takes every earlier take out at once. The audio taken out is saved as WAV in `LazyKick Cuts` next to the project, with a word-by-word SRT. Do this before step 6: a caption track does not move with a removal.
 
 ### Auto-import a folder
 1. Open **📂 Watch Bins** → **+ Add Watch Bin**.

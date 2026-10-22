@@ -114,6 +114,49 @@ section("WAV reader", () => {
 });
 
 /* ------------------------------------------------------------ speech finder */
+section("audio files", () => {
+  const pcm = { format: 1, channels: 2, rate: 48000, bits: 16, block: 4 };
+  const plain = new Uint8Array(52);
+  plain.set(A.wavHeader(pcm, 8));
+  const back = A.audioLayout(plain, 52);
+  eq("wav header: read back as written", back && [back.kind, back.format, back.channels, back.rate, back.bits, back.block, back.dataStart, back.dataBytes].join(","), "wav,1,2,48000,16,4,44,8");
+
+  // fmt as WAVE_FORMAT_EXTENSIBLE, an odd-sized chunk before the data, and a length written as 0 while recording.
+  const b = Buffer.alloc(12 + 48 + 8 + 9 + 1 + 8 + 16);
+  b.write("RIFF", 0); b.write("WAVE", 8);
+  b.write("fmt ", 12); b.writeUInt32LE(40, 16); b.writeUInt16LE(0xfffe, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(44100, 24);
+  b.writeUInt32LE(88200, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.writeUInt16LE(22, 36); b.writeUInt16LE(1, 44);
+  b.write("LIST", 60); b.writeUInt32LE(9, 64);
+  b.write("data", 78); b.writeUInt32LE(0, 82);
+  const ext = A.audioLayout(new Uint8Array(b), b.length);
+  eq("wav: extensible PCM, a padded chunk skipped, an unknown length is the rest of the file", ext && [ext.format, ext.channels, ext.rate, ext.dataStart, ext.dataBytes].join(","), "1,1,44100,86,16");
+
+  const aiff = Buffer.alloc(54 + 4);
+  aiff.write("FORM", 0); aiff.writeUInt32BE(50, 4); aiff.write("AIFF", 8);
+  aiff.write("COMM", 12); aiff.writeUInt32BE(18, 16); aiff.writeUInt16BE(2, 20); aiff.writeUInt32BE(1, 22); aiff.writeUInt16BE(16, 26);
+  aiff.writeUInt16BE(16383 + 15, 28); aiff.writeUInt32BE(0xbb800000, 30);
+  aiff.write("SSND", 38); aiff.writeUInt32BE(12, 42); aiff.writeUInt32BE(0, 46); aiff.writeUInt32BE(0, 50);
+  const ai = A.audioLayout(new Uint8Array(aiff), aiff.length);
+  eq("aiff: big-endian, the rate from its 80-bit number", ai && [ai.kind, ai.bigEndian, ai.channels, ai.rate, ai.bits, ai.dataStart, ai.dataBytes].join(","), "aiff,true,2,48000,16,54,4");
+  const aifc = Buffer.alloc(80);
+  aiff.copy(aifc, 0, 0, 38);
+  aifc.write("AIFC", 8); aifc.writeUInt32BE(22, 16); aifc.write("sowt", 38);
+  aifc.write("SSND", 42); aifc.writeUInt32BE(12, 46);
+  const sowt = A.audioLayout(new Uint8Array(aifc), aifc.length);
+  eq("aifc 'sowt': little-endian samples", sowt && sowt.bigEndian, false);
+  aifc.write("ulaw", 38);
+  eq("aifc compressed: not read", A.audioLayout(new Uint8Array(aifc), aifc.length), null);
+  eq("not audio: null", A.audioLayout(new Uint8Array(Buffer.from("PK not a sound file")), 30), null);
+
+  const sixteen = new Uint8Array([1, 2, 3, 4]);
+  A.samplesToWav(sixteen, 4, 16);
+  const twentyFour = new Uint8Array([1, 2, 3, 4, 5, 6]);
+  A.samplesToWav(twentyFour, 6, 24);
+  const eight = new Uint8Array([0x00, 0x80, 0xff]);
+  A.samplesToWav(eight, 3, 8);
+  eq("aiff samples to wav: bytes of each sample turned round, 8-bit made unsigned", [...sixteen].join(",") + " " + [...twentyFour].join(",") + " " + [...eight].join(","), "2,1,4,3 3,2,1,6,5,4 128,0,127");
+});
+
 section("speech finder", () => {
   const step = 0.01;
   const values = [];
@@ -372,6 +415,26 @@ section("cutting the timeline", () => {
   eq("time after cuts: inside the second, where it was", A.timeAfterCuts(6, gone), 4);
   eq("time after cuts: after both, earlier by both", A.timeAfterCuts(9, gone), 6);
   eq("time after cuts: at an end, where the cut was", A.timeAfterCuts(3, gone), 2);
+
+  // The word-by-word SRT of a saved stretch.
+  const timed = [
+    { start: 1, end: 3, text: "Hello big world.", words: [1, 1.6, 2.2] },
+    { start: 4, end: 6, text: "Second line here.", words: [4, 4.7, 5.3] },
+    { start: 7, end: 8, text: "Spread evenly", words: [] },
+  ];
+  const list = A.wordList(timed);
+  eq("word list: every word in time order, ending where the next starts or the line ends",
+    list.map((w) => w.text + "@" + w.t + "-" + w.end).join(" "), "Hello@1-1.6 big@1.6-2.2 world.@2.2-3 Second@4-4.7 line@4.7-5.3 here.@5.3-6 Spread@7-7.5 evenly@7.5-8");
+  const cues = A.stretchCues(list, 1.5, 4.5, { fps: 25 });
+  eq("stretch cues: only the words said in it, one a subtitle", cues.map((c) => c.text).join("|"), "big|world.|Second");
+  check("stretch cues: timed from the stretch's start, never past its end", Math.abs(cues[0].start - 0.1) < 1e-9 && Math.abs(cues[1].end - 1.5) < 1e-9 &&
+    Math.abs(cues[2].start - 2.5) < 1e-9 && Math.abs(cues[2].end - 3) < 1e-9, JSON.stringify(cues));
+  eq("stretch cues: punctuation removed when chosen", A.stretchCues(list, 1.5, 4.5, { removePunctuation: true }).map((c) => c.text).join("|"), "big|world|Second");
+  eq("stretch cues: nothing said, nothing to show", A.stretchCues(list, 3.1, 3.9, {}).length, 0);
+  const guess = A.retakeWords(list, { s: 0.2, e: 0.9 });
+  eq("retake words: the take that counts, from its start, at its pace, for as long as the retake speaks",
+    guess.map((w) => w.text + "@" + Math.round(w.t * 10) / 10).join(" "), "Hello@0.2 big@0.8");
+  eq("retake words: nothing said after it, no guess", A.retakeWords(list, { s: 8.5, e: 9 }).length, 0);
 });
 
 section("words inside a line", () => {

@@ -164,6 +164,17 @@ Audio left out.
   Removed words are struck through and no longer timed; a line with nothing
   left loses its timecode.
 
+- **The audio taken out is kept.** Before anything is removed, the audio of
+  each stretch is saved as a WAV file in *LazyKick Cuts* next to the
+  project, the same audio Time to Audio hears. **💾 Save this audio as WAV**
+  does only this, for the selected words.
+- **With a word-by-word SRT.** Next to each WAV goes an SRT of the same
+  name: the note's words said in that stretch, one a subtitle, timed from
+  the start of the WAV, laid out as the Single Word subtitles are. A retake
+  has no words in the note, so its SRT takes the words of the take that
+  counts (which starts right after it), at that take's pace, for as long as
+  the retake speaks: a good guess when the reader said the same words again.
+
 Premiere Pro's scripting has no razor of its own, so each track is cut with
 Premiere's QE razor and checked; the picture and sound pieces are linked
 again; the pieces inside are removed and every later clip moves left,

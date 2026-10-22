@@ -97,7 +97,7 @@ body, html {
 .host-badge {
     background: var(--badge-bg);
     color: var(--accent-cyan);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 3px;
@@ -217,7 +217,7 @@ body, html {
 .badge-count {
     background: var(--border-color);
     color: var(--text-primary);
-    font-size: 9px;
+    font-size: 11px;
     padding: 1px 5px;
     border-radius: 10px;
 }
@@ -349,7 +349,7 @@ body, html {
     flex: 1;
     min-width: 0;
     color: var(--text-muted);
-    font-size: 10.5px;
+    font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -702,7 +702,7 @@ input:checked + .slider:before { transform: translateX(12px); }
 }
 
 .bin-source-path {
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-muted);
     word-break: break-all;
     font-family: monospace;
@@ -714,7 +714,7 @@ input:checked + .slider:before { transform: translateX(12px); }
     align-items: center;
     padding-top: 4px;
     border-top: 1px solid rgba(255,255,255,0.05);
-    font-size: 10.5px;
+    font-size: 11px;
 }
 
 .bin-filters-badges {
@@ -786,7 +786,7 @@ input:checked + .slider:before { transform: translateX(12px); }
 .setting-row small {
     display: block;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .setting-row input[type="checkbox"] {
@@ -866,7 +866,7 @@ input:checked + .slider:before { transform: translateX(12px); }
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 10.5px;
+    font-size: 11px;
     min-height: 24px;
 }
 
@@ -883,7 +883,7 @@ input:checked + .slider:before { transform: translateX(12px); }
     align-items: center;
     gap: 4px;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .brand-tag {
@@ -989,7 +989,7 @@ input:checked + .slider:before { transform: translateX(12px); }
 .input-with-btn input { flex: 1; }
 
 .hint-text {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
 }
 
@@ -1050,14 +1050,14 @@ input:checked + .slider:before { transform: translateX(12px); }
 
 .sub-help {
     display: inline-block;
-    width: 13px;
-    height: 13px;
-    line-height: 13px;
+    width: 15px;
+    height: 15px;
+    line-height: 15px;
     margin-left: 3px;
     border-radius: 50%;
     background: #55555c;
     color: #fff;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 700;
     text-align: center;
     cursor: help;
@@ -1125,7 +1125,7 @@ input:checked + .slider:before { transform: translateX(12px); }
 }
 
 .sub-preview-head {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1149,7 +1149,7 @@ input:checked + .slider:before { transform: translateX(12px); }
 .sub-preview-time {
     flex: none;
     font-family: Consolas, Menlo, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent-cyan);
 }
 
@@ -1162,7 +1162,7 @@ input:checked + .slider:before { transform: translateX(12px); }
 }
 
 .sub-preview-more {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
 }
 
@@ -1264,7 +1264,7 @@ input:checked + .slider:before { transform: translateX(12px); }
     color: var(--text-primary);
     border: 1px solid var(--border-color);
     padding: 2px 7px;
-    font-size: 10.5px;
+    font-size: 11px;
     border-radius: 3px;
     cursor: pointer;
 }
@@ -1312,7 +1312,7 @@ input:checked + .slider:before { transform: translateX(12px); }
 
 .fb-selected-hint {
     flex: 1;
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;

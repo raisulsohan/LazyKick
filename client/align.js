@@ -187,6 +187,131 @@
     };
 
     // ============================================================
+    // Audio files: where the samples are, and a WAV header
+    // ============================================================
+
+    function ascii(bytes, at, n) {
+        var s = "";
+        for (var i = 0; i < n && at + i < bytes.length; i++) s += String.fromCharCode(bytes[at + i]);
+        return s;
+    }
+
+    /** An IEEE 80-bit extended number (AIFF's sample rate). */
+    function extended80(view, at) {
+        var exponent = ((view.getUint8(at) & 0x7f) << 8 | view.getUint8(at + 1)) - 16383;
+        var mantissa = view.getUint32(at + 2) * 4294967296 + view.getUint32(at + 6);
+        return mantissa ? mantissa * Math.pow(2, exponent - 63) : 0;
+    }
+
+    /**
+     * Where the samples of a WAV or AIFF file are, from its first bytes
+     * (`bytes`, a Uint8Array; `fileSize`, the whole file's length):
+     * { kind, format (1 PCM, 3 float), channels, rate, bits, block,
+     * dataStart, dataBytes, bigEndian }, or null for anything else.
+     */
+    function audioLayout(bytes, fileSize) {
+        if (!bytes || bytes.length < 12) return null;
+        var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+        var head = ascii(bytes, 0, 4);
+        var type = ascii(bytes, 8, 4);
+        var out = null;
+        var at = 12;
+        var size;
+        if (head === "RIFF" && type === "WAVE") {
+            out = { kind: "wav", bigEndian: false };
+            while (at + 8 <= bytes.length) {
+                var id = ascii(bytes, at, 4);
+                size = view.getUint32(at + 4, true);
+                if (id === "fmt " && at + 24 <= bytes.length) {
+                    out.format = view.getUint16(at + 8, true);
+                    out.channels = view.getUint16(at + 10, true);
+                    out.rate = view.getUint32(at + 12, true);
+                    out.bits = view.getUint16(at + 22, true);
+                    if (out.format === 0xfffe && at + 34 <= bytes.length) out.format = view.getUint16(at + 32, true);
+                } else if (id === "data") {
+                    out.dataStart = at + 8;
+                    out.dataBytes = size;
+                    break;
+                }
+                at += 8 + size + (size % 2);
+            }
+        } else if (head === "FORM" && (type === "AIFF" || type === "AIFC")) {
+            out = { kind: "aiff", bigEndian: true, format: 1 };
+            while (at + 8 <= bytes.length) {
+                var chunk = ascii(bytes, at, 4);
+                size = view.getUint32(at + 4);
+                if (chunk === "COMM" && at + 26 <= bytes.length) {
+                    out.channels = view.getUint16(at + 8);
+                    out.bits = view.getUint16(at + 14);
+                    out.rate = extended80(view, at + 16);
+                    if (type === "AIFC" && at + 30 <= bytes.length) {
+                        var compression = ascii(bytes, at + 26, 4);
+                        if (compression === "sowt") out.bigEndian = false;
+                        else if (compression === "fl32" || compression === "FL32") out.format = 3;
+                        else if (compression !== "NONE") return null;
+                    }
+                } else if (chunk === "SSND") {
+                    var offset = at + 16 <= bytes.length ? view.getUint32(at + 8) : 0;
+                    out.dataStart = at + 16 + offset;
+                    out.dataBytes = size - 8 - offset;
+                    break;
+                }
+                at += 8 + size + (size % 2);
+            }
+        } else {
+            return null;
+        }
+        if (!out.channels || !out.rate || !out.bits || out.dataStart === undefined) return null;
+        if (out.format !== 1 && out.format !== 3) return null;
+        out.block = out.channels * Math.ceil(out.bits / 8);
+        // A header written before the length was known (0 or too long): the rest of the file.
+        if (fileSize && (!out.dataBytes || out.dataStart + out.dataBytes > fileSize)) out.dataBytes = Math.max(0, fileSize - out.dataStart);
+        out.dataBytes -= out.dataBytes % out.block;
+        return out;
+    }
+
+    /** A 44-byte WAV header for `dataBytes` of samples laid out as `layout` says, little-endian. */
+    function wavHeader(layout, dataBytes) {
+        var bytes = new Uint8Array(44);
+        var view = new DataView(bytes.buffer);
+        function text(at, s) { for (var i = 0; i < s.length; i++) bytes[at + i] = s.charCodeAt(i); }
+        text(0, "RIFF");
+        view.setUint32(4, 36 + dataBytes, true);
+        text(8, "WAVE");
+        text(12, "fmt ");
+        view.setUint32(16, 16, true);
+        view.setUint16(20, layout.format === 3 ? 3 : 1, true);
+        view.setUint16(22, layout.channels, true);
+        view.setUint32(24, Math.round(layout.rate), true);
+        view.setUint32(28, Math.round(layout.rate) * layout.block, true);
+        view.setUint16(32, layout.block, true);
+        view.setUint16(34, layout.bits, true);
+        text(36, "data");
+        view.setUint32(40, dataBytes, true);
+        return bytes;
+    }
+
+    /**
+     * Turns `length` bytes of big-endian samples (AIFF) into WAV's order, in
+     * place: each sample's bytes reversed, and 8-bit samples from signed to
+     * unsigned.
+     */
+    function samplesToWav(bytes, length, bits) {
+        var size = Math.ceil(bits / 8);
+        if (size === 1) {
+            for (var b = 0; b < length; b++) bytes[b] ^= 0x80;
+            return;
+        }
+        for (var i = 0; i + size <= length; i += size) {
+            for (var lo = i, hi = i + size - 1; lo < hi; lo++, hi--) {
+                var t = bytes[lo];
+                bytes[lo] = bytes[hi];
+                bytes[hi] = t;
+            }
+        }
+    }
+
+    // ============================================================
     // Speech and pauses
     // ============================================================
 
@@ -1354,8 +1479,73 @@
         return out.join("\r\n");
     }
 
+    /**
+     * Every word of timed lines ([{ start, end, text, words }], seconds) in
+     * time order: [{ text, t, end, line }]. A word ends where the next word
+     * of its line starts, or where its line ends.
+     */
+    function wordList(lines) {
+        var out = [];
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i];
+            var words = splitWords(l.text);
+            var end = typeof l.end === "number" && l.end > l.start ? l.end : l.start + readingTime(l.text);
+            var times = l.words && l.words.length === words.length ? l.words : proportionalWordTimes(words, l.start, end);
+            for (var w = 0; w < words.length; w++) {
+                out.push({ text: words[w], t: times[w], end: w + 1 < words.length ? times[w + 1] : end, line: i });
+            }
+        }
+        out.sort(function (a, b) { return a.t - b.t; });
+        return out;
+    }
+
+    /**
+     * Word-by-word subtitle cues for a stretch of the timeline saved on its
+     * own, from `s` to `e`, timed from the stretch's start: the `words` (from
+     * wordList) said in it, one word a subtitle as the Single Word subtitles
+     * lay them out. opts: removePunctuation, fps.
+     */
+    function stretchCues(words, s, e, opts) {
+        var lines = [];
+        for (var i = 0; i < words.length; i++) {
+            var w = words[i];
+            if (w.t < s - 0.02 || w.t >= e - 0.02) continue;
+            var at = Math.max(0, w.t - s);
+            var last = lines[lines.length - 1];
+            if (!last || last.line !== w.line) {
+                last = { line: w.line, start: at, end: at, text: "", words: [] };
+                lines.push(last);
+            }
+            last.text += (last.text ? " " : "") + w.text;
+            last.words.push(at);
+            last.end = Math.max(at, Math.min(w.end, e) - s);
+        }
+        return makeCues(lines, { layout: "word", removePunctuation: !!(opts && opts.removePunctuation), fps: opts && opts.fps });
+    }
+
+    /**
+     * A guess at what a retake says (`take`: { s, e } of speech left out):
+     * the words of the take that counts, which starts after it, at that
+     * take's pace, for as long as the retake speaks. Words as wordList gives
+     * them, in the retake's own time.
+     */
+    function retakeWords(words, take) {
+        var i = 0;
+        while (i < words.length && words[i].t < take.e - 0.05) i++;
+        if (i >= words.length) return [];
+        var t0 = words[i].t;
+        var out = [];
+        for (; i < words.length && words[i].t - t0 < take.e - take.s - 0.05; i++) {
+            out.push({ text: words[i].text, t: take.s + words[i].t - t0, end: Math.min(take.e, take.s + words[i].end - t0), line: words[i].line });
+        }
+        return out;
+    }
+
     return {
         WavEnvelope: WavEnvelope,
+        audioLayout: audioLayout,
+        wavHeader: wavHeader,
+        samplesToWav: samplesToWav,
         findSpeech: findSpeech,
         lineWeight: lineWeight,
         isSpoken: isSpoken,
@@ -1379,6 +1569,9 @@
         stripPunctuation: stripPunctuation,
         makeCues: makeCues,
         srtTime: srtTime,
-        buildSrt: buildSrt
+        buildSrt: buildSrt,
+        wordList: wordList,
+        stretchCues: stretchCues,
+        retakeWords: retakeWords
     };
 });

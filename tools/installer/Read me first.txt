@@ -128,6 +128,11 @@ IF SOMETHING GOES WRONG
       the playhead where the sentence is said, right-click its
       first word, "Start this word at the playhead".
 
+  Where is the audio I removed?
+      In the "LazyKick Cuts" folder next to your project: a WAV
+      file for each removed part, with a word-by-word SRT of the
+      same name.
+
   A music track went out of sync after "Remove from the timeline"
       Locked tracks and layers are not moved. Unlock the music
       before you remove, or move it by hand. To undo a removal,

@@ -39,7 +39,7 @@ if (typeof JSON === "undefined" || !JSON.stringify) {
 var LazyKickHost = (function () {
     "use strict";
 
-    var VERSION = "1.10.0";
+    var VERSION = "1.11.0";
     var PASTE_BIN_DEFAULT = "Pasted Images";
     var TIME_EPSILON = 0.0005; // seconds; clip edges and the playhead are floats
 
@@ -2309,6 +2309,220 @@ var LazyKickHost = (function () {
         }
     }
 
+    // ---- Saving the audio of a stretch ----
+    // Before a stretch leaves the timeline (and from the note's right-click
+    // menu), its audio is rendered to a file: the same audio Time to Audio
+    // hears, so with audio clips or layers selected only theirs. The panel
+    // turns each file into a WAV in "LazyKick Cuts" next to the project.
+
+    function ticksTime(ticks) {
+        var t = new Time();
+        t.ticks = String(Math.round(ticks));
+        return t;
+    }
+
+    function timeTicks(t) {
+        try { return Number(t.ticks); } catch (e) { return NaN; }
+    }
+
+    /** Sets the sequence's work area (hidden unless its bar is switched on); true when it reads back as set. */
+    function setWorkAreaPPRO(seq, fromTicks, toTicks, tol) {
+        if (typeof seq.setWorkAreaInPoint !== "function" || typeof seq.getWorkAreaInPointAsTime !== "function") return false;
+        try {
+            // The out point first, at the end: an in point after the old out point would not take.
+            seq.setWorkAreaOutPoint(ticksTime(Number(seq.end) || toTicks));
+            seq.setWorkAreaInPoint(ticksTime(fromTicks));
+            seq.setWorkAreaOutPoint(ticksTime(toTicks));
+            return Math.abs(timeTicks(seq.getWorkAreaInPointAsTime()) - fromTicks) <= tol &&
+                   Math.abs(timeTicks(seq.getWorkAreaOutPointAsTime()) - toTicks) <= tol;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function saveAudioPPRO(payload) {
+        var tl = timelinePPRO();
+        if (!tl) return reply(false, "Open a sequence first");
+        var guard = wrongTimeline(payload.name, tl.name);
+        if (guard) return guard;
+        var preset = wavPresetPPRO();
+        if (!preset) return reply(false, "Premiere's WAV export preset (Waveform Audio 48kHz 16-bit) was not found");
+        var seq = tl.seq;
+        var tb = Number(seq.timebase) || TICKS_PER_SECOND / 30;
+        var fps = TICKS_PER_SECOND / tb;
+        var oldIn = null;
+        var oldOut = null;
+        try {
+            oldIn = seq.getWorkAreaInPointAsTime();
+            oldOut = seq.getWorkAreaOutPointAsTime();
+        } catch (eOld) {}
+        var files = [];
+        var failures = [];
+        var solo = soloSelectedTracksPPRO(seq);
+        try {
+            var items = payload.items || [];
+            for (var i = 0; i < items.length; i++) {
+                var a = Math.max(0, Math.round(Number(items[i].s) * fps));
+                var b = Math.round(Number(items[i].e) * fps);
+                if (!(b > a)) continue;
+                // With the work area set to the stretch only it is rendered; otherwise
+                // the whole sequence is, and the panel takes the stretch out of it.
+                var whole = !setWorkAreaPPRO(seq, a * tb, b * tb, tb / 2);
+                var out = new File(String(items[i].path) + ".wav");
+                try { if (out.exists) out.remove(); } catch (eOldFile) {}
+                try { seq.exportAsMediaDirect(out.fsName, preset, whole ? 0 : 2); } catch (eExport) {}
+                if (new File(out.fsName).exists) files.push({ path: out.fsName, s: a / fps, e: b / fps, whole: whole });
+                else failures.push("Premiere did not export the audio at " + formatFramesTimecode(a / fps, fps));
+            }
+        } finally {
+            for (var m = 0; m < solo.muted.length; m++) {
+                try { solo.muted[m].setMute(0); } catch (eUnmute) {}
+            }
+            if (oldIn && oldOut) {
+                try {
+                    seq.setWorkAreaOutPoint(ticksTime(Number(seq.end) || timeTicks(oldOut)));
+                    seq.setWorkAreaInPoint(oldIn);
+                    seq.setWorkAreaOutPoint(oldOut);
+                } catch (eRestore) {}
+            }
+        }
+        if (!files.length) return reply(false, failures.length ? failures.join("; ") : "Nothing to save", { files: files, failures: failures });
+        return reply(true, "Saved " + plural(files.length, "audio file"), { files: files, used: solo.used, failures: failures });
+    }
+
+    /** The output-module template that writes audio only: a WAV one if there is, else AIFF. */
+    function audioTemplateAE(om) {
+        var names = [];
+        try { names = om.templates || []; } catch (e) {}
+        var aiff = "";
+        for (var i = 0; i < names.length; i++) {
+            if (/\bwav/i.test(names[i])) return names[i];
+            if (!aiff && /aif/i.test(names[i])) aiff = names[i];
+        }
+        return aiff;
+    }
+
+    function saveAudioAE(payload) {
+        var tl = timelineAE();
+        if (!tl) return reply(false, "Open a composition first");
+        var guard = wrongTimeline(payload.name, tl.name);
+        if (guard) return guard;
+        var comp = tl.comp;
+        var fps = tl.fps;
+        var picked = {};
+        var any = false;
+        var sel = comp.selectedLayers;
+        for (var s = 0; s < sel.length; s++) {
+            try {
+                if (sel[s].hasAudio && sel[s].audioEnabled) {
+                    picked[sel[s].index] = true;
+                    any = true;
+                }
+            } catch (eSel) {}
+        }
+        var audible = 0;
+        for (var a = 1; a <= comp.numLayers; a++) {
+            try { if (comp.layer(a).hasAudio && comp.layer(a).audioEnabled && (!any || picked[a])) audible++; } catch (eA) {}
+        }
+        if (!audible) return reply(false, "This composition has no audio to save");
+
+        var rq = app.project.renderQueue;
+        var held = [];      // the user's own queued items, held back while these render
+        var mine = [];
+        var silenced = [];
+        var files = [];
+        var failures = [];
+        var failure = "";
+        app.beginUndoGroup("LazyKick: Save Audio");
+        try {
+            for (var q = 1; q <= rq.numItems; q++) {
+                try {
+                    var queued = rq.item(q);
+                    if (queued.render) {
+                        queued.render = false;
+                        held.push(queued);
+                    }
+                } catch (eHold) {}
+            }
+            if (any) {
+                for (var l = 1; l <= comp.numLayers; l++) {
+                    try {
+                        var layer = comp.layer(l);
+                        if (layer.hasAudio && layer.audioEnabled && !picked[l]) {
+                            layer.audioEnabled = false;
+                            silenced.push(layer);
+                        }
+                    } catch (eSilence) {}
+                }
+            }
+            var items = payload.items || [];
+            for (var i = 0; i < items.length && !failure; i++) {
+                var from = Math.max(0, Math.round(Number(items[i].s) * fps));
+                var to = Math.min(Math.round(Number(items[i].e) * fps), Math.round(comp.duration * fps));
+                if (!(to > from)) continue;
+                var item = rq.items.add(comp);
+                mine.push({ item: item, s: from / fps, e: to / fps });
+                item.timeSpanStart = from / fps;
+                item.timeSpanDuration = (to - from) / fps;
+                var template = audioTemplateAE(item.outputModule(1));
+                if (!template) {
+                    failure = "After Effects has no audio output template (WAV or AIFF)";
+                    break;
+                }
+                item.outputModule(1).applyTemplate(template);
+                item.outputModule(1).file = new File(String(items[i].path) + (/\bwav/i.test(template) ? ".wav" : ".aif"));
+            }
+            if (!failure && mine.length) {
+                try { app.beginSuppressDialogs(); } catch (eSup) {}
+                try {
+                    rq.render();
+                } finally {
+                    try { app.endSuppressDialogs(false); } catch (eEnd) {}
+                }
+                for (var k = 0; k < mine.length; k++) {
+                    var f = null;
+                    try { f = mine[k].item.outputModule(1).file; } catch (eFile) {}
+                    if (f && new File(f.fsName).exists) files.push({ path: f.fsName, s: mine[k].s, e: mine[k].e, whole: false });
+                    else failures.push("After Effects did not render the audio at " + formatFramesTimecode(mine[k].s, fps));
+                }
+            }
+        } finally {
+            for (var r = mine.length - 1; r >= 0; r--) {
+                try { mine[r].item.remove(); } catch (eRemove) {}
+            }
+            for (var h = 0; h < held.length; h++) {
+                try { held[h].render = true; } catch (eBack) {}
+            }
+            for (var u = 0; u < silenced.length; u++) {
+                try { silenced[u].audioEnabled = true; } catch (eLoud) {}
+            }
+            app.endUndoGroup();
+        }
+        if (failure) return reply(false, failure, { files: [], failures: [failure] });
+        if (!files.length) return reply(false, failures.length ? failures.join("; ") : "Nothing to save", { files: files, failures: failures });
+        return reply(true, "Saved " + plural(files.length, "audio file"), { files: files, used: any ? "selected" : "all", failures: failures });
+    }
+
+    /**
+     * Renders the audio of stretches of the open timeline to files.
+     * payloadJson: { name, items: [{ s, e, path }] }, seconds from the
+     * timeline's start; `path` has no extension. Returns `files`:
+     * [{ path, s, e, whole }], `whole` when Premiere rendered the whole
+     * sequence instead of the stretch. Premiere writes WAV; After Effects
+     * renders through its render queue (WAV or AIFF, as its templates have).
+     */
+    function saveTimelineAudio(payloadJson) {
+        try {
+            var payload = editPayload(payloadJson);
+            var host = getHostName();
+            if (host === "ppro") return saveAudioPPRO(payload);
+            if (host === "ae") return saveAudioAE(payload);
+            return reply(false, "Unsupported host application");
+        } catch (e) {
+            return reply(false, "Could not save the audio: " + e.toString());
+        }
+    }
+
     // Public API Object
     return {
         VERSION: VERSION,
@@ -2330,6 +2544,7 @@ var LazyKickHost = (function () {
         placeSubtitles: placeSubtitles,
         cutTimeline: cutTimeline,
         removeTimeline: removeTimeline,
+        saveTimelineAudio: saveTimelineAudio,
         // Pure helpers, exported for tools/test-host.js
         sanitizeBinPath: sanitizeBinPath,
         formatFramesTimecode: formatFramesTimecode,
@@ -2362,3 +2577,4 @@ function getTimelineAudio(wavPath) { return LazyKickHost.getTimelineAudio(wavPat
 function placeSubtitles(payloadJson) { return LazyKickHost.placeSubtitles(payloadJson); }
 function cutTimeline(payloadJson) { return LazyKickHost.cutTimeline(payloadJson); }
 function removeTimeline(payloadJson) { return LazyKickHost.removeTimeline(payloadJson); }
+function saveTimelineAudio(payloadJson) { return LazyKickHost.saveTimelineAudio(payloadJson); }

@@ -286,6 +286,37 @@ sentence, several paragraphs) and right-click:
   track and closes the gap. It asks first. In the note the words are struck
   through: they are no longer timed or put in subtitles, and every timecode
   after them moves earlier to match.
+- **💾 Save this audio as WAV** saves the selected words' audio as a WAV
+  file, with its word-by-word SRT, and changes nothing on the timeline. A
+  window then shows the file; **Show in folder** opens its folder.
+
+**The audio that is taken out is saved first.** Before ✂️ Remove from the
+timeline and ✂️ Retakes take anything out, its audio is saved as a WAV file in
+the **LazyKick Cuts** folder next to the project (in your home folder for a
+project that is not saved yet). The name tells the timeline and where the
+audio was, for example `Rough Cut removed 00-01-12-04.wav` or
+`Rough Cut retake 00-03-40-11.wav`; nothing is ever overwritten. The audio is
+what 🎙️ Time to Audio hears: all audible tracks, or only the selected clips
+(Premiere Pro) or layers (After Effects). If the audio cannot be saved,
+LazyKick asks before it removes anything.
+
+**Each WAV comes with a word-by-word SRT** of the same name, for example
+`Rough Cut removed 00-01-12-04.srt`: one word a subtitle, timed from the
+start of that WAV, so the two line up when you place them together. The
+words and times come from the note, as 💬 Subtitles' Single Word lays them
+out; punctuation stays or goes as you chose last in the Create subtitles
+window. A retake is not in the note, so its SRT is a guess: the words of the
+take that counts, at that take's pace, for as long as the retake speaks.
+Check it when the reader changed words in the retake. A stretch with no
+words in it gets no SRT.
+
+- **Premiere Pro** renders only that stretch, with its own *Waveform Audio
+  48kHz 16-bit* preset, through the sequence's work area, and puts the work
+  area back.
+- **After Effects** renders the stretch through its render queue with its
+  own audio-only output template, then removes that item again. Items you
+  queued yourself are held back and stay queued. After Effects is busy for a
+  moment while it renders.
 
 When 🎙️ Time to Audio has heard that timeline, each cut falls in the middle of
 the pause next to the words, so no word is clipped and the speech on both
@@ -584,10 +615,11 @@ older versions are still found.)
 | `paste_index.json` | Checksums of pasted images, to recognise a picture pasted again |
 
 Pasted images live next to your projects, subtitle files in
-`LazyKick Subtitles` next to them. Back up the folder above to keep your notes
+`LazyKick Subtitles` and the audio taken out of the timeline in
+`LazyKick Cuts` next to them. Back up the folder above to keep your notes
 when you move to a new computer.
 
 **Privacy:** LazyKick makes **no network requests**. It reads the clipboard
-only when you paste, audio only when you click 🎙️ Time to Audio, and only
-the folders you link. The one link it opens is the developer's website in
+only when you paste, audio only when you click 🎙️ Time to Audio or save or
+remove audio from the note, and only the folders you link. The one link it opens is the developer's website in
 the footer, when you click it.

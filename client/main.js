@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.10.0";
+    var PANEL_VERSION = "1.11.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -188,6 +188,7 @@
         noteMenuUnpin:         document.getElementById("noteMenuUnpin"),
         noteMenuCutTimeline:   document.getElementById("noteMenuCutTimeline"),
         noteMenuRemoveTimeline: document.getElementById("noteMenuRemoveTimeline"),
+        noteMenuSaveAudio:     document.getElementById("noteMenuSaveAudio"),
         noteMenuUnstrike:      document.getElementById("noteMenuUnstrike"),
 
         // In-panel dialog
@@ -1712,6 +1713,7 @@
         var timed = menuPick.some(function (p) { return !!leadingTag(p.line); });
         el.noteMenuCutTimeline.disabled = !timed || scriptBusy;
         el.noteMenuRemoveTimeline.disabled = !timed || scriptBusy;
+        el.noteMenuSaveAudio.disabled = !timed || scriptBusy;
         el.noteMenuUnstrike.classList.toggle("hidden", !menuLine || menuLine.parentNode !== el.noteEditor || !menuLine.querySelectorAll(".note-cut").length);
         el.noteMenu.classList.remove("hidden");
         // At the pointer, but inside the panel near its right and bottom edges.
@@ -1767,10 +1769,13 @@
     });
     el.noteMenuUnpin.addEventListener("click", function () { unpinLine(menuLine); });
     el.noteMenuCutTimeline.addEventListener("click", function () {
-        if (!el.noteMenuCutTimeline.disabled) editAtSelection(menuPick, false);
+        if (!el.noteMenuCutTimeline.disabled) editAtSelection(menuPick, "cut");
     });
     el.noteMenuRemoveTimeline.addEventListener("click", function () {
-        if (!el.noteMenuRemoveTimeline.disabled) editAtSelection(menuPick, true);
+        if (!el.noteMenuRemoveTimeline.disabled) editAtSelection(menuPick, "remove");
+    });
+    el.noteMenuSaveAudio.addEventListener("click", function () {
+        if (!el.noteMenuSaveAudio.disabled) editAtSelection(menuPick, "save");
     });
     el.noteMenuUnstrike.addEventListener("click", function () { unstrikeLine(menuLine); });
 
@@ -2493,8 +2498,11 @@
         return (Math.round(n * 10) / 10) + " s";
     }
 
-    /** ✂️ Cut the timeline here (`removing` false) or ✂️ Remove from the timeline (true) for words picked in the note. */
-    function editAtSelection(picked, removing) {
+    /**
+     * For words picked in the note: ✂️ Cut the timeline here ("cut"),
+     * ✂️ Remove from the timeline ("remove") or 💾 Save this audio as WAV ("save").
+     */
+    function editAtSelection(picked, action) {
         hideNoteMenu();
         if (!picked || !picked.length || scriptBusy) return Promise.resolve(null);
         var projectBefore = appState.projectId;
@@ -2506,7 +2514,7 @@
             }
             if (appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore ||
                 !picked.every(function (p) { return p.line.parentNode === el.noteEditor; })) {
-                setStatus("The note changed; nothing was cut", 3000);
+                setStatus("The note changed; nothing was done", 3000);
                 return null;
             }
             var speech = heardAudio && heardAudio.key === timelineKey(timeline) ? heardAudio.speech : null;
@@ -2515,18 +2523,20 @@
                 setStatus("Time the selected words first: click 🎙️ Time to Audio", 4000);
                 return null;
             }
-            if (!removing) return cutTimelineAt(timeline, [span.s, span.e]);
+            if (action === "cut") return cutTimelineAt(timeline, [span.s, span.e]);
+            if (action === "save") return saveAudioOf(timeline, span);
             var from = LazyAlign.formatTimecode(timeline.offset + span.s, timeline.fps);
             var to = LazyAlign.formatTimecode(timeline.offset + span.e, timeline.fps);
             return showDialog({
                 title: "Remove from the timeline?",
                 message: "Take " + from + " – " + to + " (" + secondsText(span.e - span.s) + ") out of '" + timeline.name +
-                         "' on every unlocked track and close the gap. The words get struck through in the note. Locked tracks are left as they are. " +
+                         "' on every unlocked track and close the gap. Its audio is saved as WAV in '" + CUTS_FOLDER +
+                         "' next to the project with a word-by-word SRT, and the words get struck through in the note. Locked tracks are left as they are. " +
                          undoHint(timeline.host),
                 ok: "Remove",
                 danger: true
             }).then(function (yes) {
-                return yes ? removeFromTimeline(timeline, [span], picked) : null;
+                return yes ? removeFromTimeline(timeline, [span], picked, "removed", noteWords(timeline)) : null;
             });
         });
     }
@@ -2547,39 +2557,191 @@
         });
     }
 
+    // ---- The audio of a stretch, saved as WAV
+
+    var CUTS_FOLDER = "LazyKick Cuts";
+
     /**
-     * Takes `stretches` ([{ s, e }]) out of the open timeline and closes the
-     * gaps. Then the note's times move to match and the `picked` words are
-     * struck through; the voice heard before no longer fits the timeline.
+     * Writes the WAV `dest` from a file the host rendered (WAV or AIFF): all
+     * of it, or only `s` to `e` seconds when the host rendered the whole
+     * timeline instead of the stretch.
      */
-    function removeFromTimeline(timeline, stretches, picked) {
+    function writeStretchWav(src, dest, s, e) {
+        var fd = fs.openSync(src, "r");
+        try {
+            var head = Buffer.alloc(65536);
+            var got = fs.readSync(fd, head, 0, head.length, 0);
+            var layout = LazyAlign.audioLayout(head.slice(0, got), fs.fstatSync(fd).size);
+            if (!layout) throw new Error("the rendered file is not a WAV or AIFF");
+            var rate = Math.round(layout.rate);
+            var from = 0;
+            var to = layout.dataBytes;
+            if (to / (rate * layout.block) > e - s + 0.5) {
+                from = Math.min(to, Math.round(s * rate) * layout.block);
+                to = Math.min(to, Math.round(e * rate) * layout.block);
+            }
+            var out = fs.openSync(dest, "w");
+            try {
+                fs.writeSync(out, Buffer.from(LazyAlign.wavHeader(layout, to - from)));
+                var chunk = Buffer.alloc(Math.floor(1048576 / layout.block) * layout.block);
+                for (var at = from; at < to; ) {
+                    var n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, to - at), layout.dataStart + at);
+                    if (n <= 0) break;
+                    if (layout.bigEndian) LazyAlign.samplesToWav(chunk, n, layout.bits);
+                    fs.writeSync(out, chunk, 0, n);
+                    at += n;
+                }
+            } finally {
+                fs.closeSync(out);
+            }
+        } finally {
+            fs.closeSync(fd);
+        }
+    }
+
+    /**
+     * Saves the audio of `stretches` ([{ s, e }]) as WAV files in LazyKick
+     * Cuts next to the project, named by the timeline, `label` and the start
+     * timecode. The audio is what 🎙️ Time to Audio hears: only the selected
+     * clips' or layers' when some are selected. Resolves to
+     * { ok, files: [path], dir, msg }; ok only when every stretch was saved.
+     */
+    function saveStretchAudio(timeline, stretches, label, words) {
+        var stamp = Date.now();
+        var punctuationOff = subtitleChoices().removePunctuation;
+        var items = stretches.map(function (r, i) {
+            return { s: Math.round(r.s * 1000) / 1000, e: Math.round(r.e * 1000) / 1000, path: normPath(path.join(os.tmpdir(), "lazykick-cut-" + stamp + "-" + i)) };
+        });
+        return currentProjectFolder().then(function (projectFolder) {
+            var dir = path.join(projectFolder || os.homedir(), CUTS_FOLDER);
+            return evalScriptP("saveTimelineAudio(" + JSON.stringify(JSON.stringify({ name: timeline.name, items: items })) + ")").then(function (r) {
+                var rendered = (r && r.files) || [];
+                var saved = [];
+                var subtitles = [];
+                var failed = ((r && r.failures) || []).slice();
+                if (!r) failed.push("The host did not answer");
+                else if (!r.ok && !rendered.length && !failed.length) failed.push(r.msg || "Nothing was saved");
+                var base = sanitizeRelativePath(String(timeline.name || "").replace(/[\/\\]/g, "_"), "Timeline").replace(/\//g, " ");
+                rendered.forEach(function (f) {
+                    var tc = LazyAlign.formatTimecode(timeline.offset + f.s, timeline.fps).replace(/[:;]/g, "-");
+                    try {
+                        mkdirp(dir);
+                        var stem = uniqueStem(dir, base + (label ? " " + label : "") + " " + tc);
+                        writeStretchWav(f.path, stem + ".wav", f.s, f.e);
+                        saved.push(stem + ".wav");
+                        // Word by word, timed from the start of the saved audio.
+                        var cues = words ? LazyAlign.stretchCues(words, f.s, f.e, { removePunctuation: punctuationOff, fps: timeline.fps }) : [];
+                        if (cues.length) {
+                            fs.writeFileSync(stem + ".srt", String.fromCharCode(0xFEFF) + LazyAlign.buildSrt(cues), "utf8");
+                            subtitles.push(stem + ".srt");
+                        }
+                    } catch (err) {
+                        failed.push(err.message);
+                    }
+                    removeQuietly(f.path);
+                });
+                return { ok: saved.length === items.length && !failed.length, files: saved, subtitles: subtitles, dir: dir, msg: failed.join("; ") };
+            });
+        });
+    }
+
+    /** A file name stem in `dir` that neither a .wav nor a .srt has yet. */
+    function uniqueStem(dir, stem) {
+        var candidate = path.join(dir, stem);
+        for (var n = 2; fs.existsSync(candidate + ".wav") || fs.existsSync(candidate + ".srt"); n++) {
+            candidate = path.join(dir, stem + "_" + n);
+        }
+        return candidate;
+    }
+
+    /** Every word of the note's timed lines, with its time, as LazyAlign.wordList gives them. */
+    function noteWords(timeline) {
+        return LazyAlign.wordList(followModel(timeline).lines.map(function (l) {
+            return { start: l.start, end: l.end, text: textWithoutTags(l.node).split(NBSP).join(" "), words: l.words };
+        }));
+    }
+
+    /** 💾 Save this audio as WAV: the picked words' stretch and its word-by-word SRT, with nothing on the timeline changed. */
+    function saveAudioOf(timeline, span) {
+        setScriptBusy(true);
+        setStatus("Saving the audio...");
+        return saveStretchAudio(timeline, [span], "", noteWords(timeline)).catch(function (err) {
+            return { ok: false, files: [], subtitles: [], msg: err && err.message ? err.message : String(err) };
+        }).then(function (saved) {
+            setScriptBusy(false);
+            if (!saved.files.length) {
+                setStatus("The audio was not saved: " + saved.msg, 8000);
+                return saved;
+            }
+            var srt = saved.subtitles.length ? " and its SRT" : "";
+            setStatus("Saved " + path.basename(saved.files[0]) + srt + " in " + CUTS_FOLDER, 6000);
+            showDialog({
+                title: "Audio saved",
+                message: saved.files[0] + (srt ? ", with the words one by one in " + path.basename(saved.subtitles[0]) : ""),
+                ok: "Show in folder",
+                cancel: "Close"
+            }).then(function (show) {
+                if (show) openInOS(saved.dir);
+            });
+            return saved;
+        });
+    }
+
+    /**
+     * Saves the audio of `stretches` ([{ s, e }]) as WAV (named with `label`),
+     * each with a word-by-word SRT of the `words` said in it, then takes them out of the open timeline and closes the gaps. Then the
+     * note's times move to match and the `picked` words are struck through;
+     * the voice heard before no longer fits the timeline. When the audio
+     * cannot be saved, it asks before removing.
+     */
+    function removeFromTimeline(timeline, stretches, picked, label, words) {
         var projectBefore = appState.projectId;
         var tabBefore = appState.notesData.activeTabId;
+        var saved = null;
         setScriptBusy(true);
-        setStatus("Removing from the timeline...");
-        var payload = {
-            name: timeline.name,
-            ranges: stretches.map(function (r) { return { s: Math.round(r.s * 1000) / 1000, e: Math.round(r.e * 1000) / 1000 }; })
-        };
-        return evalScriptP("removeTimeline(" + JSON.stringify(JSON.stringify(payload)) + ")").then(function (r) {
-            if (!r) {
-                setStatus("The host did not answer", 5000);
+        setStatus("Saving the audio that is taken out...");
+        return saveStretchAudio(timeline, stretches, label, words).catch(function (err) {
+            return { ok: false, files: [], subtitles: [], msg: err && err.message ? err.message : String(err) };
+        }).then(function (result) {
+            saved = result;
+            if (saved.ok) return true;
+            return showDialog({
+                title: "The audio was not saved",
+                message: "LazyKick could not save the audio before taking it out (" + saved.msg + "). Remove it anyway?",
+                ok: "Remove anyway",
+                danger: true
+            });
+        }).then(function (go) {
+            if (!go) {
+                setStatus("Nothing was removed", 3000);
                 return null;
             }
-            // Ranges come back once anything was taken out, even when a later step failed.
-            var changed = !!(r.ranges && r.ranges.length);
-            if (changed) {
-                heardAudio = null;
-                lastRetakes = null;
-                showRetakes();
-                if (appState.projectId === projectBefore && appState.notesData.activeTabId === tabBefore) {
-                    noteAfterRemoval(timeline, r.ranges, picked.filter(function (p) { return p.line.parentNode === el.noteEditor; }));
-                    noteChanged();
-                    saveCurrentNote();
+            setStatus("Removing from the timeline...");
+            var payload = {
+                name: timeline.name,
+                ranges: stretches.map(function (r) { return { s: Math.round(r.s * 1000) / 1000, e: Math.round(r.e * 1000) / 1000 }; })
+            };
+            return evalScriptP("removeTimeline(" + JSON.stringify(JSON.stringify(payload)) + ")").then(function (r) {
+                if (!r) {
+                    setStatus("The host did not answer", 5000);
+                    return null;
                 }
-            }
-            setStatus((r.msg || "Removed") + (changed ? " · the note's times moved to match" : ""), r.ok ? 6000 : 9000);
-            return r;
+                // Ranges come back once anything was taken out, even when a later step failed.
+                var changed = !!(r.ranges && r.ranges.length);
+                if (changed) {
+                    heardAudio = null;
+                    lastRetakes = null;
+                    showRetakes();
+                    if (appState.projectId === projectBefore && appState.notesData.activeTabId === tabBefore) {
+                        noteAfterRemoval(timeline, r.ranges, picked.filter(function (p) { return p.line.parentNode === el.noteEditor; }));
+                        noteChanged();
+                        saveCurrentNote();
+                    }
+                }
+                setStatus((r.msg || "Removed") + (changed ? " · the note's times moved to match" : "") +
+                          (saved.files.length ? " · audio" + (saved.subtitles.length ? " and SRT" : "") + " saved in " + CUTS_FOLDER : ""), r.ok ? 6000 : 9000);
+                return r;
+            });
         }).catch(function (err) {
             setStatus("Removing failed: " + (err && err.message ? err.message : err), 5000);
             return null;
@@ -2721,17 +2883,22 @@
             }
             var cuts = LazyAlign.outtakeCuts(audio.speech, known.outtakes);
             if (!cuts.length) return null;
+            // A retake is not in the note: its SRT guesses it says what the take that counts says.
+            var said = noteWords(timeline);
+            var guessed = [];
+            known.outtakes.forEach(function (o) { guessed = guessed.concat(LazyAlign.retakeWords(said, o)); });
             var total = cuts.reduce(function (n, c) { return n + c.e - c.s; }, 0);
             return showDialog({
                 title: "Remove the retakes?",
                 message: "Take " + (cuts.length === 1 ? "1 retake" : cuts.length + " retakes") + " (" + secondsText(total) + " in all) out of '" +
                          timeline.name + "' on every unlocked track and close the gaps. Each goes from the middle of the pause before it to " +
-                         "just before the take that counts. Locked tracks are left as they are. " + undoHint(timeline.host),
+                         "just before the take that counts. Their audio is saved as WAV in '" + CUTS_FOLDER + "' next to the project, each with a word-by-word SRT. " +
+                         "Locked tracks are left as they are. " + undoHint(timeline.host),
                 ok: "Remove",
                 danger: true
             }).then(function (yes) {
                 if (!yes || lastRetakes !== known) return null;
-                return removeFromTimeline(timeline, cuts, []);
+                return removeFromTimeline(timeline, cuts, [], "retake", guessed);
             });
         });
     }

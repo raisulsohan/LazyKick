@@ -2,6 +2,19 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.11.0
+
+### 💾 The audio taken out of the timeline is kept, with a word-by-word SRT
+- **Before ✂️ Remove from the timeline and ✂️ Retakes take anything out, its audio is saved** as a WAV file in a `LazyKick Cuts` folder next to the project (the home folder for a project not saved yet), named by the timeline, `removed` or `retake`, and the start timecode, for example `Rough Cut removed 00-01-12-04.wav`. Nothing is overwritten. The audio is what 🎙️ Time to Audio hears: all audible tracks, or only the selected clips or layers. When it cannot be saved, LazyKick asks before removing anything.
+- **Every saved WAV gets a word-by-word SRT** of the same name: the note's words said in that stretch, one a subtitle, timed from the start of the WAV (`LazyAlign.wordList`, `LazyAlign.stretchCues` with the Single Word layout; punctuation as last chosen in Create subtitles). A retake is not in the note, so its SRT guesses the words of the take that counts, at that take's pace, for as long as the retake speaks (`LazyAlign.retakeWords`). A stretch with no timed words gets no SRT.
+- **💾 Save this audio as WAV** in the note's right-click menu saves the selected words' audio and SRT without changing the timeline; a window shows the file, with **Show in folder**.
+- **Premiere Pro** renders only the stretch with its own *Waveform Audio 48kHz 16-bit* preset, through the sequence's work area (hidden unless its bar is on), which is read back and put back afterwards; if the work area cannot be set, the whole sequence is rendered and the panel keeps only the stretch.
+- **After Effects** renders each stretch through its render queue with an audio-only output-module template (a WAV one if there is, else *AIFF 48kHz*), holding the user's own queued items back and removing its items afterwards, in one undo step; the panel turns AIFF into WAV (`LazyAlign.audioLayout`, `samplesToWav`, `wavHeader`).
+- New host function `saveTimelineAudio(payloadJson)`.
+
+### Easier to read
+- Functional text below 11 px is now 11 px: the host badge, the count on Watch Bins, the script bar's hint, watch-bin paths and dates, setting notes, the footer, form hints, the subtitle preview and its **?** help mark, and the folder browser's drives and hint.
+
 ## 1.10.0
 
 ### ✂️ Cut the timeline from the script

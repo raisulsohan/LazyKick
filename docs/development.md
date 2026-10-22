@@ -181,6 +181,7 @@ returns a JSON string `{ ok, msg, … }` unless noted.
 | `getTimelineAudio(wavPath)` | Premiere Pro: exports the sequence mix to `wavPath` with *Waveform Audio 48kHz 16-bit* (`kind: "wav"`). After Effects: *Convert Audio to Keyframes* on the audible layers, one loudness value a frame (`kind: "levels"`, `step`, `start`, `values`). `used: "selected"` when only the selected clips or layers were heard |
 | `placeSubtitles(payloadJson)` | `{ srtPath, cues: [{ s, e, t }] }`. Premiere Pro: imports the SRT into a *Subtitles* bin and calls `createCaptionTrack`. After Effects: one box-text layer per cue |
 | `cutTimeline(payloadJson)` | `{ name, times: [seconds] }`: splits every unlocked track (layer) at each time, rounded to a frame. Refused with `wrongTimeline: true` when the open timeline is not `name`. Premiere Pro: QE `track.razor(timecode)` per track, checked on the DOM, and the picture and sound pieces linked again (`linkSelection`). After Effects: `duplicate()` plus in/out points, one undo step. Returns `times`, `split`, `relinked`, `lockedSkipped`, `failures` |
+| `saveTimelineAudio(payloadJson)` | `{ name, items: [{ s, e, path }] }` (`path` without an extension): renders the audio of each stretch, with only the selected clips' tracks (layers) heard when some are selected. Premiere Pro: `exportAsMediaDirect` with the *Waveform Audio 48kHz 16-bit* preset over the work area set to the stretch (`setWorkAreaInPoint`/`OutPoint`, read back, then put back); without those calls the whole sequence, flagged `whole`. After Effects: one render-queue item a stretch with an audio-only output-module template (a WAV one, else AIFF), the user's queued items held back during `render()`, the items removed after; one undo step. Returns `files: [{ path, s, e, whole }]`, `used`, `failures` |
 | `removeTimeline(payloadJson)` | `{ name, ranges: [{ s, e }] }`: takes the stretches out of every unlocked track and closes the gaps. Premiere Pro: razor at both ends, `remove(false, false)` on the pieces inside, then `move()` every later clip left, earliest first; nothing is removed when a razor did not take. After Effects: each layer trimmed, split or deleted and moved by `startTime`, one undo step. Returns `ranges` as removed (whole frames), `removedSeconds`, `removed`, `moved`, `relinked`, `lockedSkipped`, `failures` |
 
 `LazyKickHost` also exports `sanitizeBinPath`, `formatFramesTimecode`,
@@ -345,6 +346,18 @@ every tag, word time and pin by `LazyAlign.timeAfterCuts` over the ranges the
 host reports, wraps the removed words in `span.note-cut` (skipped by
 `textWithoutTags` and `lineTexts`, so they are no longer timed) and drops
 `heardAudio`, which no longer fits the timeline.
+
+Before that, `saveStretchAudio` has the host render each stretch to a temp
+file (`saveTimelineAudio`) and `writeStretchWav` copies it into *LazyKick
+Cuts* as a plain WAV: `LazyAlign.audioLayout` finds the samples of a WAV or
+AIFF, `samplesToWav` turns AIFF's big-endian samples round, `wavHeader`
+writes the 44-byte header. A render longer than the stretch (Premiere's whole
+sequence) is cut to the stretch there, so the work area never has to take.
+Beside each WAV goes an SRT: `noteWords` lists the note's timed words
+(`LazyAlign.wordList`), and `LazyAlign.stretchCues` keeps the ones said in
+the stretch, moves them to its start and lays them out with `makeCues` in
+the Single Word layout. For ✂️ Retakes, `LazyAlign.retakeWords` guesses each
+outtake's words from the take that counts, which starts after it.
 
 ### Watch bins
 
