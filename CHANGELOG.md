@@ -2,6 +2,19 @@
 
 All notable changes to LazyKick. Versions follow `package.json`.
 
+## 1.10.0
+
+### ✂️ Cut the timeline from the script
+- **Select words in a timed note and right-click.** **✂️ Cut the timeline here** cuts every unlocked track where the selected words start and where they end; nothing is taken out. **✂️ Remove from the timeline** takes them out of every unlocked track and closes the gap, after a question that names the stretch, the timeline and how to undo it.
+- When 🎙️ Time to Audio heard that timeline, every cut falls in the middle of the pause next to the words (`LazyAlign.quietCut`: a pause within 0.25 s, else a breath), so no word is clipped and a removal keeps half of the pause on each side. Without it, the word times are used. Every cut is rounded to a whole frame.
+- In the note, removed words are struck through (`span.note-cut`) and are no longer timed or put in subtitles; a line with nothing left loses its timecode. Every time after the stretch moves earlier to match: line starts, word times, pins, and timecodes in side notes and checklists. **Bring back the struck words** in the right-click menu lifts the strike again, for after you undo the cut on the timeline.
+- **✂️ Retakes:** when 🎙️ Time to Audio left retakes out, an amber button with the count appears next to it. It takes every earlier take off the timeline at once, after a question: each from the middle of the pause before it to just before the take that counts, so the pause left is as long as the reader's own (`LazyAlign.outtakeCuts`). Restarts one after another, with nothing kept between them, go as one stretch.
+- **Premiere Pro:** its scripting has no razor, so each track is cut with Premiere's QE razor at Premiere's own timecode for that frame, and the cut is checked on the timeline (a sequence that starts at 01:00:00:00 is tried with its start timecode too). The picture and sound pieces are linked again. A removal cuts both ends, removes the pieces inside and moves every later clip left, earliest first; when a cut does not take, nothing is removed. Premiere keeps each step as its own undo step.
+- **After Effects:** a layer is split by duplicating it and trimming both copies (the later piece on top, as *Edit › Split Layer* leaves it), and later layers move by their start time, all in one undo step.
+- Locked tracks and layers are left as they are, and the status bar says how many. Nothing is cut when another sequence or composition became active while the question was open.
+- New host functions `cutTimeline(payloadJson)` and `removeTimeline(payloadJson)`.
+- Not moved by a removal: Premiere Pro caption tracks, and sequence or composition markers. An After Effects composition keeps its length.
+
 ## 1.9.1
 
 ### Fixed

@@ -355,6 +355,18 @@ body, html {
     text-overflow: ellipsis;
 }
 
+.btn-tool.hidden { display: none; }
+
+.btn-retakes {
+    background: rgba(245, 166, 35, 0.14);
+    border-color: rgba(245, 166, 35, 0.6);
+    color: #f5b041;
+}
+.btn-retakes:hover {
+    background: rgba(245, 166, 35, 0.28);
+    border-color: #f5b041;
+}
+
 .btn-follow.is-on, .btn-titles.is-on {
     background: rgba(60, 169, 255, 0.16);
     border-color: rgba(60, 169, 255, 0.55);
@@ -516,6 +528,13 @@ body, html {
     content: "\1F4CC";
     font-size: 9px;
     margin-right: 2px;
+}
+
+/* Words taken out of the timeline: struck through, no longer timed. */
+.rich-editor .note-cut {
+    color: #a0a0a8;
+    text-decoration: line-through;
+    text-decoration-color: #ff6b6b;
 }
 
 /* A click on a timecode, or Ctrl/Cmd+click on a word, moves the playhead there. */

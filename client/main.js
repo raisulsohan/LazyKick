@@ -17,7 +17,7 @@
 (function () {
     "use strict";
 
-    var PANEL_VERSION = "1.9.1";
+    var PANEL_VERSION = "1.10.0";
 
     console.log("%c ⚡ LazyKick v" + PANEL_VERSION + " • Developed By RaisulSohan (raisulsohan.com) ",
                 "background: #18181a; color: #3ca9ff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid #3ca9ff;");
@@ -186,6 +186,9 @@
         noteMenuSelectAll:     document.getElementById("noteMenuSelectAll"),
         noteMenuPin:           document.getElementById("noteMenuPin"),
         noteMenuUnpin:         document.getElementById("noteMenuUnpin"),
+        noteMenuCutTimeline:   document.getElementById("noteMenuCutTimeline"),
+        noteMenuRemoveTimeline: document.getElementById("noteMenuRemoveTimeline"),
+        noteMenuUnstrike:      document.getElementById("noteMenuUnstrike"),
 
         // In-panel dialog
         dialogOverlay:         document.getElementById("dialogOverlay"),
@@ -195,7 +198,8 @@
         dialogCancel:          document.getElementById("dialogCancel"),
         dialogOk:              document.getElementById("dialogOk"),
         btnTimeToAudio:        document.getElementById("btnTimeToAudio"),
-        btnFollow:             document.getElementById("btnFollow"),
+        btnRetakes:            document.getElementById("btnRetakes"),
+        btnFollow:            document.getElementById("btnFollow"),
         btnTimeTitles:         document.getElementById("btnTimeTitles"),
         btnTextSmaller:        document.getElementById("btnTextSmaller"),
         btnTextBigger:         document.getElementById("btnTextBigger"),
@@ -789,6 +793,7 @@
         }
         savedRange = null;
         noteChanged();
+        showRetakes();
     }
 
     function rememberSelection() {
@@ -973,6 +978,11 @@
         return !!(node && node.nodeType === 1 && node.classList && node.classList.contains("timecode-tag"));
     }
 
+    /** Words taken out of the timeline: struck through, and no longer timed or in subtitles. */
+    function isStruckWords(node) {
+        return !!(node && node.nodeType === 1 && node.classList && node.classList.contains("note-cut"));
+    }
+
     function isBlankText(node) {
         return node.nodeType === 3 && !String(node.textContent).split(NBSP).join("").trim();
     }
@@ -1008,7 +1018,7 @@
 
     function textWithoutTags(node) {
         if (node.nodeType === 3) return String(node.textContent);
-        if (isTimecodeTag(node)) return "";
+        if (isTimecodeTag(node) || isStruckWords(node)) return "";
         var s = "";
         for (var child = node.firstChild; child; child = child.nextSibling) s += textWithoutTags(child);
         return node.nodeName === "BR" ? s + " " : s;
@@ -1054,13 +1064,7 @@
      * `pin`: the time the user pinned the line to (kept in data-anchor).
      */
     function setLeadingTag(line, span, timeline, words, pin) {
-        var old = leadingTag(line);
-        while (old) {
-            var after = old.nextSibling;
-            line.removeChild(old);
-            if (after && after.nodeType === 3) after.textContent = String(after.textContent).replace(/^[\s\u00a0]+/, "");
-            old = leadingTag(line);
-        }
+        dropLeadingTags(line);
         var tag = document.createElement("span");
         tag.className = "timecode-tag";
         tag.setAttribute("data-t", span.start.toFixed(3));
@@ -1070,6 +1074,16 @@
         tag.textContent = "[" + LazyAlign.formatTimecode(timeline.offset + span.start, timeline.fps) + "]";
         line.insertBefore(document.createTextNode(NBSP), line.firstChild);
         line.insertBefore(tag, line.firstChild);
+    }
+
+    function dropLeadingTags(line) {
+        var old = leadingTag(line);
+        while (old) {
+            var after = old.nextSibling;
+            line.removeChild(old);
+            if (after && after.nodeType === 3) after.textContent = String(after.textContent).replace(/^[\s ]+/, "");
+            old = leadingTag(line);
+        }
     }
 
     /**
@@ -1108,6 +1122,7 @@
         scriptBusy = busy;
         el.btnTimeToAudio.disabled = busy;
         el.btnSubtitles.disabled = busy;
+        el.btnRetakes.disabled = busy;
     }
 
     /** RMS loudness every 10 ms of a WAV, read in chunks so the panel stays responsive. */
@@ -1124,6 +1139,8 @@
     // The speech of the last timeline listened to, so pinning a line re-times
     // the others at once instead of exporting the audio again.
     var heardAudio = null;
+    // The retakes the last 🎙️ Time to Audio left out, for ✂️ Retakes.
+    var lastRetakes = null;
 
     function timelineKey(t) {
         return [appState.projectId, t.name, t.fps, t.offset, t.duration].join("|");
@@ -1235,6 +1252,8 @@
             noteChanged();
             saveCurrentNote();
             var retakes = (spans.outtakes || []).length;
+            lastRetakes = retakes ? { key: audio.key, projectId: projectBefore, tabId: tabBefore, outtakes: spans.outtakes } : null;
+            showRetakes();
             setStatus("Timed " + lines.length + " line" + (lines.length === 1 ? "" : "s") + " to " + audio.heard + " of '" + r.name + "'" +
                       (retakes ? " · " + retakes + " retake" + (retakes === 1 ? "" : "s") + " left out" : "") +
                       (pins.length ? " · " + pins.length + " pinned" : ""), 5000);
@@ -1671,6 +1690,7 @@
 
     var menuLine = null; // the note line the menu was opened on
     var menuWord = -1;   // the word of it under the pointer
+    var menuPick = [];   // the selected words, as selectedWords() gives them
 
     /** Whether a note line is timed when Time to Audio runs (so it can be pinned). */
     function isScriptLine(line) {
@@ -1688,6 +1708,11 @@
         menuWord = isScriptLine(menuLine) ? wordIndexAt(menuLine, e.clientX || 0, e.clientY || 0) : -1;
         el.noteMenuPin.disabled = !isScriptLine(menuLine) || scriptBusy;
         el.noteMenuUnpin.classList.toggle("hidden", !isScriptLine(menuLine) || !hasPins(menuLine));
+        menuPick = selected ? selectedWords() : [];
+        var timed = menuPick.some(function (p) { return !!leadingTag(p.line); });
+        el.noteMenuCutTimeline.disabled = !timed || scriptBusy;
+        el.noteMenuRemoveTimeline.disabled = !timed || scriptBusy;
+        el.noteMenuUnstrike.classList.toggle("hidden", !menuLine || menuLine.parentNode !== el.noteEditor || !menuLine.querySelectorAll(".note-cut").length);
         el.noteMenu.classList.remove("hidden");
         // At the pointer, but inside the panel near its right and bottom edges.
         var width = window.innerWidth || document.body.clientWidth || 0;
@@ -1741,6 +1766,13 @@
         if (!el.noteMenuPin.disabled) pinAtPlayhead(menuLine, menuWord);
     });
     el.noteMenuUnpin.addEventListener("click", function () { unpinLine(menuLine); });
+    el.noteMenuCutTimeline.addEventListener("click", function () {
+        if (!el.noteMenuCutTimeline.disabled) editAtSelection(menuPick, false);
+    });
+    el.noteMenuRemoveTimeline.addEventListener("click", function () {
+        if (!el.noteMenuRemoveTimeline.disabled) editAtSelection(menuPick, true);
+    });
+    el.noteMenuUnstrike.addEventListener("click", function () { unstrikeLine(menuLine); });
 
     /** A pin on the line's start (its tag) or on a word in it. */
     function hasPins(line) {
@@ -2018,43 +2050,62 @@
         return follow.model;
     }
 
-    /** A DOM range over each word of a line, in the order lineWords() counts them. */
-    function wordRanges(node) {
+    /** A line's text nodes in reading order, null for a line break. Timecodes and struck words are not read. */
+    function lineTexts(node) {
         var texts = [];
         (function collect(n) {
             for (var c = n.firstChild; c; c = c.nextSibling) {
                 if (c.nodeType === 3) texts.push(c);
-                else if (c.nodeType === 1 && !isTimecodeTag(c)) {
+                else if (c.nodeType === 1 && !isTimecodeTag(c) && !isStruckWords(c)) {
                     if (c.nodeName === "BR") texts.push(null);
                     else collect(c);
                 }
             }
         })(node);
-        var ranges = [];
+        return texts;
+    }
+
+    /**
+     * Where each word of a line is, in the order lineWords() counts them:
+     * [{ sn, so, en, eo, from, to }], its first and last text node with the
+     * offsets in them, and its place in the line's text in characters.
+     */
+    function wordSpots(node) {
+        var texts = lineTexts(node);
+        var spots = [];
         var open = null;
-        function close(endNode, endOffset) {
-            var r = document.createRange();
-            r.setStart(open.node, open.offset);
-            r.setEnd(endNode, endOffset);
-            ranges.push(r);
+        function close(endNode, endOffset, at) {
+            spots.push({ sn: open.node, so: open.offset, en: endNode, eo: endOffset, from: open.at, to: at });
             open = null;
         }
         var last = null;
+        var base = 0;
         for (var t = 0; t < texts.length; t++) {
             if (texts[t] === null) {
-                if (open) close(last, String(last.nodeValue).length);
+                if (open) close(last, String(last.nodeValue).length, base);
                 continue;
             }
             var s = String(texts[t].nodeValue);
             for (var i = 0; i < s.length; i++) {
                 var space = /[\s\u00a0]/.test(s.charAt(i));
-                if (!space && !open) open = { node: texts[t], offset: i };
-                else if (space && open) close(texts[t], i);
+                if (!space && !open) open = { node: texts[t], offset: i, at: base + i };
+                else if (space && open) close(texts[t], i, base + i);
             }
+            base += s.length;
             last = texts[t];
         }
-        if (open && last) close(last, String(last.nodeValue).length);
-        return ranges;
+        if (open && last) close(last, String(last.nodeValue).length, base);
+        return spots;
+    }
+
+    /** A DOM range over each word of a line, in the order lineWords() counts them. */
+    function wordRanges(node) {
+        return wordSpots(node).map(function (w) {
+            var r = document.createRange();
+            r.setStart(w.sn, w.so);
+            r.setEnd(w.en, w.eo);
+            return r;
+        });
     }
 
     function hideFollow() {
@@ -2323,6 +2374,369 @@
         if (e.key === JUMP_KEY_NAME) el.noteEditor.classList.remove("jump-keys");
     });
     window.addEventListener("blur", function () { el.noteEditor.classList.remove("jump-keys"); });
+
+    // ============================================================
+    // CUT AND REMOVE ON THE TIMELINE
+    // ============================================================
+    // Words selected in a timed note name a stretch of the timeline. From
+    // the right-click menu, ✂️ Cut the timeline here splits every unlocked
+    // track where the words start and end, and ✂️ Remove from the timeline
+    // takes them out and closes the gap: the words are struck through and
+    // the note's later times move to match. ✂️ Retakes takes out the earlier
+    // takes 🎙️ Time to Audio left out. With the voice heard, every cut falls
+    // in a pause, so no word is clipped.
+
+    /** Where a selection boundary (node, offset) falls in a line's text, counted as wordSpots() counts it. */
+    function textOffsetIn(line, node, offset) {
+        var count = 0;
+        var done = false;
+        var stop = node.nodeType === 3 ? null : (node.childNodes[offset] || null);
+        (function walk(n) {
+            for (var c = n.firstChild; c && !done; c = c.nextSibling) {
+                if (c === stop) {
+                    done = true;
+                } else if (c.nodeType === 3) {
+                    if (c === node) {
+                        count += offset;
+                        done = true;
+                    } else {
+                        count += String(c.nodeValue).length;
+                    }
+                } else if (c.nodeType === 1) {
+                    if (isTimecodeTag(c) || isStruckWords(c)) {
+                        if (c.contains(node)) done = true;
+                    } else {
+                        walk(c);
+                    }
+                    if (c === node) done = true;
+                }
+            }
+        })(line);
+        return count;
+    }
+
+    /** A selection boundary as { line, at }: the note line it is in, and where in that line's text. */
+    function selectionPoint(node, offset, isStart) {
+        if (node === el.noteEditor) {
+            var block = el.noteEditor.childNodes[isStart ? offset : offset - 1];
+            return block ? { line: block, at: isStart ? 0 : Infinity } : null;
+        }
+        var line = lineOf(node);
+        return line ? { line: line, at: textOffsetIn(line, node, offset) } : null;
+    }
+
+    /** The spoken words the note's selection touches: [{ line, words: [index] }], in the note's order. */
+    function selectedWords() {
+        var sel = window.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) return [];
+        var range = sel.getRangeAt(0);
+        var first = selectionPoint(range.startContainer, range.startOffset, true);
+        var last = selectionPoint(range.endContainer, range.endOffset, false);
+        if (!first || !last) return [];
+        var blocks = el.noteEditor.childNodes;
+        var picked = [];
+        for (var i = Array.prototype.indexOf.call(blocks, first.line); i >= 0 && i < blocks.length; i++) {
+            var line = blocks[i];
+            if (isScriptLine(line)) {
+                var from = line === first.line ? first.at : 0;
+                var to = line === last.line ? last.at : Infinity;
+                var words = [];
+                wordSpots(line).forEach(function (w, k) {
+                    if (w.to > from && w.from < to) words.push(k);
+                });
+                if (words.length) picked.push({ line: line, words: words });
+            }
+            if (line === last.line) break;
+        }
+        return picked;
+    }
+
+    /**
+     * The stretch of the timeline the `picked` words are said in, from the
+     * word times 👁 Follow uses: { s, e } in seconds, or null when one of
+     * their lines has no timecode. With the voice heard (`speech`), both
+     * ends move into the pause next to them.
+     */
+    function pickedTimes(picked, timeline, speech) {
+        var lines = followModel(timeline).lines;
+        var s = Infinity;
+        var e = -Infinity;
+        for (var p = 0; p < picked.length; p++) {
+            var l = null;
+            for (var i = 0; i < lines.length && !l; i++) if (lines[i].node === picked[p].line) l = lines[i];
+            if (!l) return null;
+            for (var k = 0; k < picked[p].words.length; k++) {
+                var w = picked[p].words[k];
+                if (w >= l.words.length) continue;
+                s = Math.min(s, l.words[w]);
+                e = Math.max(e, w + 1 < l.words.length ? l.words[w + 1] : l.end);
+            }
+        }
+        if (!(e > s)) return null;
+        if (speech) {
+            var from = LazyAlign.quietCut(speech, s);
+            var to = LazyAlign.quietCut(speech, e);
+            if (to > from) {
+                s = from;
+                e = to;
+            }
+        }
+        return { s: Math.max(0, s), e: e };
+    }
+
+    function undoHint(host) {
+        var key = process.platform === "darwin" ? "Cmd+Z" : "Ctrl+Z";
+        return host === "ae" ? "To undo, press " + key + " once in After Effects." : "To undo, press " + key + " in Premiere Pro a few times: it keeps each cut as a step.";
+    }
+
+    function secondsText(n) {
+        return (Math.round(n * 10) / 10) + " s";
+    }
+
+    /** ✂️ Cut the timeline here (`removing` false) or ✂️ Remove from the timeline (true) for words picked in the note. */
+    function editAtSelection(picked, removing) {
+        hideNoteMenu();
+        if (!picked || !picked.length || scriptBusy) return Promise.resolve(null);
+        var projectBefore = appState.projectId;
+        var tabBefore = appState.notesData.activeTabId;
+        return evalScriptP("getTimelineInfo()").then(function (timeline) {
+            if (!timeline || !timeline.ok) {
+                setStatus((timeline && timeline.msg) || "Open a sequence or composition first", 4000);
+                return null;
+            }
+            if (appState.projectId !== projectBefore || appState.notesData.activeTabId !== tabBefore ||
+                !picked.every(function (p) { return p.line.parentNode === el.noteEditor; })) {
+                setStatus("The note changed; nothing was cut", 3000);
+                return null;
+            }
+            var speech = heardAudio && heardAudio.key === timelineKey(timeline) ? heardAudio.speech : null;
+            var span = pickedTimes(picked, timeline, speech);
+            if (!span) {
+                setStatus("Time the selected words first: click 🎙️ Time to Audio", 4000);
+                return null;
+            }
+            if (!removing) return cutTimelineAt(timeline, [span.s, span.e]);
+            var from = LazyAlign.formatTimecode(timeline.offset + span.s, timeline.fps);
+            var to = LazyAlign.formatTimecode(timeline.offset + span.e, timeline.fps);
+            return showDialog({
+                title: "Remove from the timeline?",
+                message: "Take " + from + " – " + to + " (" + secondsText(span.e - span.s) + ") out of '" + timeline.name +
+                         "' on every unlocked track and close the gap. The words get struck through in the note. Locked tracks are left as they are. " +
+                         undoHint(timeline.host),
+                ok: "Remove",
+                danger: true
+            }).then(function (yes) {
+                return yes ? removeFromTimeline(timeline, [span], picked) : null;
+            });
+        });
+    }
+
+    function cutTimelineAt(timeline, times) {
+        setScriptBusy(true);
+        setStatus("Cutting the timeline...");
+        var payload = { name: timeline.name, times: times.map(function (t) { return Math.round(t * 1000) / 1000; }) };
+        return evalScriptP("cutTimeline(" + JSON.stringify(JSON.stringify(payload)) + ")").then(function (r) {
+            setStatus((r && r.msg) || "The host did not answer", r && r.ok ? 4000 : 8000);
+            return r;
+        }).catch(function (err) {
+            setStatus("Cutting failed: " + (err && err.message ? err.message : err), 5000);
+            return null;
+        }).then(function (r) {
+            setScriptBusy(false);
+            return r;
+        });
+    }
+
+    /**
+     * Takes `stretches` ([{ s, e }]) out of the open timeline and closes the
+     * gaps. Then the note's times move to match and the `picked` words are
+     * struck through; the voice heard before no longer fits the timeline.
+     */
+    function removeFromTimeline(timeline, stretches, picked) {
+        var projectBefore = appState.projectId;
+        var tabBefore = appState.notesData.activeTabId;
+        setScriptBusy(true);
+        setStatus("Removing from the timeline...");
+        var payload = {
+            name: timeline.name,
+            ranges: stretches.map(function (r) { return { s: Math.round(r.s * 1000) / 1000, e: Math.round(r.e * 1000) / 1000 }; })
+        };
+        return evalScriptP("removeTimeline(" + JSON.stringify(JSON.stringify(payload)) + ")").then(function (r) {
+            if (!r) {
+                setStatus("The host did not answer", 5000);
+                return null;
+            }
+            // Ranges come back once anything was taken out, even when a later step failed.
+            var changed = !!(r.ranges && r.ranges.length);
+            if (changed) {
+                heardAudio = null;
+                lastRetakes = null;
+                showRetakes();
+                if (appState.projectId === projectBefore && appState.notesData.activeTabId === tabBefore) {
+                    noteAfterRemoval(timeline, r.ranges, picked.filter(function (p) { return p.line.parentNode === el.noteEditor; }));
+                    noteChanged();
+                    saveCurrentNote();
+                }
+            }
+            setStatus((r.msg || "Removed") + (changed ? " · the note's times moved to match" : ""), r.ok ? 6000 : 9000);
+            return r;
+        }).catch(function (err) {
+            setStatus("Removing failed: " + (err && err.message ? err.message : err), 5000);
+            return null;
+        }).then(function (r) {
+            setScriptBusy(false);
+            return r;
+        });
+    }
+
+    /**
+     * After `cuts` ([{ s, e }], sorted, in whole frames) left the timeline:
+     * every time in the note moves to match, and the `picked` words are
+     * struck through and no longer timed. A line with nothing left to say
+     * loses its timecode.
+     */
+    function noteAfterRemoval(timeline, cuts, picked) {
+        function after(t) { return LazyAlign.timeAfterCuts(t, cuts); }
+        var lines = followModel(timeline).lines;
+        var lineTags = lines.map(function (l) { return l.tag; });
+        var otherTags = Array.prototype.filter.call(el.noteEditor.querySelectorAll(".timecode-tag"), function (tag) {
+            return lineTags.indexOf(tag) < 0;
+        });
+        lines.forEach(function (l) {
+            var gone = [];
+            picked.forEach(function (p) { if (p.line === l.node) gone = p.words; });
+            var kept = [];
+            l.words.forEach(function (t, w) { if (gone.indexOf(w) < 0) kept.push(after(t)); });
+            if (!kept.length) {
+                dropLeadingTags(l.node);
+                return;
+            }
+            var startKept = gone.indexOf(0) < 0;
+            var start = startKept ? after(l.start) : kept[0];
+            var pin = parseFloat(l.tag.getAttribute("data-anchor"));
+            setLeadingTag(l.node, { start: start, end: Math.max(start, after(l.end)) }, timeline,
+                          kept.map(function (t) { return t - start; }), startKept && isFinite(pin) ? after(pin) : undefined);
+        });
+        // Timecodes in side notes and checklists move too.
+        otherTags.forEach(function (tag) {
+            var times = tagTimes(tag, timeline);
+            if (!times) return;
+            var t = after(times.start);
+            ["data-t", "data-e", "data-anchor"].forEach(function (name) {
+                var v = parseFloat(tag.getAttribute(name));
+                if (isFinite(v)) tag.setAttribute(name, (name === "data-t" ? t : after(v)).toFixed(3));
+            });
+            tag.textContent = "[" + LazyAlign.formatTimecode(timeline.offset + t, timeline.fps) + "]";
+        });
+        var pins = el.noteEditor.querySelectorAll(".note-pin");
+        for (var i = 0; i < pins.length; i++) {
+            var at = parseFloat(pins[i].getAttribute("data-pin"));
+            if (isFinite(at)) pins[i].setAttribute("data-pin", after(at).toFixed(3));
+        }
+        picked.forEach(function (p) { strikeWords(p.line, p.words); });
+    }
+
+    /** Wraps the parts [{ a, b }] (in order, apart) of a text node in struck spans. */
+    function wrapStruck(node, parts) {
+        var text = String(node.nodeValue);
+        var parent = node.parentNode;
+        var at = 0;
+        parts.forEach(function (p) {
+            if (p.a > at) parent.insertBefore(document.createTextNode(text.slice(at, p.a)), node);
+            var span = document.createElement("span");
+            span.className = "note-cut";
+            span.appendChild(document.createTextNode(text.slice(p.a, p.b)));
+            parent.insertBefore(span, node);
+            at = p.b;
+        });
+        if (at < text.length) parent.insertBefore(document.createTextNode(text.slice(at)), node);
+        parent.removeChild(node);
+    }
+
+    /** Strikes through words of a line (indexes as wordSpots() counts them); a pin on one of them goes. */
+    function strikeWords(line, words) {
+        var spots = wordSpots(line);
+        var texts = lineTexts(line).filter(function (t) { return t; });
+        var parts = [];   // [{ node, cuts: [{ a, b }] }] in the line's order
+        function add(node, a, b) {
+            if (b <= a) return;
+            var prev = parts[parts.length - 1];
+            if (prev && prev.node === node) prev.cuts.push({ a: a, b: b });
+            else parts.push({ node: node, cuts: [{ a: a, b: b }] });
+        }
+        // Words side by side are struck as one, the spaces between them too.
+        var sorted = words.slice().sort(function (x, y) { return x - y; });
+        for (var k = 0; k < sorted.length; k++) {
+            var head = spots[sorted[k]];
+            while (k + 1 < sorted.length && sorted[k + 1] === sorted[k] + 1) k++;
+            var tail = spots[sorted[k]];
+            if (!head || !tail) continue;
+            var i0 = texts.indexOf(head.sn);
+            var i1 = texts.indexOf(tail.en);
+            for (var i = i0; i >= 0 && i <= i1; i++) {
+                add(texts[i], i === i0 ? head.so : 0, i === i1 ? tail.eo : String(texts[i].nodeValue).length);
+            }
+        }
+        parts.forEach(function (p) { wrapStruck(p.node, p.cuts); });
+        var pins = line.querySelectorAll(".note-pin");
+        for (var n = 0; n < pins.length; n++) {
+            if (!textWithoutTags(pins[n]).split(NBSP).join("").trim()) unwrap(pins[n]);
+        }
+    }
+
+    /** Brings a line's struck words back into the timing, after the cut was undone on the timeline. */
+    function unstrikeLine(line) {
+        hideNoteMenu();
+        if (!line || line.parentNode !== el.noteEditor) return;
+        var struck = line.querySelectorAll(".note-cut");
+        if (!struck.length) return;
+        for (var i = 0; i < struck.length; i++) unwrap(struck[i]);
+        if (line.normalize) line.normalize();
+        noteChanged();
+        saveCurrentNote();
+        setStatus("The words are back in the script: click 🎙️ Time to Audio once the timeline has them again", 5000);
+    }
+
+    /** ✂️ Retakes shows while the retakes the last 🎙️ Time to Audio left out still fit this note and timeline. */
+    function showRetakes() {
+        var r = lastRetakes;
+        var on = !!(r && heardAudio && heardAudio.key === r.key && r.projectId === appState.projectId &&
+                    r.tabId === appState.notesData.activeTabId);
+        var count = on ? LazyAlign.outtakeCuts(heardAudio.speech, r.outtakes).length : 0;
+        el.btnRetakes.classList.toggle("hidden", !count);
+        if (count) el.btnRetakes.textContent = "✂️ " + count + " retake" + (count === 1 ? "" : "s");
+    }
+
+    /** Takes the retakes the last 🎙️ Time to Audio left out off every unlocked track, after asking. */
+    function removeRetakes() {
+        var known = lastRetakes;
+        if (scriptBusy || !known) return Promise.resolve(null);
+        return evalScriptP("getTimelineInfo()").then(function (timeline) {
+            var audio = heardAudio;
+            if (!timeline || !timeline.ok || !audio || audio.key !== known.key || timelineKey(timeline) !== known.key) {
+                lastRetakes = null;
+                showRetakes();
+                setStatus("The timeline changed after 🎙️ Time to Audio: click it again to find the retakes", 5000);
+                return null;
+            }
+            var cuts = LazyAlign.outtakeCuts(audio.speech, known.outtakes);
+            if (!cuts.length) return null;
+            var total = cuts.reduce(function (n, c) { return n + c.e - c.s; }, 0);
+            return showDialog({
+                title: "Remove the retakes?",
+                message: "Take " + (cuts.length === 1 ? "1 retake" : cuts.length + " retakes") + " (" + secondsText(total) + " in all) out of '" +
+                         timeline.name + "' on every unlocked track and close the gaps. Each goes from the middle of the pause before it to " +
+                         "just before the take that counts. Locked tracks are left as they are. " + undoHint(timeline.host),
+                ok: "Remove",
+                danger: true
+            }).then(function (yes) {
+                if (!yes || lastRetakes !== known) return null;
+                return removeFromTimeline(timeline, cuts, []);
+            });
+        });
+    }
+
+    el.btnRetakes.addEventListener("click", function () { removeRetakes(); });
 
     // ============================================================
     // LAZYPASTE ENGINE (Clipboard Image to Timeline)

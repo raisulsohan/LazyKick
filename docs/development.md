@@ -180,6 +180,8 @@ returns a JSON string `{ ok, msg, … }` unless noted.
 | `setPlayhead(seconds)` | Moves the playhead to `seconds` from the timeline start: After Effects `comp.time` (kept inside the comp), Premiere `setPlayerPosition` in ticks; never before 0. Returns `t` |
 | `getTimelineAudio(wavPath)` | Premiere Pro: exports the sequence mix to `wavPath` with *Waveform Audio 48kHz 16-bit* (`kind: "wav"`). After Effects: *Convert Audio to Keyframes* on the audible layers, one loudness value a frame (`kind: "levels"`, `step`, `start`, `values`). `used: "selected"` when only the selected clips or layers were heard |
 | `placeSubtitles(payloadJson)` | `{ srtPath, cues: [{ s, e, t }] }`. Premiere Pro: imports the SRT into a *Subtitles* bin and calls `createCaptionTrack`. After Effects: one box-text layer per cue |
+| `cutTimeline(payloadJson)` | `{ name, times: [seconds] }`: splits every unlocked track (layer) at each time, rounded to a frame. Refused with `wrongTimeline: true` when the open timeline is not `name`. Premiere Pro: QE `track.razor(timecode)` per track, checked on the DOM, and the picture and sound pieces linked again (`linkSelection`). After Effects: `duplicate()` plus in/out points, one undo step. Returns `times`, `split`, `relinked`, `lockedSkipped`, `failures` |
+| `removeTimeline(payloadJson)` | `{ name, ranges: [{ s, e }] }`: takes the stretches out of every unlocked track and closes the gaps. Premiere Pro: razor at both ends, `remove(false, false)` on the pieces inside, then `move()` every later clip left, earliest first; nothing is removed when a razor did not take. After Effects: each layer trimmed, split or deleted and moved by `startTime`, one undo step. Returns `ranges` as removed (whole frames), `removedSeconds`, `removed`, `moved`, `relinked`, `lockedSkipped`, `failures` |
 
 `LazyKickHost` also exports `sanitizeBinPath`, `formatFramesTimecode`,
 `choosePremiereTrack` and `normalizeMediaPath` for the tests.
@@ -329,6 +331,20 @@ finds the word under the pointer from the same `wordRanges` rectangles (the
 nearest word on that row when the click falls between words), takes its time
 from the follow model, and calls `setPlayhead(seconds)`. The follow state is
 reset to that time with no glide rate, since a jump is not playback.
+
+Cutting from the note starts at the selection: `selectedWords()` turns the
+selection's two boundaries into character offsets of their lines (counted
+the way `wordSpots` counts, without tags and struck words) and keeps every
+word of a spoken line the selection touches. `pickedTimes` takes the first
+word's time and the end of the last (the next word's time, or the line's
+end) from the follow model and, when `heardAudio` belongs to this timeline,
+moves both into a pause with `LazyAlign.quietCut`. ✂️ Retakes uses
+`LazyAlign.outtakeCuts` on the outtakes of the last Time to Audio, while
+`heardAudio` still fits. After `removeTimeline`, `noteAfterRemoval` moves
+every tag, word time and pin by `LazyAlign.timeAfterCuts` over the ranges the
+host reports, wraps the removed words in `span.note-cut` (skipped by
+`textWithoutTags` and `lineTexts`, so they are no longer timed) and drops
+`heardAudio`, which no longer fits the timeline.
 
 ### Watch bins
 

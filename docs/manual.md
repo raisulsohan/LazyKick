@@ -277,6 +277,37 @@ Pins stay when 🎙️ Time to Audio runs again, and a pinned word keeps its pin
 when you edit the text before it. Right-click a line and choose **Unpin this
 line** to remove every pin in it.
 
+**Cut the timeline from the script.** Select words in timed lines (a word, a
+sentence, several paragraphs) and right-click:
+
+- **✂️ Cut the timeline here** cuts every unlocked track where the selected
+  words start and where they end. Nothing is taken out.
+- **✂️ Remove from the timeline** takes those words out of every unlocked
+  track and closes the gap. It asks first. In the note the words are struck
+  through: they are no longer timed or put in subtitles, and every timecode
+  after them moves earlier to match.
+
+When 🎙️ Time to Audio has heard that timeline, each cut falls in the middle of
+the pause next to the words, so no word is clipped and the speech on both
+sides keeps a natural pause. Linked picture and sound stay linked. Locked
+tracks (Premiere Pro) and locked layers (After Effects) are left as they are:
+lock a music track to keep it whole, but then it goes out of sync with the
+cut.
+
+**✂️ Retakes** appears next to 🎙️ Time to Audio when the timing left retakes
+out, with the count, for example *✂️ 4 retakes*. Click it to take every
+earlier take off the timeline at once, after a question. Each goes from the
+middle of the pause before it to just before the take that counts, so the
+pauses stay as long as the reader made them.
+
+To undo: in After Effects press **Ctrl+Z** (Cmd+Z) once. Premiere Pro keeps
+every cut and move as its own step, so press Ctrl+Z several times. The note
+does not go back by itself: right-click a struck line, choose **Bring back the
+struck words**, then click 🎙️ Time to Audio again.
+
+Premiere Pro's caption tracks and the markers do not move with a removal:
+make subtitles after the cuts. An After Effects composition keeps its length.
+
 What happens behind the button:
 
 - **Premiere Pro** exports the sequence's audio mix to a temporary WAV file

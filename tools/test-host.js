@@ -1229,6 +1229,352 @@ section("After Effects: script to audio", function () {
     eq("ae set playhead: no comp", parse(setPlayhead(1)).msg, "Open a composition first");
 });
 
+// ===================================== cut and remove on the timeline
+// Premiere's QE razor and the TrackItem calls host.jsx edits with. Times in
+// the mock are ticks; a razor splits a clip in two and, as in Premiere Pro
+// 25-26, leaves both pieces unlinked.
+var Time = null;
+var qe = null;
+var edit = {};
+
+function EditClip(track, id, s, e) {
+    this.track = track;
+    this.nodeId = id;
+    this.s = s;
+    this.e = e;
+    this.group = null;
+    this.selected = false;
+    this.sync();
+}
+EditClip.prototype.sync = function () {
+    this.start = { ticks: String(this.s), seconds: this.s / TICKS };
+    this.end = { ticks: String(this.e), seconds: this.e / TICKS };
+};
+EditClip.prototype.getLinkedItems = function () {
+    var list = { numItems: 0 };
+    if (!this.group) return list;
+    for (var i = 0; i < this.group.length; i++) list[list.numItems++] = this.group[i];
+    return list;
+};
+EditClip.prototype.setSelected = function (on) { this.selected = !!on; };
+EditClip.prototype.remove = function (ripple, align) {
+    edit.removes.push(ripple + "," + align);
+    this.unlink();
+    this.track.drop(this);
+};
+EditClip.prototype.unlink = function () {
+    if (!this.group) return;
+    for (var i = 0; i < this.group.length; i++) if (this.group[i] === this) this.group.splice(i, 1);
+    this.group = null;
+};
+EditClip.prototype.move = function (delta) {
+    var d = Number(delta.ticks);
+    var list = [this];
+    if (edit.moveTakesLinked && this.group) list = this.group.slice(0);
+    for (var i = 0; i < list.length; i++) {
+        list[i].s += d;
+        list[i].e += d;
+        list[i].sync();
+        list[i].track.rebuild();
+    }
+    edit.moves++;
+};
+
+function EditTrack(name, locked) {
+    this.name = name;
+    this.locked = locked;
+    this.list = [];
+    this.rebuild();
+}
+EditTrack.prototype.isLocked = function () { return this.locked; };
+EditTrack.prototype.add = function (s, e) {
+    var c = new EditClip(this, this.name + "-" + (edit.nextId++), s * TICKS, e * TICKS);
+    this.list.push(c);
+    this.rebuild();
+    return c;
+};
+EditTrack.prototype.drop = function (clip) {
+    for (var i = 0; i < this.list.length; i++) if (this.list[i] === clip) this.list.splice(i, 1);
+    this.rebuild();
+};
+EditTrack.prototype.rebuild = function () {
+    this.list.sort(function (a, b) { return a.s - b.s; });
+    var clips = { numItems: this.list.length };
+    for (var i = 0; i < this.list.length; i++) clips[i] = this.list[i];
+    this.clips = clips;
+};
+/** The QE track: razor(timecode) reads HH:MM:SS:FF at 25 fps. */
+EditTrack.prototype.qe = function () {
+    var track = this;
+    return {
+        razor: function (tc) {
+            edit.razors.push(tc);
+            if (edit.razorBroken) return;
+            var m = /^(\d+):(\d+):(\d+)[:;](\d+)$/.exec(tc);
+            if (!m) return;
+            var at = (((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * 25 + Number(m[4])) * (TICKS / 25);
+            if (edit.razorFromZeroPoint) at -= edit.zero;
+            for (var i = 0; i < track.list.length; i++) {
+                var c = track.list[i];
+                if (c.s < at && c.e > at) {
+                    var right = new EditClip(track, track.name + "-" + (edit.nextId++), at, c.e);
+                    c.e = at;
+                    c.sync();
+                    c.unlink();
+                    track.list.push(right);
+                    track.rebuild();
+                    return;
+                }
+            }
+        }
+    };
+};
+
+function link(clips) {
+    var group = [];
+    for (var i = 0; i < clips.length; i++) {
+        clips[i].unlink();
+        clips[i].group = group;
+        group.push(clips[i]);
+    }
+}
+
+function spans(track) {
+    var out = [];
+    for (var i = 0; i < track.list.length; i++) out.push((track.list[i].s / TICKS) + "-" + (track.list[i].e / TICKS));
+    return out.join(" ");
+}
+
+function linkedTo(clip) {
+    var names = [];
+    for (var i = 0; clip.group && i < clip.group.length; i++) names.push(clip.group[i].track.name + "@" + (clip.group[i].s / TICKS));
+    return names.join(",");
+}
+
+/** A 25 fps sequence: V1 and A1 linked shots 0-10 s and 10-20 s, music 0-30 s on A2, V2 locked. */
+function setupEdit() {
+    setupPremiere([], 0);
+    edit = { nextId: 1, razors: [], removes: [], moves: 0, links: 0, formats: [], zero: 0, razorBroken: false, razorFromZeroPoint: false, moveTakesLinked: false };
+    var v1 = new EditTrack("V1", false);
+    var v2 = new EditTrack("V2", true);
+    var a1 = new EditTrack("A1", false);
+    var a2 = new EditTrack("A2", false);
+    link([v1.add(0, 10), a1.add(0, 10)]);
+    link([v1.add(10, 20), a1.add(10, 20)]);
+    var music = a2.add(0, 30);
+    v2.add(0, 30);
+    var all = [v1, v2, a1, a2];
+    var seq = app.project.activeSequence;
+    seq.videoTracks = { numTracks: 2, 0: v1, 1: v2 };
+    seq.audioTracks = { numTracks: 2, 0: a1, 1: a2 };
+    seq.zeroPoint = "0";
+    seq.getSelection = function () {
+        var picked = [];
+        for (var t = 0; t < all.length; t++) {
+            for (var i = 0; i < all[t].list.length; i++) if (all[t].list[i].selected) picked.push(all[t].list[i]);
+        }
+        return picked;
+    };
+    seq.linkSelection = function () {
+        edit.links++;
+        link(seq.getSelection());
+        return true;
+    };
+    app.enableQE = function () { edit.qeOn = true; };
+    var qeSeq = {
+        getVideoTrackAt: function (i) { return [v1, v2][i].qe(); },
+        getAudioTrackAt: function (i) { return [a1, a2][i].qe(); }
+    };
+    qe = { project: { getActiveSequence: function () { return qeSeq; } } };
+    Time = function () { this.ticks = "0"; };
+    Time.prototype.getFormatted = function (rate, display) {
+        edit.formats.push(display);
+        var tb = Number(rate.ticks);
+        var f = Math.round(Number(this.ticks) / tb);
+        var fps = Math.round(TICKS / tb);
+        function two(n) { return (n < 10 ? "0" : "") + n; }
+        return two(Math.floor(f / (fps * 3600))) + ":" + two(Math.floor(f / (fps * 60)) % 60) + ":" + two(Math.floor(f / fps) % 60) + ":" + two(f % fps);
+    };
+    return { seq: seq, v1: v1, v2: v2, a1: a1, a2: a2, music: music };
+}
+
+section("pure helpers: timeline edits", function () {
+    var H = LazyKickHost;
+    eq("frame points: rounded to frames, sorted, once, never 0", H.framePoints([4.01, 1, 0, 1.005, "x", -2], 25).join(","), "25,100");
+    var r = H.frameRanges([{ s: 12, e: 13 }, { s: 4, e: 6 }, { s: 5.5, e: 7 }, { s: 9, e: 9.01 }, { s: -1, e: 0.5 }], 25);
+    var shown = [];
+    for (var i = 0; i < r.length; i++) shown.push(r[i].a + "-" + r[i].b);
+    eq("frame ranges: sorted, overlaps joined, empty left out, never before 0", shown.join(" "), "0-13 100-175 300-325");
+    function pieces(list) {
+        var out = [];
+        for (var k = 0; k < list.length; k++) out.push(list[k].a + "-" + list[k].b + (list[k].shift ? ">" + list[k].shift : ""));
+        return out.join(" ");
+    }
+    var ranges = [{ a: 4, b: 6 }, { a: 12, b: 13 }];
+    eq("kept pieces: across two removals", pieces(H.keptPieces(0, 20, [], ranges, 0.01)), "0-4 6-12>2 13-20>3");
+    eq("kept pieces: all inside, nothing kept", pieces(H.keptPieces(4.5, 5.5, [], ranges, 0.01)), "");
+    eq("kept pieces: after the removals, moved by both", pieces(H.keptPieces(14, 16, [], ranges, 0.01)), "14-16>3");
+    eq("kept pieces: before, as it was", pieces(H.keptPieces(0, 3, [], ranges, 0.01)), "0-3");
+    eq("kept pieces: cut points split, nothing moves", pieces(H.keptPieces(0, 10, [2, 10, 7], [], 0.01)), "0-2 2-7 7-10");
+});
+
+section("Premiere Pro: cut at the selection", function () {
+    var t = setupEdit();
+    t.music.selected = true;
+    var r = parse(cutTimeline(JSON.stringify({ name: "Seq 01", times: [4.01, 15] })));
+    check("ppro cut: ok", r.ok === true, r.msg);
+    eq("ppro cut: QE turned on", edit.qeOn, true);
+    eq("ppro cut: times rounded to frames", r.times.join(","), "4,15");
+    eq("ppro cut: Premiere's own timecode in the sequence's display format", edit.razors.slice(0, 2).join(",") + ":" + edit.formats[0], "00:00:04:00,00:00:04:00:101");
+    eq("ppro cut: every unlocked track cut at both times", spans(t.v1) + " | " + spans(t.a1) + " | " + spans(t.a2), "0-4 4-10 10-15 15-20 | 0-4 4-10 10-15 15-20 | 0-4 4-15 15-30");
+    eq("ppro cut: a locked track left as it is", spans(t.v2), "0-30");
+    eq("ppro cut: count and locked track reported", r.split + ":" + r.lockedSkipped, "6:1");
+    eq("ppro cut: picture and sound linked again on both sides of each cut", r.relinked + ":" + edit.links, "4:4");
+    eq("ppro cut: pieces linked to their own sound", linkedTo(t.v1.list[1]) + " " + linkedTo(t.v1.list[2]), "V1@4,A1@4 V1@10,A1@10");
+    eq("ppro cut: the music has nothing to link", t.a2.list[1].group, null);
+    eq("ppro cut: the selection put back", t.music.selected + ":" + t.v1.list[1].selected + ":" + t.a1.list[0].selected, "true:false:false");
+
+    var again = parse(cutTimeline(JSON.stringify({ name: "Seq 01", times: [4] })));
+    check("ppro cut: already cut there, nothing to do", again.ok === true && again.split === 0 && /No clip/.test(again.msg), again.msg);
+
+    var razorsBefore = edit.razors.length;
+    var wrong = parse(cutTimeline(JSON.stringify({ name: "Seq 02", times: [2] })));
+    check("ppro cut: another sequence open, refused", wrong.ok === false && wrong.wrongTimeline === true && /Seq 02/.test(wrong.msg), wrong.msg);
+    eq("ppro cut: refused before any cut", edit.razors.length, razorsBefore);
+    eq("ppro cut: no time inside the sequence", parse(cutTimeline(JSON.stringify({ name: "Seq 01", times: [0] }))).ok, false);
+});
+
+section("Premiere Pro: cut where the timecode starts at 01:00:00:00", function () {
+    var t = setupEdit();
+    edit.zero = 3600 * TICKS;
+    edit.razorFromZeroPoint = true;
+    app.project.activeSequence.zeroPoint = String(edit.zero);
+    var r = parse(cutTimeline(JSON.stringify({ name: "Seq 01", times: [4] })));
+    check("ppro cut 01h: ok", r.ok === true, r.msg);
+    eq("ppro cut 01h: tried from 0, then with the start timecode, then kept that", edit.razors.join(","), "00:00:04:00,01:00:04:00,01:00:04:00,01:00:04:00");
+    eq("ppro cut 01h: cut at the right time", spans(t.v1) + " | " + spans(t.a2), "0-4 4-10 10-20 | 0-4 4-30");
+});
+
+section("Premiere Pro: remove and close the gap", function () {
+    var t = setupEdit();
+    var r = parse(removeTimeline(JSON.stringify({ name: "Seq 01", ranges: [{ s: 12, e: 13 }, { s: 4, e: 6 }] })));
+    check("ppro remove: ok", r.ok === true, r.msg);
+    eq("ppro remove: ranges as removed", r.ranges.length + ":" + r.ranges[0].s + "-" + r.ranges[0].e + ":" + r.ranges[1].s + "-" + r.ranges[1].e, "2:4-6:12-13");
+    eq("ppro remove: seconds and pieces", r.removedSeconds + ":" + r.removed, "3:6");
+    eq("ppro remove: the gaps closed on every unlocked track", spans(t.v1) + " | " + spans(t.a1) + " | " + spans(t.a2), "0-4 4-8 8-10 10-17 | 0-4 4-8 8-10 10-17 | 0-4 4-10 10-27");
+    eq("ppro remove: a locked track did not move", spans(t.v2) + ":" + r.lockedSkipped, "0-30:1");
+    eq("ppro remove: no ripple of Premiere's own", edit.removes.join(" "), "false,false false,false false,false false,false false,false false,false");
+    eq("ppro remove: each later piece moved once", r.moved + ":" + edit.moves, "8:8");
+    eq("ppro remove: picture and sound linked again", r.relinked + ":" + linkedTo(t.v1.list[0]) + ":" + linkedTo(t.v1.list[1]) + ":" + linkedTo(t.v1.list[3]), "4:V1@0,A1@0:V1@4,A1@4:V1@10,A1@10");
+    check("ppro remove: message", /Removed 3 s/.test(r.msg) && /locked/.test(r.msg), r.msg);
+
+    // A Premiere Pro that moves the linked partner along: nothing moves twice.
+    t = setupEdit();
+    edit.moveTakesLinked = true;
+    r = parse(removeTimeline(JSON.stringify({ name: "Seq 01", ranges: [{ s: 4, e: 6 }] })));
+    check("ppro remove linked move: ok", r.ok === true, r.msg);
+    eq("ppro remove linked move: everything in place", spans(t.v1) + " | " + spans(t.a1), "0-4 4-8 8-18 | 0-4 4-8 8-18");
+    eq("ppro remove linked move: partners not moved twice", edit.moves, 3);
+
+    // The razor does nothing: nothing is removed.
+    t = setupEdit();
+    edit.razorBroken = true;
+    r = parse(removeTimeline(JSON.stringify({ name: "Seq 01", ranges: [{ s: 4, e: 6 }] })));
+    check("ppro remove no razor: refused", r.ok === false && /Nothing was removed/.test(r.msg), r.msg);
+    eq("ppro remove no razor: nothing removed or moved", edit.removes.length + ":" + edit.moves + ":" + spans(t.v1), "0:0:0-10 10-20");
+
+    t = setupEdit();
+    qe = null;
+    r = parse(removeTimeline(JSON.stringify({ name: "Seq 01", ranges: [{ s: 4, e: 6 }] })));
+    check("ppro remove: no QE, clear message", r.ok === false && /QE/.test(r.msg), r.msg);
+    t = setupEdit();
+    eq("ppro remove: nothing to remove", parse(removeTimeline(JSON.stringify({ name: "Seq 01", ranges: [{ s: 5, e: 5 }] }))).ok, false);
+    eq("ppro remove: another sequence open", parse(removeTimeline(JSON.stringify({ name: "Other", ranges: [{ s: 4, e: 6 }] }))).wrongTimeline, true);
+    app.project.activeSequence = null;
+    eq("ppro remove: no sequence", parse(removeTimeline(JSON.stringify({ ranges: [{ s: 4, e: 6 }] }))).msg, "Open a sequence first");
+    eq("ppro cut: no sequence", parse(cutTimeline(JSON.stringify({ times: [4] }))).msg, "Open a sequence first");
+});
+
+section("After Effects: cut and remove", function () {
+    var comp;
+    // startTime is a plain number here; in After Effects setting it moves the
+    // layer's in and out points too, so placed() applies it before comparing.
+    function Layer(name, inP, outP, locked) {
+        this.name = name;
+        this.startTime = 0;
+        this.inPoint = inP;
+        this.outPoint = outP;
+        this.locked = !!locked;
+    }
+    Layer.prototype.duplicate = function () {
+        var copy = new Layer(this.name, this.inPoint, this.outPoint, this.locked);
+        copy.startTime = this.startTime;
+        for (var i = 0; i < comp.list.length; i++) {
+            if (comp.list[i] === this) { comp.list.splice(i, 0, copy); break; }
+        }
+        comp.reindex();
+        return copy;
+    };
+    Layer.prototype.remove = function () {
+        for (var i = 0; i < comp.list.length; i++) if (comp.list[i] === this) comp.list.splice(i, 1);
+        comp.reindex();
+    };
+    function setup() {
+        CompItem = function () {};
+        FolderItem = function () {};
+        comp = new CompItem();
+        comp.name = "Explainer";
+        comp.frameRate = 25;
+        comp.frameDuration = 0.04;
+        comp.duration = 30;
+        comp.displayStartTime = 0;
+        comp.list = [new Layer("Title", 2, 5), new Layer("Voice", 0, 20), new Layer("Music", 0, 30), new Layer("Logo", 0, 30, true)];
+        comp.reindex = function () { this.numLayers = this.list.length; };
+        comp.layer = function (i) { return this.list[i - 1]; };
+        comp.reindex();
+        app = {
+            project: { activeItem: comp, importFile: function () {} },
+            beginUndoGroup: function () { undoDepth++; undoGroups++; },
+            endUndoGroup: function () { undoDepth--; }
+        };
+    }
+    function placed() {
+        var out = [];
+        for (var i = 0; i < comp.list.length; i++) {
+            var l = comp.list[i];
+            var d = l.startTime;
+            out.push(l.name + " " + (Math.round((l.inPoint + d) * 100) / 100) + "-" + (Math.round((l.outPoint + d) * 100) / 100));
+        }
+        return out.join(", ");
+    }
+
+    setup();
+    var groupsBefore = undoGroups;
+    var r = parse(cutTimeline(JSON.stringify({ name: "Explainer", times: [4.01, 15] })));
+    check("ae cut: ok", r.ok === true, r.msg);
+    eq("ae cut: layers split at both times, later pieces on top", placed(), "Title 4-5, Title 2-4, Voice 15-20, Voice 4-15, Voice 0-4, Music 15-30, Music 4-15, Music 0-4, Logo 0-30");
+    eq("ae cut: count, locked layer reported, one undo step", r.split + ":" + r.lockedSkipped + ":" + (undoGroups - groupsBefore) + ":" + undoDepth, "5:1:1:0");
+    eq("ae cut: another composition, refused", parse(cutTimeline(JSON.stringify({ name: "Other", times: [3] }))).wrongTimeline, true);
+
+    setup();
+    groupsBefore = undoGroups;
+    r = parse(removeTimeline(JSON.stringify({ name: "Explainer", ranges: [{ s: 4, e: 6 }, { s: 12, e: 13 }] })));
+    check("ae remove: ok", r.ok === true, r.msg);
+    eq("ae remove: pieces trimmed, later ones moved left, title cut short", placed(), "Title 2-4, Voice 10-17, Voice 4-10, Voice 0-4, Music 10-27, Music 4-10, Music 0-4, Logo 0-30");
+    eq("ae remove: seconds, moved, locked, one undo step", r.removedSeconds + ":" + r.moved + ":" + r.lockedSkipped + ":" + (undoGroups - groupsBefore) + ":" + undoDepth, "3:4:1:1:0");
+    eq("ae remove: ranges as removed", r.ranges[0].s + "-" + r.ranges[0].e + "," + r.ranges[1].s + "-" + r.ranges[1].e, "4-6,12-13");
+
+    setup();
+    comp.list = [new Layer("Blip", 4.2, 5.5), new Layer("Later", 8, 9)];
+    comp.reindex();
+    r = parse(removeTimeline(JSON.stringify({ name: "Explainer", ranges: [{ s: 4, e: 6 }] })));
+    eq("ae remove: a layer inside the stretch is deleted, a later one moves", r.ok + ":" + r.removed + ":" + placed(), "true:1:Later 6-7");
+
+    app.project.activeItem = null;
+    eq("ae remove: no comp", parse(removeTimeline(JSON.stringify({ ranges: [{ s: 1, e: 2 }] }))).msg, "Open a composition first");
+    eq("ae cut: no comp", parse(cutTimeline(JSON.stringify({ times: [1] }))).msg, "Open a composition first");
+});
+
 // ------------------------------------------------------------------ report
 WScript.Echo("LazyKick - host.jsx tests");
 WScript.Echo("");

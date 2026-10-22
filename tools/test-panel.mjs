@@ -26,6 +26,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAIN_SRC = readFileSync(join(root, "client", "main.js"), "utf8");
 const ALIGN_SRC = readFileSync(join(root, "client", "align.js"), "utf8");
 const PASTE_SRC = readFileSync(join(root, "client", "paste.js"), "utf8");
+const retakesFixture = JSON.parse(readFileSync(join(root, "tools", "fixtures", "tts-retakes.json"), "utf8"));
 const nodeRequire = createRequire(import.meta.url);
 
 let passed = 0;
@@ -299,6 +300,8 @@ const host = {
   playhead: null,            // seconds from the timeline start, or null for no timeline
   playheadCalls: 0,
   jumps: [],                 // times the panel moved the playhead to (setPlayhead)
+  cuts: [],                  // what the panel asked to cut (cutTimeline)
+  removals: [],              // what the panel asked to take out (removeTimeline)
   refuseProject: false,
   timecode: { ok: true, timecode: "00:00:05:00" },
 };
@@ -368,6 +371,20 @@ function answer(script) {
       const payload = JSON.parse(args[0]);
       host.subtitleCalls.push(payload);
       return JSON.stringify({ ok: true, msg: `Subtitles placed on a new caption track in '${host.timeline.name}'`, placed: true });
+    }
+    case "cutTimeline": {
+      const payload = JSON.parse(args[0]);
+      host.cuts.push(payload);
+      return JSON.stringify({ ok: true, msg: `Cut 2 clips at ${payload.times.length} points`, times: payload.times, split: 2, relinked: 0, lockedSkipped: 0, failures: [] });
+    }
+    case "removeTimeline": {
+      // As host.jsx: whole frames of the timeline, back in the reply.
+      const payload = JSON.parse(args[0]);
+      host.removals.push(payload);
+      const fps = host.timeline.fps || 25;
+      const ranges = payload.ranges.map((r) => ({ s: Math.round(r.s * fps) / fps, e: Math.round(r.e * fps) / fps }));
+      const seconds = ranges.reduce((n, r) => n + r.e - r.s, 0);
+      return JSON.stringify({ ok: true, msg: `Removed ${Math.round(seconds * 10) / 10} s and closed the gap`, ranges, removedSeconds: seconds, removed: 2, moved: 3, relinked: 0, lockedSkipped: 0, failures: [] });
     }
     default: return "EvalScript error.";
   }
@@ -451,7 +468,7 @@ doc.getElementById("fbOverlay").classList.add("hidden");
 doc.getElementById("dialogOverlay").classList.add("hidden");
 doc.getElementById("subModalOverlay").classList.add("hidden");
 doc.getElementById("noteMenu").classList.add("hidden");
-for (const id of ["noteMenuCut", "noteMenuCopy", "noteMenuPaste", "noteMenuPastePlain", "noteMenuSelectAll", "noteMenuPin", "noteMenuUnpin"]) doc.getElementById("noteMenu").appendChild(doc.getElementById(id));
+for (const id of ["noteMenuCut", "noteMenuCopy", "noteMenuPaste", "noteMenuPastePlain", "noteMenuSelectAll", "noteMenuPin", "noteMenuUnpin", "noteMenuCutTimeline", "noteMenuRemoveTimeline", "noteMenuUnstrike"]) doc.getElementById("noteMenu").appendChild(doc.getElementById(id));
 doc.getElementById("optTargetFolder").value = "Pasted Images";
 
 const nativePopups = [];
@@ -1672,6 +1689,129 @@ try {
   eq("word unpin: the mark is gone", pinPara.querySelectorAll(".note-pin").length, 0);
   eq("word unpin: the text is unchanged", pinPara.textContent.replace(/^\[[^\]]*\]\s*/, "").replace(/ /g, " ").trim(), `${script[0]} ${script[1]}`);
   near("word unpin: the word is timed freely again, at its words", parseFloat(tagOf(pinPara).getAttribute("data-t")) + tagOf(pinPara).getAttribute("data-w").split(",").map(Number)[3], bursts[1].s, 0.15);
+
+  // ---- Cut and remove on the timeline, from words selected in the note
+  const plainGetSelection = context.window.getSelection;
+  const selectText = (node, from, to, endNode = node) => {
+    const range = { startContainer: node, startOffset: from, endContainer: endNode, endOffset: to };
+    range.cloneRange = () => range;
+    context.window.getSelection = () => ({ rangeCount: 1, isCollapsed: false, anchorNode: node, getRangeAt: () => range, removeAllRanges() {}, addRange() {} });
+  };
+  const textIn = (div, piece) => div.all().find((c) => c.nodeType === 3 && c._text.includes(piece));
+  const startOf = (div) => parseFloat(tagOf(div).getAttribute("data-t"));
+  const struck = (div) => div.querySelectorAll(".note-cut").map((s) => s.textContent).join("|");
+  setEditor([{ tag: "p", kids: [script[0]] }, { tag: "p", kids: [script[1]] }, { tag: "p", kids: [script[2]] }]);
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 3 lines/.test($("globalStatus").textContent), "timed before cutting");
+  const [cutA, cutB, cutC] = $("noteEditor").children;
+  const aStart = startOf(cutA);
+  const cStart = startOf(cutC);
+  const cWords = tagOf(cutC).getAttribute("data-w");
+  check("cut: no ✂️ Retakes for a read without retakes", $("btnRetakes").classList.contains("hidden"));
+
+  selectText(textIn(cutB, "Today"), 0, script[1].length);
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  eq("cut: offered for timed words", `${$("noteMenuCutTimeline").disabled}:${$("noteMenuRemoveTimeline").disabled}`, "false:false");
+  check("cut: no Bring back on a line with nothing struck", $("noteMenuUnstrike").classList.contains("hidden"));
+  $("noteMenuCutTimeline").click();
+  await waitFor(() => host.cuts.length === 1 && /Cut 2 clips/.test($("globalStatus").textContent), "cut sent");
+  eq("cut: for the open sequence", host.cuts[0].name, "Seq 01");
+  near("cut: in the middle of the pause before the words", host.cuts[0].times[0], (bursts[0].e + bursts[1].s) / 2, 0.08);
+  near("cut: in the middle of the pause after them", host.cuts[0].times[1], (bursts[1].e + bursts[2].s) / 2, 0.08);
+  eq("cut: the note is unchanged", `${struck(cutB)}:${startOf(cutC)}`, `:${cStart}`);
+
+  const listensBeforeRemove = host.audioCalls.length;
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  $("noteMenuRemoveTimeline").click();
+  const askedRemove = await answerDialog(true, "remove a line");
+  check("remove: asks first, with the stretch, the sequence and how to undo", askedRemove.title === "Remove from the timeline?" && askedRemove.okClass === "btn-danger-sm" &&
+    /'Seq 01' on every unlocked track/.test(askedRemove.message) && /Ctrl\+Z in Premiere Pro/.test(askedRemove.message), askedRemove.message);
+  await waitFor(() => host.removals.length === 1 && /moved to match/.test($("globalStatus").textContent), "line removed");
+  const asked = host.removals[0].ranges;
+  eq("remove: one stretch, for the open sequence", `${asked.length}:${host.removals[0].name}`, "1:Seq 01");
+  near("remove: from the middle of the pause before", asked[0].s, (bursts[0].e + bursts[1].s) / 2, 0.08);
+  near("remove: to the middle of the pause after", asked[0].e, (bursts[1].e + bursts[2].s) / 2, 0.08);
+  const goneSeconds = Math.round(asked[0].e * 25) / 25 - Math.round(asked[0].s * 25) / 25;
+  eq("remove: the words are struck through", struck(cutB), script[1]);
+  eq("remove: a line with nothing left to say has no timecode", tagOf(cutB), undefined);
+  near("remove: a later line moves earlier by the stretch taken out", startOf(cutC), cStart - goneSeconds, 0.002);
+  eq("remove: ... with its word times", tagOf(cutC).getAttribute("data-w"), cWords);
+  eq("remove: an earlier line stays", startOf(cutA), aStart);
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 2 lines/.test($("globalStatus").textContent), "timed without the struck line");
+  eq("remove: the timeline is listened to again, and the struck line is not timed", `${host.audioCalls.length - listensBeforeRemove}:${tagOf(cutB)}`, "1:undefined");
+
+  $("noteEditor").dispatch("contextmenu", { target: cutB, clientX: 20, clientY: 26 });
+  check("bring back: offered on a line with struck words", !$("noteMenuUnstrike").classList.contains("hidden"));
+  $("noteMenuUnstrike").click();
+  eq("bring back: the strike is gone, the text as it was", `${struck(cutB)}|${cutB.textContent.trim()}`, `|${script[1]}`);
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 3 lines/.test($("globalStatus").textContent), "timed with the line back");
+
+  // Words inside a paragraph: only the words the selection touches go.
+  setEditor([{ tag: "p", kids: [`${script[0]} ${script[1]}`] }, { tag: "p", kids: [script[2]] }]);
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 2 lines/.test($("globalStatus").textContent), "paragraph timed before cutting");
+  const [cutPara, cutAfter] = $("noteEditor").children;
+  const paraStartBefore = startOf(cutPara);
+  const afterStartBefore = startOf(cutAfter);
+  const paraNode = textIn(cutPara, "Welcome");
+  selectText(paraNode, paraNode._text.indexOf("Today") + 2, paraNode._text.indexOf("button") + 3);   // from inside "Today" to inside "button."
+  $("noteEditor").dispatch("contextmenu", { target: cutPara, clientX: 20, clientY: 6 });
+  $("noteMenuRemoveTimeline").click();
+  await answerDialog(true, "remove words in a paragraph");
+  await waitFor(() => host.removals.length === 2 && /moved to match/.test($("globalStatus").textContent), "words removed");
+  const inPara = host.removals[1].ranges[0];
+  near("remove in a paragraph: from the pause before the first word", inPara.s, (bursts[0].e + bursts[1].s) / 2, 0.08);
+  eq("remove in a paragraph: every word touched is struck, whole", struck(cutPara), script[1]);
+  eq("remove in a paragraph: the line keeps its start", startOf(cutPara), paraStartBefore);
+  eq("remove in a paragraph: word times for the words left", tagOf(cutPara).getAttribute("data-w").split(",").length, script[0].split(" ").length);
+  near("remove in a paragraph: the next line moves earlier", startOf(cutAfter),
+    afterStartBefore - (Math.round(inPara.e * 25) - Math.round(inPara.s * 25)) / 25, 0.002);
+
+  setEditor([{ tag: "p", kids: [script[0]] }]);
+  selectText(textIn($("noteEditor").children[0], "Welcome"), 0, 7);
+  $("noteEditor").dispatch("contextmenu", { target: $("noteEditor").children[0], clientX: 20, clientY: 6 });
+  eq("cut: not offered for words with no timecode", `${$("noteMenuCutTimeline").disabled}:${$("noteMenuRemoveTimeline").disabled}`, "true:true");
+  $("noteMenu").classList.add("hidden");
+  context.window.getSelection = plainGetSelection;
+  $("noteEditor").dispatch("contextmenu", { target: $("noteEditor").children[0], clientX: 20, clientY: 6 });
+  eq("cut: not offered without a selection", $("noteMenuRemoveTimeline").disabled, true);
+  $("noteMenu").classList.add("hidden");
+
+  // ---- ✂️ Retakes: an unedited read; the takes Time to Audio left out are taken off the timeline
+  const retakeRead = retakesFixture.variants["retakes-natural"];
+  host.timeline = { ok: true, host: "ae", name: "Read", fps: 25, offset: 0, duration: retakeRead.duration };
+  host.audioReply = () => ({ ok: true, kind: "levels", step: retakesFixture.step, start: 0, values: retakeRead.values, used: "all", name: "Read", fps: 25, offset: 0, duration: retakeRead.duration });
+  setEditor(retakeRead.lines.map((l) => ({ tag: "p", kids: [l.text] })));
+  $("btnTimeToAudio").click();
+  await waitFor(() => /Timed 12 lines/.test($("globalStatus").textContent), "retakes read timed");
+  check("retakes: Time to Audio says it left takes out", /retakes? left out/.test($("globalStatus").textContent), $("globalStatus").textContent);
+  check("retakes: ✂️ Retakes shows, with how many", !$("btnRetakes").classList.contains("hidden") && /^✂️ \d+ retakes?$/.test($("btnRetakes").textContent), $("btnRetakes").textContent);
+  const readLines = $("noteEditor").children.slice();
+  const readStarts = readLines.map(startOf);
+  const removalsBefore = host.removals.length;
+  $("btnRetakes").click();
+  const askedRetakes = await answerDialog(false, "retakes, cancelled");
+  check("retakes: asks first, with the composition and how to undo", askedRetakes.title === "Remove the retakes?" && /'Read' on every unlocked track/.test(askedRetakes.message) &&
+    /once in After Effects/.test(askedRetakes.message), askedRetakes.message);
+  eq("retakes: Cancel takes nothing out", host.removals.length, removalsBefore);
+  $("btnRetakes").click();
+  await answerDialog(true, "retakes");
+  await waitFor(() => host.removals.length === removalsBefore + 1 && /moved to match/.test($("globalStatus").textContent), "retakes removed");
+  const retakeCuts = host.removals[removalsBefore].ranges;
+  check("retakes: every earlier take is inside a stretch taken out", retakeRead.outtakes.every((o) => retakeCuts.some((c) => c.s <= o.start + 0.05 && c.e >= o.end - 0.05)),
+    JSON.stringify(retakeCuts));
+  check("retakes: no take that counts is cut into", retakeRead.lines.every((l) => retakeCuts.every((c) => c.e <= l.start + 0.03 || c.s >= l.end - 0.03)), JSON.stringify(retakeCuts));
+  const snapped = retakeCuts.map((c) => ({ s: Math.round(c.s * 25) / 25, e: Math.round(c.e * 25) / 25 }));
+  check("retakes: every line moves earlier by the stretches before it",
+    readLines.every((div, i) => Math.abs(startOf(div) - LazyAlign.timeAfterCuts(readStarts[i], snapped)) < 0.002), readLines.map(startOf).join(","));
+  check("retakes: the button goes, and nothing is struck", $("btnRetakes").classList.contains("hidden") && $("noteEditor").querySelectorAll(".note-cut").length === 0);
+  host.timeline = { ok: true, host: "ppro", name: "Seq 01", fps: 25, offset: 0, duration: total };
+  host.audioReply = (wavPath) => {
+    writeVoiceWav(wavPath);
+    return { ok: true, kind: "wav", path: wavPath, used: "all", name: "Seq 01", fps: 25, offset: 0, duration: total };
+  };
 
   // ---- A long paragraph becomes several subtitles, each when its first word is said
   const longText = "In 1920, a country decided to delete a problem. Not reduce it. Not manage it. Delete it. " +

@@ -138,6 +138,40 @@ Every word's time is kept in the line's tag. It is used by
 word being said, and by [💬 Subtitles](manual.md#6-make-subtitles) to start
 each piece of a long paragraph when its first word is spoken.
 
+## Cuts from the script
+
+The word times also say where to cut the timeline. Select words in the note
+and right-click: **✂️ Cut the timeline here** cuts every unlocked track where
+they start and end, and **✂️ Remove from the timeline** takes them out and
+closes the gap. **✂️ Retakes** takes out every earlier take that 🎙️ Time to
+Audio left out.
+
+- **Where a cut goes.** The start is the first selected word's time; the end
+  is the time of the word after the last one, or the end of the line. When
+  the voice of that timeline was heard, each end moves to the **middle of the
+  pause** within 0.25 s of it, or else to a breath within reach. A removal so
+  keeps half of the pause before the words and half of the pause after them.
+- **A retake** goes from the middle of the pause before it to just before
+  the take that counts, so the silence left before that take is as long as
+  the one the reader left before the retake. A retake that starts at a
+  breath, with no pause, is cut at the breath and keeps the reader's usual
+  pause. Restarts one after another, with nothing kept between them, go as
+  one stretch.
+- **Whole frames.** Every cut is rounded to a frame of the timeline.
+- **The note follows.** Every time after a removed stretch moves earlier by
+  its length: line starts, word times, pins, and timecodes in side notes and
+  checklists. A time inside a removed stretch moves to where the stretch was.
+  Removed words are struck through and no longer timed; a line with nothing
+  left loses its timecode.
+
+Premiere Pro's scripting has no razor of its own, so each track is cut with
+Premiere's QE razor and checked; the picture and sound pieces are linked
+again; the pieces inside are removed and every later clip moves left,
+earliest first. If a cut does not take, nothing is removed. In After Effects
+a layer is split by duplicating it and trimming both copies (the later piece
+on top, as *Edit › Split Layer* leaves it), and the later layers move by
+their start time, all in one undo step.
+
 ## How accurate it is
 
 On the test voiceovers (Windows' own voices reading three scripts, with

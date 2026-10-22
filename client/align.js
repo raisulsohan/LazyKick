@@ -1059,6 +1059,117 @@
     }
 
     // ============================================================
+    // Cutting the timeline
+    // ============================================================
+
+    /**
+     * Where to cut near `t` (seconds) without clipping a word: the middle of
+     * the pause `t` is in or within `reach` of (before the first or after
+     * the last speech: 0.3 s from the voice); else the nearest breath within
+     * reach; else `t` itself.
+     */
+    function quietCut(speech, t, reach) {
+        var segs = (speech && speech.segments) || [];
+        if (!segs.length) return t;
+        if (reach === undefined) reach = 0.25;
+        var best = t;
+        var bestGap = Infinity;
+        for (var i = 0; i <= segs.length; i++) {
+            var a = i > 0 ? segs[i - 1].e : -Infinity;
+            var b = i < segs.length ? segs[i].s : Infinity;
+            if (b <= a) continue;
+            var gap = t < a ? a - t : (t > b ? t - b : 0);
+            if (gap > reach || gap >= bestGap) continue;
+            bestGap = gap;
+            if (a === -Infinity) best = Math.max(0, b - 0.3);
+            else if (b === Infinity) best = a + 0.3;
+            else best = (a + b) / 2;
+        }
+        if (bestGap < Infinity) return best;
+        var dips = speech.dips || [];
+        for (var d = 0; d < dips.length; d++) {
+            var off = Math.abs(dips[d] - t);
+            if (off <= reach && off < bestGap) {
+                bestGap = off;
+                best = dips[d];
+            }
+        }
+        return best;
+    }
+
+    /** Where the voice is at or after `t`: `t` inside speech, else the next start (Infinity: never again). */
+    function nextSpeech(segs, t) {
+        for (var i = 0; i < segs.length; i++) {
+            if (segs[i].e > t + 0.01) return Math.max(segs[i].s, t);
+        }
+        return Infinity;
+    }
+
+    /** Where the voice before `t` ends: `t` inside speech, 0 when nothing is said before it. */
+    function speechEndBefore(segs, t) {
+        var end = 0;
+        for (var i = 0; i < segs.length; i++) {
+            if (segs[i].s >= t - 0.01) break;
+            if (segs[i].e > t) return t;
+            end = segs[i].e;
+        }
+        return end;
+    }
+
+    /**
+     * The stretches to take out of the timeline for the retakes a timing
+     * left out (`outtakes`: [{ s, e }] of speech), sorted: each from the
+     * middle of the pause before it to just before the take that counts,
+     * so the pause that stays is as long as the one before the retake.
+     * Retakes with nothing kept between them become one stretch.
+     */
+    function outtakeCuts(speech, outtakes) {
+        var segs = (speech && speech.segments) || [];
+        var list = (outtakes || []).slice().sort(function (x, y) { return x.s - y.s; });
+        var blocks = [];
+        for (var i = 0; i < list.length; i++) {
+            var last = blocks[blocks.length - 1];
+            if (last && nextSpeech(segs, last.e) >= list[i].s - 0.01) {
+                if (list[i].e > last.e) last.e = list[i].e;
+            } else {
+                blocks.push({ s: list[i].s, e: list[i].e });
+            }
+        }
+        var gaps = [];
+        for (var g = 1; g < segs.length; g++) gaps.push(segs[g].s - segs[g - 1].e);
+        gaps.sort(function (x, y) { return x - y; });
+        var usual = gaps.length ? Math.min(0.8, percentile(gaps, 0.5)) : 0.4;
+        var cuts = [];
+        for (var b = 0; b < blocks.length; b++) {
+            var s = blocks[b].s;
+            var e = blocks[b].e;
+            var before = speechEndBefore(segs, s);
+            var pause = s - before;             // 0 when the retake starts at a breath
+            var from = before + pause / 2;
+            var after = nextSpeech(segs, e);    // the take that counts
+            var to = e;
+            if (after < Infinity) to = Math.max(e, after - Math.min(pause > 0 ? pause / 2 : usual, (after - e) / 2));
+            if (to - from > 0.02) cuts.push({ s: from, e: to });
+        }
+        return cuts;
+    }
+
+    /**
+     * Where time `t` is once the stretches `cuts` ([{ s, e }], sorted, apart)
+     * are taken out of the timeline: earlier by all of them before it; a time
+     * inside one goes to where that one was.
+     */
+    function timeAfterCuts(t, cuts) {
+        var shift = 0;
+        for (var i = 0; i < cuts.length; i++) {
+            if (t >= cuts[i].e) shift += cuts[i].e - cuts[i].s;
+            else if (t > cuts[i].s) return cuts[i].s - shift;
+            else break;
+        }
+        return t - shift;
+    }
+
+    // ============================================================
     // Subtitle cues
     // ============================================================
 
@@ -1251,6 +1362,9 @@
         alignLines: alignLines,
         alignScript: alignScript,
         retakeGap: retakeGap,
+        quietCut: quietCut,
+        outtakeCuts: outtakeCuts,
+        timeAfterCuts: timeAfterCuts,
         formatTimecode: formatTimecode,
         parseTimecode: parseTimecode,
         readingTime: readingTime,

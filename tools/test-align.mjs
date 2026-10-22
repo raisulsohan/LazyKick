@@ -272,6 +272,12 @@ section("retakes", () => {
       JSON.stringify(timed.outtakes));
     check(`${name}: in order, never overlapping`, timed.every((s, i) => s.end > s.start && (i === 0 || s.start >= timed[i - 1].end - 1e-9)));
 
+    // ✂️ Retakes: the stretches taken off the timeline hold every earlier take and never cut into a later one.
+    const cuts = A.outtakeCuts(speech, timed.outtakes);
+    check(`${name}: retake cuts hold every earlier take`, v.outtakes.every((o) => cuts.some((c) => c.s <= o.start + 0.05 && c.e >= o.end - 0.05)), JSON.stringify(cuts));
+    check(`${name}: retake cuts never cut into a take that counts`, v.lines.every((l) => cuts.every((c) => c.e <= l.start + 0.03 || c.s >= l.end - 0.03)), JSON.stringify(cuts));
+    check(`${name}: retake cuts in order, apart`, cuts.length > 0 && cuts.every((c, i) => c.e > c.s && (i === 0 || c.s >= cuts[i - 1].e)), JSON.stringify(cuts));
+
     // Pasted as paragraphs: every sentence inside lands on its later take too.
     const paras = [];
     v.lines.forEach((l) => { (paras[l.paragraph] = paras[l.paragraph] || []).push(l); });
@@ -338,6 +344,36 @@ section("retakes", () => {
 });
 
 /* --------------------------------------------------- words inside a line */
+section("cutting the timeline", () => {
+  const speech = { segments: [{ s: 1, e: 2 }, { s: 2.6, e: 4 }, { s: 6.5, e: 8 }], dips: [3.3] };
+  near("quiet cut: in a pause, its middle", A.quietCut(speech, 2.5), 2.3, 1e-9);
+  near("quiet cut: just inside the words, the pause next to them", A.quietCut(speech, 2.75), 2.3, 1e-9);
+  eq("quiet cut: deep in speech, the breath within reach", A.quietCut(speech, 3.2), 3.3);
+  eq("quiet cut: nothing within reach, as it is", A.quietCut(speech, 7.2), 7.2);
+  near("quiet cut: before the voice, 0.3 s before it starts", A.quietCut(speech, 0.2), 0.7, 1e-9);
+  near("quiet cut: after the voice, 0.3 s after it ends", A.quietCut(speech, 9), 8.3, 1e-9);
+  eq("quiet cut: no voice heard, as it is", A.quietCut({ segments: [] }, 5), 5);
+
+  const one = A.outtakeCuts(speech, [{ s: 2.6, e: 4 }]);
+  check("retake cut: from the middle of the pause before to just before the take that counts (the pause stays 0.6 s)",
+    one.length === 1 && Math.abs(one[0].s - 2.3) < 1e-9 && Math.abs(one[0].e - 6.2) < 1e-9, JSON.stringify(one));
+  const twoSpeech = { segments: [{ s: 1, e: 2 }, { s: 3, e: 3.5 }, { s: 5.5, e: 6 }, { s: 8, e: 9 }] };
+  const two = A.outtakeCuts(twoSpeech, [{ s: 5.5, e: 6 }, { s: 3, e: 3.5 }]);
+  check("retake cut: two takes with nothing kept between them are one stretch", two.length === 1 && two[0].s === 2.5 && two[0].e === 7.5, JSON.stringify(two));
+  const breath = A.outtakeCuts({ segments: [{ s: 1, e: 4 }, { s: 6, e: 7 }] }, [{ s: 2.5, e: 4 }]);
+  check("retake cut: a take that starts at a breath is cut there, and the reader's usual pause is kept before the next",
+    breath.length === 1 && breath[0].s === 2.5 && Math.abs(breath[0].e - 5.2) < 1e-9, JSON.stringify(breath));
+  eq("retake cut: none left out, nothing cut", A.outtakeCuts(speech, []).length, 0);
+
+  const gone = [{ s: 2, e: 3 }, { s: 5, e: 7 }];
+  eq("time after cuts: before them, as it was", A.timeAfterCuts(1, gone), 1);
+  eq("time after cuts: inside one, where it was", A.timeAfterCuts(2.5, gone), 2);
+  eq("time after cuts: between, earlier by the first", A.timeAfterCuts(4, gone), 3);
+  eq("time after cuts: inside the second, where it was", A.timeAfterCuts(6, gone), 4);
+  eq("time after cuts: after both, earlier by both", A.timeAfterCuts(9, gone), 6);
+  eq("time after cuts: at an end, where the cut was", A.timeAfterCuts(3, gone), 2);
+});
+
 section("words inside a line", () => {
   // Two sentences read as one line: the first word of the second sentence
   // must start when that sentence was really spoken.

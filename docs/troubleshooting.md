@@ -204,6 +204,50 @@ has audio, and click again.
 You switched project or tab, or edited the lines, while the audio was being
 read. Click 🎙️ again.
 
+### ✂️ Cut the timeline here / ✂️ Remove from the timeline is greyed out
+
+Select words first, in lines that have a timecode. Click 🎙️ Time to Audio if
+they have none yet.
+
+### "Time the selected words first: click 🎙️ Time to Audio"
+
+One of the selected lines has no timecode. Click 🎙️ Time to Audio, then select
+the words again.
+
+### "The open timeline is '…', but the note is timed to '…'"
+
+Another sequence or composition became active while you answered the
+question. Open the one named and try again; nothing was cut.
+
+### A cut clipped a word, or left a breath
+
+Without 🎙️ Time to Audio on that timeline in this session, the cuts fall at
+the word times, which can be a little early or late. Click 🎙️ Time to Audio
+first: then every cut falls in the middle of a pause.
+
+### "Nothing was removed: could not cut … track …"
+
+Premiere Pro did not cut one of the tracks (an unusual timecode display, say).
+The cuts already made stay; press Ctrl+Z (Cmd+Z) to take them back. Unlock
+the track, or set the sequence to show timecode, and try again.
+
+### A music track went out of sync after a removal
+
+Locked tracks and layers are left as they are, so everything after the
+removal moved and they did not. Unlock them before removing, or move them by
+hand.
+
+### The ✂️ Retakes button went away
+
+It shows only while the timeline is as 🎙️ Time to Audio heard it. After a
+removal, an edit that changed the timeline's length, or another tab, click
+🎙️ Time to Audio again.
+
+### I undid a removal in Premiere Pro or After Effects, and the note still shows it
+
+The note does not follow an undo. Right-click each struck line, choose
+**Bring back the struck words**, then click 🎙️ Time to Audio.
+
 ---
 
 ## Subtitles

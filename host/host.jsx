@@ -39,7 +39,7 @@ if (typeof JSON === "undefined" || !JSON.stringify) {
 var LazyKickHost = (function () {
     "use strict";
 
-    var VERSION = "1.9.1";
+    var VERSION = "1.10.0";
     var PASTE_BIN_DEFAULT = "Pasted Images";
     var TIME_EPSILON = 0.0005; // seconds; clip edges and the playhead are floats
 
@@ -1714,6 +1714,601 @@ var LazyKickHost = (function () {
         }
     }
 
+    // ============================================================
+    // CUT AND REMOVE ON THE TIMELINE
+    // ============================================================
+    // The note's words are timed, so words chosen in the note name a stretch
+    // of the timeline. cutTimeline splits every unlocked track at the given
+    // times; removeTimeline takes stretches out and closes the gaps, as a
+    // ripple delete does. Times are seconds from the timeline's start (the
+    // time the note's tags are measured in) and are rounded to whole frames.
+    // Premiere's scripting has no razor, so the cuts go through its QE layer,
+    // one track at a time; After Effects splits a layer by duplicating it and
+    // trimming both copies.
+
+    /** Whole-frame cut points from seconds: sorted, each once, never at 0. */
+    function framePoints(times, fps) {
+        var list = [];
+        for (var i = 0; i < (times || []).length; i++) {
+            var f = Math.round(Number(times[i]) * fps);
+            if (isNaN(f) || f <= 0) continue;
+            var seen = false;
+            for (var j = 0; j < list.length; j++) if (list[j] === f) seen = true;
+            if (!seen) list.push(f);
+        }
+        list.sort(function (x, y) { return x - y; });
+        return list;
+    }
+
+    /** Whole-frame stretches [{ a, b }] from [{ s, e }] seconds: sorted, overlaps joined, empty ones left out. */
+    function frameRanges(ranges, fps) {
+        var list = [];
+        for (var i = 0; i < (ranges || []).length; i++) {
+            var a = Math.round(Number(ranges[i].s) * fps);
+            var b = Math.round(Number(ranges[i].e) * fps);
+            if (isNaN(a) || isNaN(b)) continue;
+            if (a < 0) a = 0;
+            if (b > a) list.push({ a: a, b: b });
+        }
+        list.sort(function (x, y) { return x.a - y.a; });
+        var merged = [];
+        for (var j = 0; j < list.length; j++) {
+            var last = merged.length ? merged[merged.length - 1] : null;
+            if (last && list[j].a <= last.b) {
+                if (list[j].b > last.b) last.b = list[j].b;
+            } else {
+                merged.push({ a: list[j].a, b: list[j].b });
+            }
+        }
+        return merged;
+    }
+
+    /**
+     * What becomes of a clip or layer that runs from inP to outP after cuts
+     * at `points` and the removal of `ranges` (sorted, joined): the pieces
+     * that stay, each { a, b, shift }, where shift is how far the piece moves
+     * left. Any unit, as long as all values share it.
+     */
+    function keptPieces(inP, outP, points, ranges, tol) {
+        var edges = [inP];
+        var r;
+        for (var p = 0; p < points.length; p++) {
+            if (points[p] > inP + tol && points[p] < outP - tol) edges.push(points[p]);
+        }
+        for (r = 0; r < ranges.length; r++) {
+            if (ranges[r].a > inP + tol && ranges[r].a < outP - tol) edges.push(ranges[r].a);
+            if (ranges[r].b > inP + tol && ranges[r].b < outP - tol) edges.push(ranges[r].b);
+        }
+        edges.push(outP);
+        edges.sort(function (x, y) { return x - y; });
+        var pieces = [];
+        for (var k = 0; k + 1 < edges.length; k++) {
+            var a = edges[k];
+            var b = edges[k + 1];
+            if (b - a <= tol) continue;
+            var removed = false;
+            var shift = 0;
+            for (r = 0; r < ranges.length; r++) {
+                if (a >= ranges[r].a - tol && b <= ranges[r].b + tol) removed = true;
+                else if (ranges[r].b <= a + tol) shift += ranges[r].b - ranges[r].a;
+            }
+            if (!removed) pieces.push({ a: a, b: b, shift: shift });
+        }
+        return pieces;
+    }
+
+    function editPayload(payloadJson) {
+        return ((typeof payloadJson === "string") ? JSON.parse(payloadJson) : payloadJson) || {};
+    }
+
+    /** A refusal when the open timeline is not the one the note was timed to. */
+    function wrongTimeline(expected, actual) {
+        if (!expected || String(expected) === String(actual)) return null;
+        return reply(false, "The open timeline is '" + actual + "', but the note is timed to '" + expected + "'. Open '" + expected + "' first", { wrongTimeline: true });
+    }
+
+    function plural(n, word) {
+        return n + " " + word + (n === 1 ? "" : "s");
+    }
+
+    // ---- Premiere Pro ----
+
+    /** Every track of the sequence, video first: { type, index, locked }. */
+    function tracksPPRO(seq) {
+        var out = [];
+        var kinds = [["video", seq.videoTracks], ["audio", seq.audioTracks]];
+        for (var k = 0; k < kinds.length; k++) {
+            var n = 0;
+            try { n = kinds[k][1].numTracks || 0; } catch (eCount) {}
+            for (var i = 0; i < n; i++) {
+                var locked = false;
+                try {
+                    var dom = kinds[k][1][i];
+                    locked = (typeof dom.isLocked === "function") ? !!dom.isLocked() : false;
+                } catch (eLock) {}
+                out.push({ type: kinds[k][0], index: i, locked: locked });
+            }
+        }
+        return out;
+    }
+
+    function domTrackPPRO(seq, t) {
+        return t.type === "video" ? seq.videoTracks[t.index] : seq.audioTracks[t.index];
+    }
+
+    function qeTrackPPRO(qeSeq, t) {
+        return t.type === "video" ? qeSeq.getVideoTrackAt(t.index) : qeSeq.getAudioTrackAt(t.index);
+    }
+
+    /** The clips on a track as it is now: { clip, id, start, end } in ticks. */
+    function clipsPPRO(seq, t) {
+        var list = [];
+        var clips = domTrackPPRO(seq, t).clips;
+        for (var i = 0; i < clips.numItems; i++) {
+            var c = clips[i];
+            var id = "";
+            try { id = String(c.nodeId); } catch (eId) {}
+            list.push({ clip: c, id: id, start: Number(c.start.ticks), end: Number(c.end.ticks), track: t });
+        }
+        return list;
+    }
+
+    function spansPPRO(seq, t, ticks, tol) {
+        var clips = clipsPPRO(seq, t);
+        for (var i = 0; i < clips.length; i++) {
+            if (clips[i].start < ticks - tol && clips[i].end > ticks + tol) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The timecode strings QE's razor may want for a tick position, the most
+     * likely first: Premiere's own formatting in the sequence's display
+     * format, then the same with the sequence's start timecode added.
+     */
+    function razorTimecodesPPRO(ctx, ticks) {
+        var list = [];
+        var bases = [0];
+        if (ctx.zero > 0) bases.push(ctx.zero);
+        for (var b = 0; b < bases.length; b++) {
+            var at = ticks + bases[b];
+            var tc = "";
+            try {
+                var rate = new Time();
+                rate.ticks = String(ctx.tb);
+                var time = new Time();
+                time.ticks = String(at);
+                if (typeof time.getFormatted === "function") tc = String(time.getFormatted(rate, ctx.display));
+            } catch (eFormat) {}
+            if (!tc || !/:|;/.test(tc)) tc = formatFramesTimecode(at / TICKS_PER_SECOND, TICKS_PER_SECOND / ctx.tb);
+            list.push(tc);
+        }
+        if (ctx.prefer > 0 && ctx.prefer < list.length) list.unshift(list.splice(ctx.prefer, 1)[0]);
+        return list;
+    }
+
+    /** Razors one track at `ticks`; true when no clip on it runs across that time any more. */
+    function razorPPRO(ctx, t, ticks) {
+        if (!spansPPRO(ctx.seq, t, ticks, ctx.tol)) return true;
+        var codes = razorTimecodesPPRO(ctx, ticks);
+        var order = ctx.prefer > 0 ? [ctx.prefer, 0] : [0, 1];
+        for (var i = 0; i < codes.length; i++) {
+            try { qeTrackPPRO(ctx.qeSeq, t).razor(codes[i]); } catch (eRazor) {}
+            if (!spansPPRO(ctx.seq, t, ticks, ctx.tol)) {
+                ctx.prefer = order[i];
+                ctx.split++;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The linked clips (picture and its sound) that run across each cut, as
+     * groups of tracks. QE's razor leaves the new pieces unlinked; these
+     * groups say which pieces to link again.
+     */
+    function linkGroupsPPRO(seq, tracks, cuts, tol) {
+        var where = {};
+        var all = [];
+        for (var t = 0; t < tracks.length; t++) {
+            if (tracks[t].locked) continue;
+            var clips = clipsPPRO(seq, tracks[t]);
+            for (var c = 0; c < clips.length; c++) {
+                if (clips[c].id) where[clips[c].id] = clips[c];
+                all.push(clips[c]);
+            }
+        }
+        var groups = [];
+        var seen = {};
+        for (var p = 0; p < cuts.length; p++) {
+            var at = cuts[p];
+            for (var a = 0; a < all.length; a++) {
+                var clip = all[a];
+                if (!(clip.start < at - tol && clip.end > at + tol)) continue;
+                var linked = null;
+                try { linked = clip.clip.getLinkedItems(); } catch (eLinked) {}
+                if (!linked || !linked.numItems) continue;
+                var members = [clip.track];
+                var ids = [clip.id];
+                for (var l = 0; l < linked.numItems; l++) {
+                    var other = null;
+                    try { other = where[String(linked[l].nodeId)]; } catch (eOther) {}
+                    if (!other || other === clip) continue;
+                    if (!(other.start < at - tol && other.end > at + tol)) continue;
+                    members.push(other.track);
+                    ids.push(other.id);
+                }
+                ids.sort();
+                var key = at + "|" + ids.join(",");
+                if (members.length > 1 && !seen[key]) {
+                    seen[key] = true;
+                    groups.push({ at: at, tracks: members });
+                }
+            }
+        }
+        return groups;
+    }
+
+    function selectionPPRO(seq) {
+        var ids = [];
+        try {
+            var selection = seq.getSelection();
+            for (var i = 0; selection && i < selection.length; i++) ids.push(String(selection[i].nodeId));
+        } catch (eSelection) {}
+        return ids;
+    }
+
+    function clearSelectionPPRO(seq) {
+        try {
+            var selection = seq.getSelection();
+            for (var i = 0; selection && i < selection.length; i++) selection[i].setSelected(false, true);
+        } catch (eClear) {}
+    }
+
+    function isLinkedPPRO(pieces) {
+        var linked = null;
+        try { linked = pieces[0].clip.getLinkedItems(); } catch (eLinked) {}
+        if (!linked) return false;
+        for (var p = 1; p < pieces.length; p++) {
+            var found = false;
+            for (var l = 0; l < linked.numItems; l++) {
+                try { if (String(linked[l].nodeId) === pieces[p].id) found = true; } catch (eId) {}
+            }
+            if (!found) return false;
+        }
+        return true;
+    }
+
+    /** Links the pieces on each side of every cut again, where the razor left them apart. */
+    function relinkPPRO(ctx, groups, failures) {
+        var seq = ctx.seq;
+        var tol = ctx.tol;
+        var relinked = 0;
+        var sides = ["start", "end"];
+        for (var g = 0; g < groups.length; g++) {
+            for (var s = 0; s < sides.length; s++) {
+                var pieces = [];
+                for (var m = 0; m < groups[g].tracks.length; m++) {
+                    var clips = clipsPPRO(seq, groups[g].tracks[m]);
+                    for (var c = 0; c < clips.length; c++) {
+                        if (Math.abs(clips[c][sides[s]] - groups[g].at) <= tol) {
+                            pieces.push(clips[c]);
+                            break;
+                        }
+                    }
+                }
+                if (pieces.length < 2 || isLinkedPPRO(pieces)) continue;
+                clearSelectionPPRO(seq);
+                try {
+                    for (var i = 0; i < pieces.length; i++) pieces[i].clip.setSelected(true, true);
+                    seq.linkSelection();
+                } catch (eLink) {}
+                if (isLinkedPPRO(pieces)) relinked++;
+                else failures.push("Premiere Pro did not link the picture and sound again at " + formatFramesTimecode(groups[g].at / TICKS_PER_SECOND, ctx.fps));
+            }
+        }
+        return relinked;
+    }
+
+    function restoreSelectionPPRO(seq, tracks, ids) {
+        clearSelectionPPRO(seq);
+        if (!ids.length) return;
+        var want = {};
+        for (var i = 0; i < ids.length; i++) want[ids[i]] = true;
+        for (var t = 0; t < tracks.length; t++) {
+            var clips = clipsPPRO(seq, tracks[t]);
+            for (var c = 0; c < clips.length; c++) {
+                if (want[clips[c].id]) { try { clips[c].clip.setSelected(true, true); } catch (eSelect) {} }
+            }
+        }
+    }
+
+    /** The open sequence with QE ready, or a refusal. */
+    function editContextPPRO(payload) {
+        var tl = timelinePPRO();
+        if (!tl) return { refusal: reply(false, "Open a sequence first") };
+        var guard = wrongTimeline(payload.name, tl.name);
+        if (guard) return { refusal: guard };
+        try { app.enableQE(); } catch (eQE) {}
+        var qeSeq = null;
+        try { qeSeq = qe.project.getActiveSequence(); } catch (eSeq) {}
+        if (!qeSeq) return { refusal: reply(false, "Premiere Pro's editing scripts (QE) are not available, so LazyKick cannot cut the sequence") };
+        var seq = tl.seq;
+        var tb = Number(seq.timebase) || TICKS_PER_SECOND / 30;
+        var display = 0;
+        try { display = seq.getSettings().videoDisplayFormat; } catch (eDisplay) {}
+        var zero = 0;
+        try { zero = Number(seq.zeroPoint) || 0; } catch (eZero) {}
+        return { seq: seq, qeSeq: qeSeq, name: tl.name, tb: tb, fps: TICKS_PER_SECOND / tb, tol: tb / 2, display: display, zero: zero, prefer: 0, split: 0 };
+    }
+
+    /**
+     * Locked tracks the edit would change: with a clip across one of the
+     * `cuts`, or, when `from` is given, with anything after it (a removal
+     * moves everything after it). They are left as they are.
+     */
+    function lockedInTheWayPPRO(ctx, tracks, cuts, from) {
+        var n = 0;
+        for (var t = 0; t < tracks.length; t++) {
+            if (!tracks[t].locked) continue;
+            var clips = clipsPPRO(ctx.seq, tracks[t]);
+            var hit = false;
+            for (var c = 0; c < clips.length && !hit; c++) {
+                if (from !== undefined && clips[c].end > from + ctx.tol) hit = true;
+                for (var p = 0; p < cuts.length && !hit; p++) {
+                    if (clips[c].start < cuts[p] - ctx.tol && clips[c].end > cuts[p] + ctx.tol) hit = true;
+                }
+            }
+            if (hit) n++;
+        }
+        return n;
+    }
+
+    function cutPPRO(payload) {
+        var ctx = editContextPPRO(payload);
+        if (ctx.refusal) return ctx.refusal;
+        var points = framePoints(payload.times, ctx.fps);
+        if (!points.length) return reply(false, "Nothing to cut: no time inside the sequence");
+        var cuts = [];
+        for (var p = 0; p < points.length; p++) cuts.push(points[p] * ctx.tb);
+        var tracks = tracksPPRO(ctx.seq);
+        var locked = lockedInTheWayPPRO(ctx, tracks, cuts);
+        var before = selectionPPRO(ctx.seq);
+        var groups = linkGroupsPPRO(ctx.seq, tracks, cuts, ctx.tol);
+        var failures = [];
+        for (var c = 0; c < cuts.length; c++) {
+            for (var t = 0; t < tracks.length; t++) {
+                if (tracks[t].locked) continue;
+                if (!razorPPRO(ctx, tracks[t], cuts[c])) {
+                    failures.push("could not cut " + tracks[t].type + " track " + (tracks[t].index + 1) + " at " + formatFramesTimecode(cuts[c] / TICKS_PER_SECOND, ctx.fps));
+                }
+            }
+        }
+        var relinked = relinkPPRO(ctx, groups, failures);
+        restoreSelectionPPRO(ctx.seq, tracks, before);
+        var times = [];
+        for (var i = 0; i < points.length; i++) times.push(points[i] / ctx.fps);
+        var msg = ctx.split ? "Cut " + plural(ctx.split, "clip") + " at " + plural(points.length, "point") : "No clip runs across " + (points.length === 1 ? "that time" : "those times");
+        if (locked) msg += " (" + plural(locked, "locked track") + " left as " + (locked === 1 ? "it is" : "they are") + ")";
+        return reply(failures.length === 0, failures.length ? "Cut, but " + failures.join("; ") : msg, { times: times, split: ctx.split, relinked: relinked, lockedSkipped: locked, failures: failures });
+    }
+
+    function removePPRO(payload) {
+        var ctx = editContextPPRO(payload);
+        if (ctx.refusal) return ctx.refusal;
+        var frames = frameRanges(payload.ranges, ctx.fps);
+        if (!frames.length) return reply(false, "Nothing to remove");
+        var ranges = [];
+        var cuts = [];
+        for (var r = 0; r < frames.length; r++) {
+            ranges.push({ a: frames[r].a * ctx.tb, b: frames[r].b * ctx.tb });
+            cuts.push(frames[r].a * ctx.tb, frames[r].b * ctx.tb);
+        }
+        var tracks = tracksPPRO(ctx.seq);
+        var locked = lockedInTheWayPPRO(ctx, tracks, cuts, ranges[0].a);
+        var before = selectionPPRO(ctx.seq);
+        var groups = linkGroupsPPRO(ctx.seq, tracks, cuts, ctx.tol);
+        var failures = [];
+        var c;
+        var t;
+        for (c = 0; c < cuts.length; c++) {
+            for (t = 0; t < tracks.length; t++) {
+                if (tracks[t].locked) continue;
+                if (!razorPPRO(ctx, tracks[t], cuts[c])) {
+                    failures.push("could not cut " + tracks[t].type + " track " + (tracks[t].index + 1) + " at " + formatFramesTimecode(cuts[c] / TICKS_PER_SECOND, ctx.fps));
+                }
+            }
+        }
+        if (failures.length) {
+            restoreSelectionPPRO(ctx.seq, tracks, before);
+            return reply(false, "Nothing was removed: " + failures.join("; ") + ". The cuts made so far stay; undo them with Ctrl+Z (Cmd+Z)", { failures: failures });
+        }
+        // Sort every piece: inside a stretch it goes, after one it moves left.
+        var gone = [];
+        var movers = [];
+        for (t = 0; t < tracks.length; t++) {
+            if (tracks[t].locked) continue;
+            var clips = clipsPPRO(ctx.seq, tracks[t]);
+            for (c = 0; c < clips.length; c++) {
+                var kept = keptPieces(clips[c].start, clips[c].end, [], ranges, ctx.tol);
+                if (!kept.length) gone.push(clips[c]);
+                else if (kept[0].shift > 0) movers.push({ clip: clips[c].clip, id: clips[c].id, track: tracks[t], start: clips[c].start, shift: kept[0].shift });
+            }
+        }
+        for (c = 0; c < gone.length; c++) {
+            try { gone[c].clip.remove(false, false); } catch (eRemove) { failures.push("could not remove a clip: " + eRemove.toString()); }
+        }
+        var relinked = relinkPPRO(ctx, groups, failures);
+        // Earliest first, so each clip moves into room that is already empty.
+        movers.sort(function (x, y) { return x.start - y.start; });
+        var moved = 0;
+        for (c = 0; c < movers.length; c++) {
+            var target = movers[c].start - movers[c].shift;
+            var now = null;
+            var live = clipsPPRO(ctx.seq, movers[c].track);
+            for (var l = 0; l < live.length; l++) {
+                if (live[l].id === movers[c].id) { now = live[l]; break; }
+            }
+            if (!now) { failures.push("a clip to move was not found"); continue; }
+            // Moving a clip can take its linked partner along.
+            if (Math.abs(now.start - target) <= ctx.tol) { moved++; continue; }
+            try {
+                var delta = new Time();
+                delta.ticks = String(-movers[c].shift);
+                now.clip.move(delta);
+            } catch (eMove) {
+                failures.push("could not move a clip: " + eMove.toString());
+                continue;
+            }
+            var after = clipsPPRO(ctx.seq, movers[c].track);
+            var landed = false;
+            for (var v = 0; v < after.length; v++) {
+                if (after[v].id === movers[c].id && Math.abs(after[v].start - target) <= ctx.tol) landed = true;
+            }
+            if (landed) moved++;
+            else failures.push("a clip at " + formatFramesTimecode(movers[c].start / TICKS_PER_SECOND, ctx.fps) + " did not move into place");
+        }
+        restoreSelectionPPRO(ctx.seq, tracks, before);
+        var removedTicks = 0;
+        var out = [];
+        for (r = 0; r < ranges.length; r++) {
+            removedTicks += ranges[r].b - ranges[r].a;
+            out.push({ s: frames[r].a / ctx.fps, e: frames[r].b / ctx.fps });
+        }
+        var seconds = removedTicks / TICKS_PER_SECOND;
+        var msg = "Removed " + (Math.round(seconds * 10) / 10) + " s (" + plural(gone.length, "piece") + ") and closed the gap" + (ranges.length === 1 ? "" : "s");
+        if (locked) msg += "; " + plural(locked, "locked track") + " did not move";
+        return reply(failures.length === 0, failures.length ? "Removed, but " + failures.join("; ") : msg, {
+            ranges: out, removedSeconds: seconds, removed: gone.length, moved: moved, relinked: relinked, lockedSkipped: locked, failures: failures
+        });
+    }
+
+    // ---- After Effects ----
+
+    /** Cuts or removes in the open composition, as one undo step. */
+    function editAE(payload, removing) {
+        var tl = timelineAE();
+        if (!tl) return reply(false, "Open a composition first");
+        var guard = wrongTimeline(payload.name, tl.name);
+        if (guard) return guard;
+        var comp = tl.comp;
+        var fps = tl.fps;
+        var tol = 0.25 / fps;
+        var points = [];
+        var ranges = [];
+        var frames = removing ? frameRanges(payload.ranges, fps) : [];
+        var i;
+        if (removing) {
+            for (i = 0; i < frames.length; i++) ranges.push({ a: frames[i].a / fps, b: frames[i].b / fps });
+            if (!ranges.length) return reply(false, "Nothing to remove");
+        } else {
+            var f = framePoints(payload.times, fps);
+            for (i = 0; i < f.length; i++) points.push(f[i] / fps);
+            if (!points.length) return reply(false, "Nothing to cut: no time inside the composition");
+        }
+        // Duplicates change the layer numbers, so take the layers first.
+        var layers = [];
+        for (i = 1; i <= comp.numLayers; i++) layers.push(comp.layer(i));
+        var split = 0;
+        var removed = 0;
+        var moved = 0;
+        var locked = 0;
+        var failures = [];
+        app.beginUndoGroup(removing ? "LazyKick: Remove from the timeline" : "LazyKick: Cut at the selection");
+        try {
+            for (i = 0; i < layers.length; i++) {
+                var layer = layers[i];
+                var inP = layer.inPoint;
+                var outP = layer.outPoint;
+                var pieces = keptPieces(inP, outP, points, ranges, tol);
+                var same = pieces.length === 1 && pieces[0].shift === 0 && Math.abs(pieces[0].a - inP) <= tol && Math.abs(pieces[0].b - outP) <= tol;
+                if (same) continue;
+                if (layer.locked) {
+                    locked++;
+                    continue;
+                }
+                try {
+                    if (!pieces.length) {
+                        layer.remove();
+                        removed++;
+                        continue;
+                    }
+                    // Each copy goes directly above the last, so later pieces
+                    // stack on top, as Edit > Split Layer leaves them.
+                    var copies = [layer];
+                    for (var d = 1; d < pieces.length; d++) copies.push(copies[d - 1].duplicate());
+                    for (var k = 0; k < pieces.length; k++) {
+                        var piece = copies[k];
+                        if (Math.abs(pieces[k].a - inP) > tol) piece.inPoint = pieces[k].a;
+                        if (Math.abs(pieces[k].b - outP) > tol) piece.outPoint = pieces[k].b;
+                        if (pieces[k].shift > 0) {
+                            piece.startTime = piece.startTime - pieces[k].shift;
+                            moved++;
+                        }
+                    }
+                    split += pieces.length - 1;
+                } catch (eLayer) {
+                    failures.push("layer '" + layer.name + "': " + eLayer.toString());
+                }
+            }
+        } finally {
+            app.endUndoGroup();
+        }
+        var lockedNote = locked ? " (" + plural(locked, "locked layer") + " left as " + (locked === 1 ? "it is" : "they are") + ")" : "";
+        if (!removing) {
+            var times = [];
+            for (i = 0; i < points.length; i++) times.push(points[i]);
+            var cutMsg = split ? "Cut " + plural(split, "layer") + " at " + plural(points.length, "point") : "No layer runs across " + (points.length === 1 ? "that time" : "those times");
+            return reply(failures.length === 0, failures.length ? "Cut, but " + failures.join("; ") : cutMsg + lockedNote, { times: times, split: split, relinked: 0, lockedSkipped: locked, failures: failures });
+        }
+        var seconds = 0;
+        var out = [];
+        for (i = 0; i < ranges.length; i++) {
+            seconds += ranges[i].b - ranges[i].a;
+            out.push({ s: ranges[i].a, e: ranges[i].b });
+        }
+        var msg = "Removed " + (Math.round(seconds * 10) / 10) + " s and closed the gap" + (ranges.length === 1 ? "" : "s") + lockedNote;
+        return reply(failures.length === 0, failures.length ? "Removed, but " + failures.join("; ") : msg, {
+            ranges: out, removedSeconds: seconds, removed: removed, moved: moved, relinked: 0, lockedSkipped: locked, failures: failures
+        });
+    }
+
+    /**
+     * Cuts every unlocked track (layer) at the given times, keeping each
+     * clip's picture and sound linked. payloadJson: { name, times: [seconds] },
+     * where name is the timeline the note was timed to.
+     */
+    function cutTimeline(payloadJson) {
+        try {
+            var payload = editPayload(payloadJson);
+            var host = getHostName();
+            if (host === "ppro") return cutPPRO(payload);
+            if (host === "ae") return editAE(payload, false);
+            return reply(false, "Unsupported host application");
+        } catch (e) {
+            return reply(false, "Could not cut the timeline: " + e.toString());
+        }
+    }
+
+    /**
+     * Takes stretches out of every unlocked track (layer) and closes the
+     * gaps, as a ripple delete does. payloadJson: { name, ranges: [{ s, e }] }
+     * in seconds. The reply's ranges are the stretches as removed, in whole
+     * frames, so the panel can move the note's times to match.
+     */
+    function removeTimeline(payloadJson) {
+        try {
+            var payload = editPayload(payloadJson);
+            var host = getHostName();
+            if (host === "ppro") return removePPRO(payload);
+            if (host === "ae") return editAE(payload, true);
+            return reply(false, "Unsupported host application");
+        } catch (e) {
+            return reply(false, "Could not remove from the timeline: " + e.toString());
+        }
+    }
+
     // Public API Object
     return {
         VERSION: VERSION,
@@ -1733,11 +2328,16 @@ var LazyKickHost = (function () {
         setPlayhead: setPlayhead,
         getTimelineAudio: getTimelineAudio,
         placeSubtitles: placeSubtitles,
+        cutTimeline: cutTimeline,
+        removeTimeline: removeTimeline,
         // Pure helpers, exported for tools/test-host.js
         sanitizeBinPath: sanitizeBinPath,
         formatFramesTimecode: formatFramesTimecode,
         choosePremiereTrack: choosePremiereTrack,
-        normalizeMediaPath: normalizeMediaPath
+        normalizeMediaPath: normalizeMediaPath,
+        framePoints: framePoints,
+        frameRanges: frameRanges,
+        keptPieces: keptPieces
     };
 })();
 
@@ -1760,3 +2360,5 @@ function getPlayhead() { return LazyKickHost.getPlayhead(); }
 function setPlayhead(seconds) { return LazyKickHost.setPlayhead(seconds); }
 function getTimelineAudio(wavPath) { return LazyKickHost.getTimelineAudio(wavPath); }
 function placeSubtitles(payloadJson) { return LazyKickHost.placeSubtitles(payloadJson); }
+function cutTimeline(payloadJson) { return LazyKickHost.cutTimeline(payloadJson); }
+function removeTimeline(payloadJson) { return LazyKickHost.removeTimeline(payloadJson); }
